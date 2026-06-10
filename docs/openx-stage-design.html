@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenX — 阶段性成果 · 工头层产品设计</title>
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --panel: #1a1d24;
+      --panel-inset: #12141a;
+      --brass: #c9a227;
+      --brass-dim: #8a7020;
+      --copper: #b87333;
+      --text: #e8e4dc;
+      --text-dim: #9a958a;
+      --teal: #3dd6c3;
+      --amber: #e8a838;
+      --green: #5cb85c;
+      --red: #c44;
+      --border: #2a2e38;
+      --rivet: #4a4e58;
+      --glow-amber: 0 0 12px rgba(232, 168, 56, 0.35);
+      --glow-teal: 0 0 10px rgba(61, 214, 195, 0.3);
+      --font-display: "Georgia", "Noto Serif SC", serif;
+      --font-ui: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* —— Doc chrome —— */
+    .doc-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: linear-gradient(180deg, #151820 0%, #0d0f12 100%);
+      border-bottom: 2px solid var(--brass-dim);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .doc-header h1 {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      color: var(--brass);
+      letter-spacing: 0.05em;
+    }
+
+    .doc-nav {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .doc-nav a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 0.8rem;
+      padding: 0.35rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel-inset);
+    }
+
+    .doc-nav a:hover, .doc-nav a.active {
+      color: var(--brass);
+      border-color: var(--brass-dim);
+      box-shadow: var(--glow-amber);
+    }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+    section {
+      margin-bottom: 3rem;
+      scroll-margin-top: 4rem;
+    }
+
+    section > h2 {
+      font-family: var(--font-display);
+      color: var(--brass);
+      font-size: 1.35rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--brass-dim);
+    }
+
+    section > h3 {
+      font-size: 1rem;
+      color: var(--teal);
+      margin: 1.25rem 0 0.5rem;
+    }
+
+    p, li { color: var(--text-dim); font-size: 0.9rem; }
+    p { margin-bottom: 0.75rem; }
+    ul { margin-left: 1.25rem; margin-bottom: 1rem; }
+
+    .metal-panel {
+      background: linear-gradient(145deg, #22262e 0%, #161920 100%);
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      padding: 1.25rem;
+      position: relative;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 20px rgba(0,0,0,0.5);
+    }
+
+    .metal-panel::before {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border: 1px solid rgba(201, 162, 39, 0.15);
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    .rivet {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #6a6e78, var(--rivet));
+      position: absolute;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+    }
+    .rivet.tl { top: 8px; left: 8px; }
+    .rivet.tr { top: 8px; right: 8px; }
+    .rivet.bl { bottom: 8px; left: 8px; }
+    .rivet.br { bottom: 8px; right: 8px; }
+
+    .tag {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 2px;
+      border: 1px solid;
+      margin-right: 0.35rem;
+    }
+    .tag.done { color: var(--green); border-color: var(--green); }
+    .tag.wip { color: var(--amber); border-color: var(--amber); }
+    .tag.no { color: var(--red); border-color: var(--red); opacity: 0.85; }
+
+    /* —— Principles grid —— */
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .principle-card {
+      background: var(--panel-inset);
+      border: 1px solid var(--border);
+      padding: 1rem;
+      border-radius: 4px;
+      border-left: 3px solid var(--brass);
+    }
+
+    .principle-card strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 0.35rem;
+      font-size: 0.95rem;
+    }
+
+    /* —— State machine interactive —— */
+    .state-flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+
+    .state-node {
+      padding: 0.5rem 0.85rem;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      background: var(--panel-inset);
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: all 0.2s;
+      color: var(--text-dim);
+    }
+
+    .state-node:hover { border-color: var(--brass-dim); color: var(--text); }
+    .state-node.active {
+      border-color: var(--brass);
+      color: var(--brass);
+      box-shadow: var(--glow-amber);
+    }
+
+    .state-arrow { color: var(--brass-dim); font-size: 0.85rem; }
+
+    .state-desc {
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      background: #0a0c10;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: var(--text);
+      min-height: 3rem;
+    }
+
+    /* —— Flow walkthrough —— */
+    .flow-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.65rem;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .flow-step:hover { background: rgba(201, 162, 39, 0.08); }
+    .flow-step.active {
+      border-color: var(--brass-dim);
+      background: rgba(201, 162, 39, 0.12);
+    }
+
+    .flow-step .num {
+      flex-shrink: 0;
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 50%;
+      background: var(--panel-inset);
+      border: 2px solid var(--brass-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: var(--brass);
+    }
+
+    .flow-step.active .num {
+      border-color: var(--brass);
+      box-shadow: var(--glow-amber);
+    }
+
+    .flow-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 768px) {
+      .flow-layout { grid-template-columns: 1fr; }
+    }
+
+    /* —— App prototype —— */
+    .prototype-wrap {
+      border: 3px solid #2a2e38;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0a0c10;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6), inset 0 0 60px rgba(0,0,0,0.3);
+    }
+
+    .proto-app {
+      display: grid;
+      grid-template-columns: 52px 1fr;
+      min-height: 480px;
+      font-size: 0.8rem;
+    }
+
+    .proto-rail {
+      background: linear-gradient(90deg, #1e1a16 0%, #2a241c 100%);
+      border-right: 2px solid var(--brass-dim);
+      padding: 0.5rem 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .proto-rail button {
+      width: 40px;
+      height: 40px;
+      border: 1px solid var(--border);
+      background: var(--panel-inset);
+      border-radius: 4px;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 0.65rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 2px;
+    }
+
+    .proto-rail button:hover { color: var(--text); border-color: var(--brass-dim); }
+    .proto-rail button.active {
+      border-color: var(--amber);
+      color: var(--amber);
+      box-shadow: var(--glow-amber);
+    }
+
+    .proto-main {
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #1c2028 0%, #141820 100%);
+    }
+
+    .proto-topbar {
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .proto-topbar .title {
+      font-family: var(--font-display);
+      color: var(--brass);
+      font-size: 0.95rem;
+    }
+
+    .proto-status {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+
+    .led {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+    }
+    .led.off { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+    .proto-broadcast {
+      padding: 0.4rem 1rem;
+      background: #0a0c10;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--amber);
+      min-height: 2rem;
+      display: flex;
+      align-items: center;
+    }
+
+    .proto-body { flex: 1; padding: 1rem; overflow: auto; }
+
+    .proto-filters {
+      display: flex;
+      gap: 0.35rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .proto-filters button {
+      padding: 0.35rem 0.75rem;
+      border: 1px solid var(--border);
+      background: var(--panel-inset);
+      color: var(--text-dim);
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .proto-filters button.active {
+      border-color: var(--teal);
+      color: var(--teal);
+      box-shadow: var(--glow-teal);
+    }
+
+    .goal-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .goal-card {
+      padding: 0.65rem 0.85rem;
+      background: var(--panel-inset);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.35rem;
+      align-items: center;
+      transition: border-color 0.2s;
+    }
+
+    .goal-card:hover { border-color: var(--brass-dim); }
+
+    .goal-card .g-title { color: var(--text); font-weight: 600; }
+    .goal-card .g-meta { font-size: 0.7rem; color: var(--text-dim); grid-column: 1 / -1; }
+
+    .status-pill {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 2px;
+      border: 1px solid;
+    }
+    .status-pill.running { color: var(--amber); border-color: var(--amber); }
+    .status-pill.review { color: var(--teal); border-color: var(--teal); }
+    .status-pill.done { color: var(--green); border-color: var(--green); }
+    .status-pill.failed { color: var(--red); border-color: var(--red); }
+    .status-pill.draft { color: var(--text-dim); border-color: var(--border); }
+
+    .progress-bar {
+      height: 4px;
+      background: #0a0c10;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 0.35rem;
+      grid-column: 1 / -1;
+    }
+
+    .progress-bar span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--copper), var(--amber));
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
+    .proto-actions {
+      padding: 0.75rem 1rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .btn {
+      padding: 0.45rem 0.9rem;
+      border: 2px solid var(--brass-dim);
+      background: linear-gradient(180deg, #3a3428 0%, #2a241c 100%);
+      color: var(--brass);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+      box-shadow: 0 2px 0 #1a1610, inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+
+    .btn:hover { filter: brightness(1.1); }
+    .btn:active { transform: translateY(1px); box-shadow: none; }
+    .btn.primary { border-color: var(--teal); color: var(--teal); }
+    .btn.danger { border-color: var(--red); color: #f88; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: linear-gradient(145deg, #22262e, #161920);
+      border: 2px solid var(--brass-dim);
+      border-radius: 8px;
+      max-width: 420px;
+      width: 100%;
+      padding: 1.25rem;
+      position: relative;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.8);
+    }
+
+    .modal h4 {
+      font-family: var(--font-display);
+      color: var(--brass);
+      margin-bottom: 1rem;
+    }
+
+    .modal label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 0.25rem;
+    }
+
+    .modal input, .modal textarea {
+      width: 100%;
+      padding: 0.5rem;
+      margin-bottom: 0.75rem;
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+
+    .modal textarea { min-height: 60px; resize: vertical; }
+
+    .modal-footer { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+
+    /* Detail view inside prototype */
+    .proto-detail { display: none; }
+    .proto-detail.visible { display: block; }
+    .proto-board.hidden { display: none; }
+
+    .detail-block {
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      background: var(--panel-inset);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .detail-block h5 { color: var(--teal); font-size: 0.75rem; margin-bottom: 0.35rem; }
+
+    .detail-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+
+    .log-fold summary {
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 0.75rem;
+    }
+
+    .log-fold pre {
+      margin-top: 0.5rem;
+      padding: 0.5rem;
+      background: #050608;
+      font-size: 0.65rem;
+      color: var(--green);
+      overflow: auto;
+      max-height: 100px;
+      border-radius: 3px;
+    }
+
+    /* API table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin: 0.75rem 0;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+    }
+
+    th { background: var(--panel-inset); color: var(--brass); }
+    td { color: var(--text-dim); }
+    code {
+      font-size: 0.75rem;
+      color: var(--teal);
+      background: #0a0c10;
+      padding: 0.1rem 0.3rem;
+      border-radius: 2px;
+    }
+
+    /* Phase timeline */
+    .phases {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .phase-item {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 1rem;
+      padding: 1rem 0;
+      border-left: 2px solid var(--border);
+      margin-left: 20px;
+      padding-left: 1.5rem;
+      position: relative;
+    }
+
+    .phase-item::before {
+      content: attr(data-step);
+      position: absolute;
+      left: -27px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--panel);
+      border: 2px solid var(--brass-dim);
+      font-size: 0.7rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--brass);
+    }
+
+    .phase-item.done::before { border-color: var(--green); color: var(--green); }
+    .phase-item.current::before { border-color: var(--amber); box-shadow: var(--glow-amber); }
+
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+
+    .compare .col {
+      padding: 1rem;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    .compare .col.yes { border-color: var(--green); }
+    .compare .col.no { border-color: var(--red); opacity: 0.9; }
+
+    .compare h4 { font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .compare .yes h4 { color: var(--green); }
+    .compare .no h4 { color: var(--red); }
+
+    footer.doc-foot {
+      text-align: center;
+      padding: 2rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<header class="doc-header">
+  <h1>OpenX · 工头层 — 阶段性成果</h1>
+  <nav class="doc-nav">
+    <a href="#position">定位</a>
+    <a href="#principles">原理</a>
+    <a href="#model">模型</a>
+    <a href="#flow">流程</a>
+    <a href="#prototype">交互原型</a>
+    <a href="#api">接口</a>
+    <a href="#phases">阶段</a>
+    <a href="#scope">边界</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- 1. 定位 -->
+  <section id="position">
+    <h2>一、产品定位</h2>
+    <div class="metal-panel">
+      <span class="rivet tl"></span><span class="rivet tr"></span>
+      <span class="rivet bl"></span><span class="rivet br"></span>
+      <p style="color: var(--text); font-size: 1rem; margin-bottom: 1rem;">
+        <strong style="color: var(--brass);">OpenX 是「工头 + 统一目标看板」</strong>，不是又一个会写代码、会控电脑的 Agent 工具。
+      </p>
+      <p>用户只思考：<em>要达成什么、怎样算做好、整体进展如何</em>。不思考该用 Codex、Cursor 还是 Claude。</p>
+      <p>市面上不缺执行型 Agent；缺的是能<strong>整体规划、汇总状态、推动效果确认</strong>的那一层。</p>
+      <div class="compare" style="margin-top: 1rem;">
+        <div class="col yes">
+          <h4>我们做</h4>
+          <ul>
+            <li>目标 → 执行 → 效果确认 闭环</li>
+            <li>统一看板 + 工头播报</li>
+            <li>单执行面（黑盒），本机 PC</li>
+          </ul>
+        </div>
+        <div class="col no">
+          <h4>不做</h4>
+          <ul>
+            <li>多 CLI 品牌编排</li>
+            <li>自建写代码 / 控桌面能力</li>
+            <li>自由 Chat、小组 CRUD、任务 DAG</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 第一性原理 -->
+  <section id="principles">
+    <h2>二、第一性原理（功能裁剪依据）</h2>
+    <div class="principles">
+      <div class="principle-card">
+        <strong>① 用户唯一输入</strong>
+        要达成什么 + 一句验收标准
+      </div>
+      <div class="principle-card">
+        <strong>② 用户唯一输出</strong>
+        看全盘推进 + 对结果说达标 / 返工
+      </div>
+      <div class="principle-card">
+        <strong>③ 系统唯一职责</strong>
+        存目标、调执行面、收结果、促确认
+      </div>
+      <div class="principle-card">
+        <strong>④ 执行不可见</strong>
+        子代理、CLI 品牌不对用户暴露
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 数据模型 -->
+  <section id="model">
+    <h2>三、最小数据模型</h2>
+    <p>只存 <strong>Goal（目标）</strong>，不另建 Squad / Task 多套实体。</p>
+    <div class="metal-panel">
+      <pre style="font-size: 0.75rem; color: var(--teal); overflow: auto; line-height: 1.5;">Goal {
+  id, title, acceptance,    // 目标 + 怎样算做好
+  status, progress,         // 五态 + 0-100
+  assignee: "default",      // MVP 固定单一执行位
+  resultSummary?, effectStatus?,  // 交差摘要 / approved | rework
+  createdAt, updatedAt
+}</pre>
+    </div>
+
+    <h3>状态机（5 态）— 点击节点查看说明</h3>
+    <div class="state-flow" id="stateFlow">
+      <span class="state-node" data-state="draft">draft</span>
+      <span class="state-arrow">→</span>
+      <span class="state-node active" data-state="running">running</span>
+      <span class="state-arrow">→</span>
+      <span class="state-node" data-state="awaiting_review">awaiting_review</span>
+      <span class="state-arrow">→</span>
+      <span class="state-node" data-state="done">done</span>
+      <span style="margin-left: 0.5rem; color: var(--text-dim);">|</span>
+      <span class="state-node" data-state="failed" style="margin-left: 0.5rem;">failed</span>
+    </div>
+    <div class="state-desc" id="stateDesc">running：执行面正在处理；进度由 Executor 回调更新。</div>
+  </section>
+
+  <!-- 4. 用户流程 -->
+  <section id="flow">
+    <h2>四、用户流程（仅 3 条路径）</h2>
+    <div class="flow-layout">
+      <div class="flow-steps" id="flowSteps">
+        <div class="flow-step active" data-step="0">
+          <span class="num">A1</span>
+          <div><strong>新目标</strong><br/>填标题 + 验收标准 → 点「开始」</div>
+        </div>
+        <div class="flow-step" data-step="1">
+          <span class="num">A2</span>
+          <div><strong>进行中</strong><br/>看板显示进度，工头播报</div>
+        </div>
+        <div class="flow-step" data-step="2">
+          <span class="num">A3</span>
+          <div><strong>待确认</strong><br/>执行面交差，用户看 resultSummary</div>
+        </div>
+        <div class="flow-step" data-step="3">
+          <span class="num">A4</span>
+          <div><strong>达标 / 返工</strong><br/>达标 → done；返工 → 再 dispatch</div>
+        </div>
+        <div class="flow-step" data-step="4">
+          <span class="num">B</span>
+          <div><strong>看全盘</strong><br/>首页三筛选：进行中 | 待确认 | 已完成</div>
+        </div>
+        <div class="flow-step" data-step="5">
+          <span class="num">C</span>
+          <div><strong>详情</strong><br/>验收标准、结果、折叠技术日志</div>
+        </div>
+      </div>
+      <div class="metal-panel" id="flowDetail">
+        <p id="flowDetailText" style="color: var(--text);">
+          <strong>路径 A · 步骤 1</strong><br/>
+          用户点击「新目标」，填写必填项：标题（一句话目标）、验收标准（怎样算做好）。点击「开始」后，OpenX 向本机 Executor 发送 <code>POST /execute</code>，Goal 进入 <code>running</code>。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 交互原型 -->
+  <section id="prototype">
+    <h2>五、界面与交互原型（可点击）</h2>
+    <p>机械朋克控制台风格 · 2 屏 + 1 弹层 · 下方原型可实际操作</p>
+
+    <div class="prototype-wrap">
+      <div class="proto-app">
+        <aside class="proto-rail">
+          <button type="button" class="active" title="目标看板" data-view="board">◎<br/>看板</button>
+          <button type="button" title="设置" data-view="settings">⚙<br/>设置</button>
+        </aside>
+        <div class="proto-main">
+          <div class="proto-topbar">
+            <span class="title">OpenX Agent 控制台</span>
+            <div class="proto-status">
+              <span class="led" id="connLed"></span>
+              <span id="connText">执行面 已连接</span>
+            </div>
+          </div>
+          <div class="proto-broadcast" id="broadcast">
+            「接入登录 API」已交差，请确认是否达标。
+          </div>
+          <div class="proto-body">
+            <!-- Board -->
+            <div class="proto-board" id="protoBoard">
+              <div class="proto-filters">
+                <button type="button" class="filter-btn active" data-filter="all">全部</button>
+                <button type="button" class="filter-btn" data-filter="running">进行中</button>
+                <button type="button" class="filter-btn" data-filter="awaiting_review">待确认</button>
+                <button type="button" class="filter-btn" data-filter="done">已完成</button>
+              </div>
+              <div class="goal-list" id="goalList"></div>
+            </div>
+            <!-- Detail -->
+            <div class="proto-detail" id="protoDetail">
+              <button type="button" class="btn" id="backBoard" style="margin-bottom: 0.75rem;">← 返回看板</button>
+              <div class="detail-block">
+                <h5>目标</h5>
+                <div id="detailTitle" style="color: var(--text); font-weight: 600;"></div>
+              </div>
+              <div class="detail-block">
+                <h5>验收标准</h5>
+                <div id="detailAcceptance" style="color: var(--text-dim);"></div>
+              </div>
+              <div class="detail-block">
+                <h5>状态 · 进度</h5>
+                <div id="detailStatus"></div>
+                <div class="progress-bar"><span id="detailProgress" style="width: 0%"></span></div>
+              </div>
+              <div class="detail-block" id="resultBlock" style="display: none;">
+                <h5>结果摘要</h5>
+                <div id="detailResult" style="color: var(--text);"></div>
+              </div>
+              <div class="detail-actions" id="reviewActions" style="display: none;">
+                <button type="button" class="btn primary" id="btnApprove">达标</button>
+                <button type="button" class="btn danger" id="btnRework">返工</button>
+              </div>
+              <details class="log-fold" style="margin-top: 1rem;">
+                <summary>技术日志（默认收起）</summary>
+                <pre id="detailLog">[INFO] Executor 已接收 goal_001
+[INFO] 执行中…
+[INFO] 完成，等待效果确认</pre>
+              </details>
+            </div>
+            <!-- Settings -->
+            <div class="proto-detail" id="protoSettings">
+              <h3 style="color: var(--brass); margin-bottom: 0.75rem;">设置</h3>
+              <div class="detail-block">
+                <h5>执行面连接</h5>
+                <p style="font-size: 0.8rem;">本机 <code>127.0.0.1:3921</code> · 单一 Executor，无 CLI 品牌选项</p>
+                <button type="button" class="btn" id="testConn" style="margin-top: 0.5rem;">测试连接</button>
+              </div>
+            </div>
+          </div>
+          <div class="proto-actions" id="protoActions">
+            <button type="button" class="btn primary" id="btnNewGoal">＋ 新目标</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. API -->
+  <section id="api">
+    <h2>六、与执行面接口（本机 MVP）</h2>
+    <div class="metal-panel">
+      <h3>OpenX → Executor</h3>
+      <table>
+        <tr><th>调用</th><th>时机</th></tr>
+        <tr><td><code>POST /execute</code></td><td>用户点「开始」或「返工」</td></tr>
+      </table>
+      <pre style="font-size: 0.7rem; color: var(--teal); margin: 0.5rem 0;">{ "goalId", "title", "acceptance", "reworkReason?" }</pre>
+
+      <h3>Executor → OpenX</h3>
+      <table>
+        <tr><th>回调</th><th>作用</th></tr>
+        <tr><td><code>POST /goals/:id/progress</code></td><td>更新 progress、可选 message</td></tr>
+        <tr><td><code>POST /goals/:id/complete</code></td><td>写入 resultSummary → awaiting_review</td></tr>
+        <tr><td><code>POST /goals/:id/fail</code></td><td>→ failed</td></tr>
+        <tr><td><code>POST /goals/:id/log</code></td><td>详情页技术日志（可选）</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- 7. 阶段 -->
+  <section id="phases">
+    <h2>七、MVP 交付阶段</h2>
+    <div class="phases metal-panel">
+      <div class="phase-item done" data-step="1">
+        <div>
+          <span class="tag done">设计</span>
+          <strong>产品定位 & 流程收敛</strong>
+          <p>工头层、五态、三路径、少即是多 — 本文档</p>
+        </div>
+      </div>
+      <div class="phase-item current" data-step="2">
+        <div>
+          <span class="tag wip">下一步</span>
+          <strong>P0 · 看板 + Goal CRUD + Mock 状态</strong>
+          <p>可走完 UI；执行面手动改状态</p>
+        </div>
+      </div>
+      <div class="phase-item" data-step="3">
+        <div>
+          <span class="tag wip">P1</span>
+          <strong>Mock Executor 自动流转</strong>
+          <p>running → awaiting_review 自动完成</p>
+        </div>
+      </div>
+      <div class="phase-item" data-step="4">
+        <div>
+          <span class="tag wip">P2</span>
+          <strong>达标 / 返工 + 模板播报</strong>
+          <p>效果确认闭环，可无 LLM</p>
+        </div>
+      </div>
+      <div class="phase-item" data-step="5">
+        <div>
+          <span class="tag wip">P3</span>
+          <strong>真实 Executor + 桌面壳</strong>
+          <p>本机一键启动，执行仍黑盒</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 边界 -->
+  <section id="scope">
+    <h2>八、功能自检（加功能前必过）</h2>
+    <table>
+      <tr><th>问题</th><th>不过则不做</th></tr>
+      <tr><td>用户是否只需想「目标 + 效果」？</td><td>✓</td></tr>
+      <tr><td>是否强化「全盘看板」？</td><td>✓</td></tr>
+      <tr><td>能否用现有 5 态表达？</td><td>✓</td></tr>
+      <tr><td>删掉后是否仍能完成「开始 → 确认」？</td><td>✓</td></tr>
+    </table>
+
+    <h3 style="margin-top: 1.5rem;">架构演进摘要</h3>
+    <table>
+      <tr><th>阶段</th><th>想法</th><th>收敛后</th></tr>
+      <tr><td>初版</td><td>多 CLI、小组、抢单</td><td>—</td></tr>
+      <tr><td>中期</td><td>单 Executor + 逻辑角色</td><td>执行黑盒</td></tr>
+      <tr><td>定稿</td><td>工头 + 目标看板</td><td>仅 Goal 五态、三路径、模板播报</td></tr>
+    </table>
+  </section>
+
+</main>
+
+<!-- New goal modal -->
+<div class="modal-overlay" id="modalNew">
+  <div class="modal">
+    <span class="rivet tl"></span><span class="rivet tr"></span>
+    <h4>新目标</h4>
+    <label>标题（必填）</label>
+    <input type="text" id="inputTitle" placeholder="例如：接入登录 API" />
+    <label>验收标准（必填）</label>
+    <textarea id="inputAcceptance" placeholder="例如：登录接口返回 200，前端可跳转首页"></textarea>
+    <div class="modal-footer">
+      <button type="button" class="btn" id="modalCancel">取消</button>
+      <button type="button" class="btn primary" id="modalStart">开始</button>
+    </div>
+  </div>
+</div>
+
+<footer class="doc-foot">
+  OpenX 阶段性成果 · 交互设计文档 · 2026-06 · 仅用 HTML 表现流程与界面，不含 Markdown
+</footer>
+
+<script>
+(function () {
+  const STATE_DESC = {
+    draft: 'draft：刚创建，未开工。用户点击「开始」后进入 running。',
+    running: 'running：执行面正在处理；进度由 Executor 回调更新。',
+    awaiting_review: 'awaiting_review：执行面已交差，等待用户确认效果（达标 / 返工）。',
+    done: 'done：用户确认达标，目标关闭。',
+    failed: 'failed：执行失败，可查看错误后返工或新建目标。'
+  };
+
+  document.querySelectorAll('#stateFlow .state-node').forEach((node) => {
+    node.addEventListener('click', () => {
+      document.querySelectorAll('#stateFlow .state-node').forEach((n) => n.classList.remove('active'));
+      node.classList.add('active');
+      document.getElementById('stateDesc').textContent = STATE_DESC[node.dataset.state] || '';
+    });
+  });
+
+  const FLOW_TEXT = [
+    '<strong>路径 A · 步骤 1</strong><br/>用户点击「新目标」，填写标题与验收标准。点击「开始」后，OpenX 调用 <code>POST /execute</code>，Goal 进入 <code>running</code>。',
+    '<strong>路径 A · 步骤 2</strong><br/>看板该条显示进行中与进度条。工头播报：「已开始处理：{title}」。进度来自 Executor 的 progress 回调。',
+    '<strong>路径 A · 步骤 3</strong><br/>Executor 调用 complete 后，状态变为 <code>awaiting_review</code>，展示 resultSummary。播报：「已交差，请确认效果。」',
+    '<strong>路径 A · 步骤 4</strong><br/>用户点「达标」→ done；点「返工」→ 可选原因后再次 dispatch，回到 running。',
+    '<strong>路径 B · 看全盘</strong><br/>打开应用即目标看板。筛选：进行中 | 待确认 | 已完成。每条仅：标题 · 状态 · 进度% · 时间。',
+    '<strong>路径 C · 详情</strong><br/>点击目标进入详情：验收标准、结果摘要、达标/返工按钮（仅待确认）、技术日志默认折叠。'
+  ];
+
+  document.querySelectorAll('#flowSteps .flow-step').forEach((step) => {
+    step.addEventListener('click', () => {
+      document.querySelectorAll('#flowSteps .flow-step').forEach((s) => s.classList.remove('active'));
+      step.classList.add('active');
+      document.getElementById('flowDetailText').innerHTML = FLOW_TEXT[Number(step.dataset.step)] || '';
+    });
+  });
+
+  // —— Prototype data ——
+  let goals = [
+    { id: 'g1', title: '接入登录 API', acceptance: '接口 200，前端可跳转首页', status: 'awaiting_review', progress: 100, resultSummary: '已在 auth 模块完成 login 联调，本地测试通过。', updatedAt: '10:28' },
+    { id: 'g2', title: '补全单元测试', acceptance: '核心模块覆盖率 ≥ 80%', status: 'running', progress: 65, updatedAt: '10:25' },
+    { id: 'g3', title: '同步外部数据源', acceptance: '定时任务每日 0 点成功', status: 'failed', progress: 0, updatedAt: '10:20' },
+    { id: 'g4', title: '写发布说明', acceptance: '含版本号与 breaking changes', status: 'done', progress: 100, effectStatus: 'approved', updatedAt: '昨日' }
+  ];
+
+  let currentFilter = 'all';
+  let selectedId = null;
+
+  const statusLabel = {
+    draft: '草稿',
+    running: '进行中',
+    awaiting_review: '待确认',
+    done: '已完成',
+    failed: '失败'
+  };
+
+  function renderGoals() {
+    const list = document.getElementById('goalList');
+    const filtered = goals.filter((g) => currentFilter === 'all' || g.status === currentFilter);
+    list.innerHTML = filtered.map((g) => `
+      <div class="goal-card" data-id="${g.id}">
+        <span class="g-title">${escapeHtml(g.title)}</span>
+        <span class="status-pill ${g.status}">${statusLabel[g.status] || g.status}</span>
+        <span class="g-meta">更新 ${g.updatedAt} · ${g.progress}%</span>
+        ${g.status === 'running' ? `<div class="progress-bar"><span style="width:${g.progress}%"></span></div>` : ''}
+      </div>
+    `).join('') || '<p style="color: var(--text-dim); font-size: 0.8rem;">暂无目标</p>';
+
+    list.querySelectorAll('.goal-card').forEach((card) => {
+      card.addEventListener('click', () => openDetail(card.dataset.id));
+    });
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function openDetail(id) {
+    selectedId = id;
+    const g = goals.find((x) => x.id === id);
+    if (!g) return;
+    document.getElementById('protoBoard').classList.add('hidden');
+    document.getElementById('protoDetail').classList.add('visible');
+    document.getElementById('protoSettings').classList.remove('visible');
+    document.getElementById('protoActions').style.display = 'none';
+
+    document.getElementById('detailTitle').textContent = g.title;
+    document.getElementById('detailAcceptance').textContent = g.acceptance;
+    document.getElementById('detailStatus').innerHTML = `<span class="status-pill ${g.status}">${statusLabel[g.status]}</span>`;
+    document.getElementById('detailProgress').style.width = g.progress + '%';
+
+    const showResult = g.status === 'awaiting_review' || g.status === 'done';
+    document.getElementById('resultBlock').style.display = showResult && g.resultSummary ? 'block' : 'none';
+    document.getElementById('detailResult').textContent = g.resultSummary || '—';
+    document.getElementById('reviewActions').style.display = g.status === 'awaiting_review' ? 'flex' : 'none';
+  }
+
+  function closeDetail() {
+    document.getElementById('protoBoard').classList.remove('hidden');
+    document.getElementById('protoDetail').classList.remove('visible');
+    document.getElementById('protoActions').style.display = 'flex';
+    selectedId = null;
+    renderGoals();
+  }
+
+  document.getElementById('backBoard').addEventListener('click', closeDetail);
+
+  document.querySelectorAll('.filter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentFilter = btn.dataset.filter;
+      renderGoals();
+    });
+  });
+
+  document.getElementById('btnNewGoal').addEventListener('click', () => {
+    document.getElementById('modalNew').classList.add('open');
+    document.getElementById('inputTitle').value = '';
+    document.getElementById('inputAcceptance').value = '';
+  });
+
+  document.getElementById('modalCancel').addEventListener('click', () => {
+    document.getElementById('modalNew').classList.remove('open');
+  });
+
+  document.getElementById('modalStart').addEventListener('click', () => {
+    const title = document.getElementById('inputTitle').value.trim();
+    const acceptance = document.getElementById('inputAcceptance').value.trim();
+    if (!title || !acceptance) {
+      alert('请填写标题和验收标准');
+      return;
+    }
+    const id = 'g' + Date.now();
+    goals.unshift({
+      id, title, acceptance,
+      status: 'running', progress: 0,
+      updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    });
+    document.getElementById('modalNew').classList.remove('open');
+    setBroadcast('已开始处理：「' + title + '」');
+    renderGoals();
+    simulateProgress(id);
+  });
+
+  function simulateProgress(id) {
+    const g = goals.find((x) => x.id === id);
+    if (!g || g.status !== 'running') return;
+    let p = 0;
+    const t = setInterval(() => {
+      p += 20;
+      g.progress = Math.min(p, 100);
+      g.updatedAt = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      if (p >= 100) {
+        clearInterval(t);
+        g.status = 'awaiting_review';
+        g.resultSummary = '（模拟）执行面已完成，请确认效果。';
+        setBroadcast('「' + g.title + '」已交差，请确认是否达标。');
+        if (selectedId === id) openDetail(id);
+      }
+      renderGoals();
+      if (selectedId === id) openDetail(id);
+    }, 600);
+  }
+
+  document.getElementById('btnApprove').addEventListener('click', () => {
+    const g = goals.find((x) => x.id === selectedId);
+    if (!g) return;
+    g.status = 'done';
+    g.effectStatus = 'approved';
+    setBroadcast('「' + g.title + '」已达标。');
+    closeDetail();
+  });
+
+  document.getElementById('btnRework').addEventListener('click', () => {
+    const g = goals.find((x) => x.id === selectedId);
+    if (!g) return;
+    g.status = 'running';
+    g.progress = 0;
+    g.resultSummary = undefined;
+    setBroadcast('「' + g.title + '」已返工，重新执行中。');
+    closeDetail();
+    simulateProgress(g.id);
+  });
+
+  function setBroadcast(msg) {
+    document.getElementById('broadcast').textContent = msg;
+  }
+
+  document.querySelectorAll('.proto-rail button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.proto-rail button').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const view = btn.dataset.view;
+      if (view === 'settings') {
+        document.getElementById('protoBoard').classList.add('hidden');
+        document.getElementById('protoDetail').classList.remove('visible');
+        document.getElementById('protoSettings').classList.add('visible');
+        document.getElementById('protoActions').style.display = 'none';
+      } else {
+        document.getElementById('protoSettings').classList.remove('visible');
+        closeDetail();
+        document.getElementById('protoBoard').classList.remove('hidden');
+        document.getElementById('protoActions').style.display = 'flex';
+      }
+    });
+  });
+
+  document.getElementById('testConn').addEventListener('click', () => {
+    const led = document.getElementById('connLed');
+    const text = document.getElementById('connText');
+    led.classList.toggle('off');
+    text.textContent = led.classList.contains('off') ? '执行面 未连接' : '执行面 已连接';
+  });
+
+  // Nav highlight on scroll
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('.doc-nav a');
+  window.addEventListener('scroll', () => {
+    let cur = '';
+    sections.forEach((sec) => {
+      if (window.scrollY >= sec.offsetTop - 80) cur = sec.id;
+    });
+    navLinks.forEach((a) => {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + cur);
+    });
+  });
+
+  renderGoals();
+})();
+</script>
+</body>
+</html>

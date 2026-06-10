@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenX 控制台 UI 线框 · 设计参考</title>
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --panel: #1a1d24;
+      --panel-inset: #12141a;
+      --brass: #c9a227;
+      --brass-dim: #8a7020;
+      --text: #e8e4dc;
+      --text-dim: #9a958a;
+      --teal: #3dd6c3;
+      --amber: #e8a838;
+      --green: #5cb85c;
+      --red: #c44;
+      --border: #2a2e38;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .topbar { display: flex; justify-content: space-between; padding: 0.6rem 1rem; border-bottom: 2px solid var(--brass-dim); background: #151820; }
+    .topbar h1 { font-family: Georgia, serif; color: var(--brass); font-size: 1rem; }
+    .status { font-size: 0.72rem; color: var(--text-dim); display: flex; gap: 0.4rem; align-items: center; }
+    .led { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .broadcast { padding: 0.4rem 1rem; color: var(--amber); font-size: 0.75rem; border-bottom: 1px solid var(--border); animation: tick 12s linear infinite; white-space: nowrap; overflow: hidden; }
+    @keyframes tick { from { text-indent: 100%; } to { text-indent: -100%; } }
+    .body { display: flex; flex: 1; min-height: calc(100vh - 88px); }
+    .rail { width: 48px; background: linear-gradient(90deg, #1e1a16, #2a241c); border-right: 2px solid var(--brass-dim); display: flex; flex-direction: column; align-items: center; padding: 0.5rem 0; }
+    .rail button { width: 40px; height: 44px; border: 1px solid var(--border); background: var(--panel-inset); color: var(--amber); border-radius: 4px; margin-bottom: 0.35rem; }
+    .quad { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 6px; padding: 6px; }
+    .panel { background: linear-gradient(145deg, #22262e, #161920); border: 2px solid var(--border); border-radius: 6px; padding: 0.6rem; position: relative; display: flex; flex-direction: column; min-height: 200px; }
+    .panel h2 { font-size: 0.8rem; color: var(--brass); margin-bottom: 0.5rem; border-bottom: 1px solid var(--brass-dim); padding-bottom: 0.25rem; }
+    .card { background: var(--panel-inset); border: 1px solid var(--border); border-radius: 4px; padding: 0.4rem; margin-bottom: 0.35rem; font-size: 0.72rem; }
+    .card.selected { border-color: var(--brass); box-shadow: 0 0 10px rgba(201,162,39,0.3); }
+    .tag { display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 2px; margin-right: 0.25rem; }
+    .tag.run { color: var(--teal); border: 1px solid var(--teal); }
+    .tag.review { color: var(--amber); border: 1px solid var(--amber); }
+    .btn { font-size: 0.68rem; padding: 0.25rem 0.5rem; border: 1px solid var(--brass-dim); background: #0a0c10; color: var(--brass); border-radius: 3px; margin-right: 0.25rem; margin-top: 0.35rem; }
+    .btn.primary { background: linear-gradient(180deg, #3a3218, #1a1810); }
+    .log { font-family: ui-monospace, monospace; font-size: 0.65rem; color: var(--text-dim); margin-bottom: 0.2rem; }
+    .log.warn { color: var(--amber); }
+    .log.err { color: var(--red); }
+    .note { position: fixed; bottom: 8px; right: 8px; font-size: 0.65rem; color: var(--text-dim); background: var(--panel); padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <h1>OpenX Agent 控制台</h1>
+    <div class="status"><span class="led"></span> Agent 在线 <span>|</span> Coach Zen 免费 · big-pickle</div>
+  </header>
+  <div class="broadcast">目标「接入登录 API」已进入 awaiting_review，等待工头达标确认 —— 执行器 Pi 进度 100%</div>
+  <div class="body">
+    <nav class="rail"><button title="控制台">◎<br>台</button></nav>
+    <main class="quad">
+      <section class="panel">
+        <h2>任务</h2>
+        <div style="margin-bottom:0.35rem"><span class="btn">全部</span><span class="btn">进行中</span><span class="btn primary">+ 新目标</span></div>
+        <div class="card selected"><strong>接入登录 API</strong><br><span class="tag review">待确认</span><span class="tag run">Pi</span> 100%<br><span class="btn primary">达标</span><span class="btn">返工</span></div>
+        <div class="card"><strong>写 README</strong><br><span class="tag run">进行中</span> Mock 42%</div>
+      </section>
+      <section class="panel">
+        <h2>对话 · OpenX Coach</h2>
+        <div class="card" style="flex:1;overflow:auto">Coach: 我是 OpenX 工头 Coach…<br>你: 最近任务情况？</div>
+        <div class="card" style="border-color:var(--teal)">精炼预览：标题 / 验收 / 执行提示词</div>
+        <input style="width:100%;margin-top:0.35rem;background:#0a0c10;border:1px solid var(--border);color:var(--text);padding:0.35rem;font-size:0.72rem" placeholder="输入草稿或提问…" />
+        <span class="btn">优化提示词</span><span class="btn primary">发送</span>
+      </section>
+      <section class="panel">
+        <h2>日志</h2>
+        <div class="log">[03:12:01] [INFO] Mock 模拟进度 50%</div>
+        <div class="log warn">[03:12:45] [WARN] 等待工头确认</div>
+        <div class="log err">[03:13:00] [ERROR] （示例）</div>
+      </section>
+      <section class="panel">
+        <h2>设置</h2>
+        <div class="card">默认执行器: Pi · 工作区 ./</div>
+        <div class="card"><span class="btn primary">应用 OpenCode Zen 免费预设</span><br>模型: big-pickle ▾</div>
+        <div class="card"><span style="color:var(--green)">●</span> Mock 可用 · <span style="color:var(--green)">●</span> Pi 可用</div>
+        <span class="btn primary">保存设置</span>
+      </section>
+    </main>
+  </div>
+  <p class="note">历史四宫格线框 · 现行实现见 openx-ui-design-spec.md「Agent 运行台」布局</p>
+</body>
+</html>

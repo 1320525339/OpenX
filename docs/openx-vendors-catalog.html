@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenX · 热门 Agent 项目 Review 与本地 vendors</title>
+  <style>
+    :root {
+      --bg: #0d0f12; --panel: #1a1d24; --inset: #0a0c10;
+      --brass: #c9a227; --text: #e8e4dc; --dim: #9a958a;
+      --green: #5cb85c; --amber: #e8a838; --red: #c55; --teal: #3dd6c3;
+      --border: #2a2e38;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    header {
+      position: sticky; top: 0; z-index: 50; background: #12151a;
+      border-bottom: 2px solid #8a7020; padding: 0.75rem 1.25rem;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    header h1 { font-family: Georgia, serif; font-size: 1.1rem; color: var(--brass); }
+    nav a { color: var(--dim); font-size: 0.78rem; margin-left: 0.35rem; text-decoration: none; padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 3px; }
+    nav a:hover { color: var(--brass); }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.25rem; }
+    section { margin-bottom: 2.5rem; scroll-margin-top: 3.5rem; }
+    h2 { font-family: Georgia, serif; color: var(--brass); font-size: 1.2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #8a7020; padding-bottom: 0.35rem; }
+    h3 { color: var(--teal); font-size: 0.95rem; margin: 1rem 0 0.4rem; }
+    p, li, td { color: var(--dim); font-size: 0.86rem; }
+    p { margin-bottom: 0.6rem; }
+    ul { margin-left: 1.2rem; margin-bottom: 0.75rem; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin: 0.75rem 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin: 0.5rem 0; }
+    th, td { border: 1px solid var(--border); padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }
+    th { background: var(--inset); color: var(--brass); }
+    code { font-size: 0.72rem; background: var(--inset); color: var(--teal); padding: 0.1rem 0.25rem; border-radius: 2px; }
+    a { color: var(--teal); }
+    .tag { display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 2px; margin-right: 0.25rem; }
+    .tag.exec { background: #1a2a3a; color: var(--teal); }
+    .tag.foreman { background: #2a2a1a; color: var(--amber); }
+    .tag.skip { background: #2a1a1a; color: var(--red); }
+    .tag.ref { background: #1a2a1a; color: var(--green); }
+    .card {
+      border: 1px solid var(--border); border-radius: 6px; margin: 1rem 0;
+      overflow: hidden; background: var(--inset);
+    }
+    .card-head {
+      padding: 0.65rem 1rem; background: #151820;
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-head strong { color: var(--text); font-size: 1rem; }
+    .card-body { padding: 1rem; }
+    .path-list { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--dim); list-style: none; margin: 0.5rem 0 0; }
+    .path-list li { padding: 0.15rem 0; }
+    .path-list li::before { content: "📁 "; }
+    footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--dim); border-top: 1px solid var(--border); }
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1rem; }
+    .filter-bar button {
+      padding: 0.35rem 0.65rem; border: 1px solid var(--border); background: var(--inset);
+      color: var(--dim); border-radius: 3px; cursor: pointer; font-size: 0.75rem;
+    }
+    .filter-bar button.active { border-color: var(--brass); color: var(--brass); }
+    .card[data-cat] { display: block; }
+    .card.hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>热门 Agent 项目 · 详细 Review</h1>
+  <nav>
+    <a href="openx-stage-design.html">阶段设计</a>
+    <a href="openx-foundation-survey.html">地基调研</a>
+    <a href="#summary">总表</a>
+    <a href="#user-five">你点名的 5 个</a>
+    <a href="#cards">逐项</a>
+    <a href="#openx">OpenX 怎么用</a>
+  </nav>
+</header>
+
+<main>
+
+  <section id="intro">
+    <h2>本地已下载（vendors/）</h2>
+    <div class="panel">
+      <p style="color: var(--text);">路径：<code>c:\Users\13205\Desktop\Demo\OpenX\vendors\</code> · 均为 <strong>浅克隆 depth=1</strong>，约 680MB 合计（goose 最大）。</p>
+      <p>索引文件：<code>vendors/README.md</code></p>
+    </div>
+    <table>
+      <tr><th>目录</th><th>体积</th><th>语言</th><th>上游</th></tr>
+      <tr><td><code>pi</code></td><td>~14 MB</td><td>TypeScript</td><td><a href="https://github.com/earendil-works/pi">earendil-works/pi</a></td></tr>
+      <tr><td><code>opencode</code></td><td>~88 MB</td><td>TypeScript</td><td><a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a></td></tr>
+      <tr><td><code>openclaude</code></td><td>~23 MB</td><td>TypeScript</td><td><a href="https://github.com/Gitlawb/openclaude">Gitlawb/openclaude</a></td></tr>
+      <tr><td><code>codewhale</code></td><td>~13 MB</td><td>Rust</td><td><a href="https://github.com/Hmbown/CodeWhale">Hmbown/CodeWhale</a> <em>（原 deepseek-tui）</em></td></tr>
+      <tr><td><code>agent-kanban</code></td><td>~4 MB</td><td>TypeScript</td><td><a href="https://github.com/bonaysoft/agent-kanban">bonaysoft/agent-kanban</a></td></tr>
+      <tr><td><code>mission-control</code></td><td>~15 MB</td><td>TypeScript</td><td><a href="https://github.com/builderz-labs/mission-control">builderz-labs/mission-control</a></td></tr>
+      <tr><td><code>aider</code></td><td>~74 MB</td><td>Python</td><td><a href="https://github.com/Aider-AI/aider">Aider-AI/aider</a></td></tr>
+      <tr><td><code>gemini-cli</code></td><td>~102 MB</td><td>TypeScript</td><td><a href="https://github.com/google-gemini/gemini-cli">google-gemini/gemini-cli</a></td></tr>
+      <tr><td><code>goose</code></td><td>~347 MB</td><td>Rust 等</td><td><a href="https://github.com/block/goose">block/goose</a></td></tr>
+      <tr><td><code>openhands</code></td><td>~16 MB</td><td>Python/TS</td><td><a href="https://github.com/OpenHands/OpenHands">OpenHands/OpenHands</a></td></tr>
+    </table>
+  </section>
+
+  <section id="summary">
+    <h2>总表 · 对 OpenX「工头层」的价值</h2>
+    <table>
+      <tr>
+        <th>项目</th><th>类型</th><th>Stars 量级</th>
+        <th>OpenX 角色</th><th>建议</th>
+      </tr>
+      <tr>
+        <td>Pi</td><td>TS monorepo · CLI+SDK+RPC</td><td>~60k</td>
+        <td><span class="tag exec">Executor 桥</span></td>
+        <td>优先读 RPC/SDK，嵌入本机 Executor</td>
+      </tr>
+      <tr>
+        <td>OpenCode</td><td>TS monorepo · server+desktop</td><td>~168k</td>
+        <td><span class="tag exec">Executor</span> <span class="tag ref">架构参考</span></td>
+        <td>读 session/server API；体量大，勿整仓依赖</td>
+      </tr>
+      <tr>
+        <td>OpenClaude</td><td>TS CLI · 多 Provider</td><td>~28k</td>
+        <td><span class="tag exec">Executor 备选</span></td>
+        <td>注意许可证；适合「一个 CLI 多模型」</td>
+      </tr>
+      <tr>
+        <td>CodeWhale</td><td>Rust TUI · DeepSeek 系</td><td>~36k</td>
+        <td><span class="tag exec">Executor 备选</span></td>
+        <td>原名 deepseek-tui；Goal 工具已有，可对齐你们五态</td>
+      </tr>
+      <tr>
+        <td>Agent Kanban</td><td>看板 · Hono · D1</td><td>~300+</td>
+        <td><span class="tag foreman">工头参考 #1</span></td>
+        <td>抄 SSE + review；改为人可建 Goal</td>
+      </tr>
+      <tr>
+        <td>Mission Control</td><td>Next · SQLite · 编排台</td><td>成长中</td>
+        <td><span class="tag foreman">工头参考 #2</span></td>
+        <td>抄本机 SQLite；砍掉 32 面板</td>
+      </tr>
+      <tr>
+        <td>Aider</td><td>Python CLI</td><td>~30k+</td>
+        <td><span class="tag skip">不当地基</span></td>
+        <td>执行层；可作 Executor 黑盒调用</td>
+      </tr>
+      <tr>
+        <td>Gemini CLI</td><td>Google 官方</td><td>高</td>
+        <td><span class="tag exec">Executor</span> <span class="tag ref">ACP</span></td>
+        <td>原生 ACP；与 OpenX 协议层对齐</td>
+      </tr>
+      <tr>
+        <td>Goose</td><td>桌面+CLI</td><td>高</td>
+        <td><span class="tag ref">参考</span></td>
+        <td>体积大；扩展/recipe 思路可读</td>
+      </tr>
+      <tr>
+        <td>OpenHands</td><td>SDK+GUI+沙箱</td><td>极高</td>
+        <td><span class="tag skip">执行平台</span></td>
+        <td>明确边界：OpenX 不基于其 UI 建站</td>
+      </tr>
+    </table>
+  </section>
+
+  <section id="user-five">
+    <h2>你点名的 5 个 · 逐项结论</h2>
+
+    <div class="card" data-cat="exec">
+      <div class="card-head">
+        <strong>1. Pi Agent</strong>
+        <span class="tag exec">Executor / SDK</span>
+        <span style="color: var(--dim); font-size: 0.8rem;">本地 <code>vendors/pi</code></span>
+      </div>
+      <div class="card-body">
+        <p><strong>是什么：</strong>Mario Zechner 发起的开源 coding agent 工具链；主仓已迁移至 <code>earendil-works/pi</code>（原 badlogic/pi-mono）。Monorepo：<code>pi-coding-agent</code>、<code>pi-agent-core</code>、<code>pi-ai</code>、<code>pi-tui</code>。</p>
+        <p><strong>和 OpenX 的关系：</strong>非常适合做<strong>本机 Executor</strong>。四种模式：交互 TUI、print/JSON、<strong>RPC（stdin/stdout JSONL）</strong>、<strong>SDK 嵌入</strong> — 工头层只需调 RPC/SDK，不必重做工具循环。</p>
+        <h3>建议阅读的脚手架</h3>
+        <ul class="path-list">
+          <li>vendors/pi/packages/coding-agent/README.md — RPC / SDK 入口</li>
+          <li>vendors/pi/packages/coding-agent/docs/rpc.md</li>
+          <li>vendors/pi/packages/coding-agent/examples/sdk/</li>
+          <li>vendors/pi/packages/agent/ — agent runtime</li>
+          <li>vendors/pi/packages/ai/ — 统一多 Provider LLM API</li>
+        </ul>
+        <p><strong>注意：</strong>热门 fork <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>（子代理、Rust 加速）未克隆，需要时可单独 shallow clone。</p>
+        <p><strong>安装体验：</strong><code>npm i -g @earendil-works/pi-coding-agent</code></p>
+      </div>
+    </div>
+
+    <div class="card" data-cat="exec">
+      <div class="card-head">
+        <strong>2. OpenCode</strong>
+        <span class="tag exec">Executor + Server</span>
+        <span style="color: var(--dim); font-size: 0.8rem;">vendors/opencode</span>
+      </div>
+      <div class="card-body">
+        <p><strong>是什么：</strong>SST/anomalyco 旗下超热门开源 coding agent（~168k stars）。终端 TUI + <strong>中央 server</strong> + 桌面端 + VS Code 扩展；75+ 模型 Provider；内置 build/plan 主代理与 <code>@general</code> 子代理。</p>
+        <p><strong>和 OpenX 的关系：</strong>可作为 Executor（调其 server/session API），或学其 <strong>packages/opencode</strong> 的会话与工具循环。不适合整项目 fork — 体量大、产品完整度高，易变成「又一个 OpenCode」。</p>
+        <h3>建议阅读路径</h3>
+        <ul class="path-list">
+          <li>vendors/opencode/packages/opencode/ — 主 CLI + server</li>
+          <li>vendors/opencode/packages/server/</li>
+          <li>vendors/opencode/packages/sdk/js/</li>
+          <li>vendors/opencode/packages/web/src/content/docs/agents.mdx</li>
+        </ul>
+        <p><strong>安装：</strong><code>npm i -g opencode-ai@latest</code></p>
+      </div>
+    </div>
+
+    <div class="card" data-cat="exec">
+      <div class="card-head">
+        <strong>3. OpenClaude</strong>
+        <span class="tag exec">Executor CLI</span>
+        <span style="color: var(--dim); font-size: 0.8rem;">vendors/openclaude</span>
+      </div>
+      <div class="card-body">
+        <p><strong>是什么：</strong>社区项目，把 coding-agent 工作流扩展到 OpenAI / Gemini / Ollama / Codex OAuth 等；终端优先；带 VS Code 扩展与 <code>/provider</code> 配置。</p>
+        <p><strong>和 OpenX 的关系：</strong>典型「一个 CLI 多模型」执行面；工头层对用户隐藏品牌后，可把它当作 Executor 之一。<strong>许可证为 NOASSERTION / 见 LICENSE 文件</strong>，商用前需法务过一遍。</p>
+        <h3>建议阅读路径</h3>
+        <ul class="path-list">
+          <li>vendors/openclaude/src/ — 核心 runtime</li>
+          <li>vendors/openclaude/bin/openclaude</li>
+          <li>vendors/openclaude/package.json — SDK export <code>./sdk</code></li>
+        </ul>
+        <p><strong>安装：</strong><code>npm i -g @gitlawb/openclaude</code></p>
+        <p><strong>声明：</strong>与 Anthropic 无官方关系；名称含 Claude 需注意商标说明（仓库 README 已写）。</p>
+      </div>
+    </div>
+
+    <div class="card" data-cat="exec">
+      <div class="card-head">
+        <strong>4. DeepSeek-TUI → CodeWhale</strong>
+        <span class="tag exec">Executor · Rust</span>
+        <span style="color: var(--dim); font-size: 0.8rem;">vendors/codewhale</span>
+      </div>
+      <div class="card-body">
+        <p><strong>重要：</strong>项目已<strong>改名为 CodeWhale</strong>（<code>codewhale</code> / <code>codewhale-tui</code>）。<code>deepseek-tui</code> npm 已弃用，二进制仅为过渡期 shim。</p>
+        <p><strong>是什么：</strong>Rust 终端 coding agent，面向 DeepSeek V4；流式 reasoning、审批门、子代理、MCP、任务队列、LSP 诊断反馈。</p>
+        <p><strong>和 OpenX 的关系：</strong>执行层；release 笔记提到 <strong>Goal Tools</strong>，与你们 Goal 模型有概念重合，可读其任务/验证设计。集成方式：子进程调用 <code>codewhale</code> 非交互模式（需读 docs 是否支持 headless/JSON）。</p>
+        <h3>建议阅读路径</h3>
+        <ul class="path-list">
+          <li>vendors/codewhale/README.md · README.zh-CN.md</li>
+          <li>vendors/codewhale/docs/REBRAND.md</li>
+          <li>vendors/codewhale/docs/INSTALL.md</li>
+        </ul>
+        <p><strong>安装：</strong><code>npm i -g codewhale</code> 或 <code>cargo install codewhale-cli codewhale-tui --locked</code></p>
+      </div>
+    </div>
+
+    <p style="margin-top: 1rem; color: var(--text);"><strong>第 5 类「尽量多找」</strong> — 已额外克隆 6 个热门项目，见下方卡片与总表。</p>
+  </section>
+
+  <section id="cards">
+    <h2>扩展下载 · 详细卡片</h2>
+    <div class="filter-bar">
+      <button type="button" class="active" data-filter="all">全部</button>
+      <button type="button" data-filter="foreman">工头参考</button>
+      <button type="button" data-filter="exec">执行层</button>
+      <button type="button" data-filter="skip">边界对照</button>
+    </div>
+
+    <div class="card" data-cat="foreman">
+      <div class="card-head"><strong>Agent Kanban</strong><span class="tag foreman">工头 #1</span></div>
+      <div class="card-body">
+        <p>Agent-first 看板：Ed25519 身份、多 runtime（Claude Code/Codex/Gemini/ACP）、SSE 实时、<strong>In Review → 人 reject/complete</strong>。</p>
+        <p><strong>冲突点：</strong>Web UI <em>只读</em>，任务由 Agent CLI 创建 — 与 OpenX「用户立目标」相反。<strong>抄：</strong>状态机、SSE、review API、pnpm monorepo 结构。</p>
+        <ul class="path-list">
+          <li>vendors/agent-kanban/CLAUDE.md — 产品约束必读</li>
+          <li>vendors/agent-kanban/packages/</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" data-cat="foreman">
+      <div class="card-head"><strong>Mission Control</strong><span class="tag foreman">工头 #2</span></div>
+      <div class="card-body">
+        <p>OpenClaw 生态的编排台：SQLite、Kanban、多 Agent 适配、WebSocket/SSE、本机 <code>pnpm start</code>。</p>
+        <p><strong>抄：</strong>自托管、零 Redis、任务看板。<strong>慎抄：</strong>32 面板、OpenClaw 绑定 — MVP 过重。</p>
+        <ul class="path-list">
+          <li>vendors/mission-control/openapi.json</li>
+          <li>vendors/mission-control/package.json</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" data-cat="exec">
+      <div class="card-head"><strong>Gemini CLI</strong><span class="tag exec">Executor · ACP</span></div>
+      <div class="card-body">
+        <p>Google 官方终端 Agent；<strong>原生支持 ACP</strong>（<code>--acp</code>），与 JetBrains/Zed 生态互通。</p>
+        <p><strong>OpenX：</strong>Executor 桥接协议首选调研对象之一（Client 在你们，Agent 在子进程）。Windows 克隆需 <code>core.longpaths=true</code>。</p>
+        <ul class="path-list">
+          <li>vendors/gemini-cli/packages/cli/</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" data-cat="skip">
+      <div class="card-head"><strong>Aider</strong><span class="tag skip">执行层 · Python</span></div>
+      <div class="card-body">
+        <p>最成熟的「结对编程」CLI 之一；git 集成、repo map、多模型。</p>
+        <p><strong>OpenX：</strong>仅作 Executor 黑盒（spawn <code>aider --message</code> 类），勿用其架构做工头 UI。</p>
+        <ul class="path-list"><li>vendors/aider/aider/</li></ul>
+      </div>
+    </div>
+
+    <div class="card" data-cat="skip">
+      <div class="card-head"><strong>Goose</strong><span class="tag ref">Block · 大而全</span></div>
+      <div class="card-body">
+        <p>Block 开源 Agent：桌面应用、recipe、扩展；仓库体积最大（~347MB 浅克隆）。</p>
+        <p><strong>OpenX：</strong>读扩展/recipe 思路即可；不建议作为第一 Executor。</p>
+      </div>
+    </div>
+
+    <div class="card" data-cat="skip">
+      <div class="card-head"><strong>OpenHands</strong><span class="tag skip">执行平台</span></div>
+      <div class="card-body">
+        <p>软件工程 Agent：SDK、CLI、Local GUI、Docker 沙箱、子代理委托。</p>
+        <p><strong>OpenX：</strong>明确<strong>不</strong>基于 OpenHands 建站；与「工头不干活」冲突。边界对照用。</p>
+        <ul class="path-list">
+          <li>vendors/openhands/README.md</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="openx">
+    <h2>OpenX 建议怎么用这些仓库</h2>
+    <div class="panel">
+      <h3 style="color: var(--brass); margin-top: 0;">分层取用（不要混层）</h3>
+      <table>
+        <tr><th>OpenX 层</th><th>优先参考</th><th>做法</th></tr>
+        <tr>
+          <td>工头 UI + Goal API</td>
+          <td>自研 + agent-kanban、mission-control</td>
+          <td>抄 SSE/状态/review；UI 用 stage-design 原型</td>
+        </tr>
+        <tr>
+          <td>Executor 桥</td>
+          <td><strong>Pi RPC/SDK</strong>、Gemini ACP、OpenCode server</td>
+          <td>抽象 <code>POST /execute</code> → 适配器子进程</td>
+        </tr>
+        <tr>
+          <td>多模型</td>
+          <td>openclaude、pi-ai</td>
+          <td>藏在 Executor 内，看板不展示品牌</td>
+        </tr>
+        <tr>
+          <td>不采用</td>
+          <td>openhands、aider 内核、langgraph 全栈</td>
+          <td>避免做成第四个 coding agent</td>
+        </tr>
+      </table>
+
+      <h3>Executor 适配优先级（本机 MVP）</h3>
+      <ol style="margin-left: 1.2rem;">
+        <li><strong>Pi <code>--mode rpc</code></strong> — TS 同源、文档齐全、易嵌入 Node 服务</li>
+        <li><strong>ACP Client</strong> — 接 Gemini CLI / Codex 等（长期一套协议）</li>
+        <li><strong>OpenCode HTTP</strong> — 若需现成 server/session</li>
+        <li><strong>CodeWhale / OpenClaude</strong> — 备选 CLI spawn</li>
+      </ol>
+
+      <h3>团队阅读顺序（约 2 天）</h3>
+      <ol style="margin-left: 1.2rem;">
+        <li><code>vendors/agent-kanban/CLAUDE.md</code> + OpenX stage-design 原型</li>
+        <li><code>vendors/pi/packages/coding-agent/docs/rpc.md</code> + <code>examples/sdk/</code></li>
+        <li><code>vendors/opencode/packages/opencode/</code> 目录扫一眼 session 模型</li>
+        <li>选 1 个 CLI 在本地跑通，验证「工头 dispatch → 子进程 → progress 回调」</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2>协议与未克隆项</h2>
+    <table>
+      <tr><th>名称</th><th>用途</th><th>说明</th></tr>
+      <tr>
+        <td><a href="https://agentclientprotocol.com/">ACP</a></td>
+        <td>Editor ↔ Agent</td>
+        <td>Executor 桥；Gemini/Codex 等已支持</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/a2aproject/A2A">A2A</a></td>
+        <td>Agent ↔ Agent</td>
+        <td>远期多 Executor 互操作；MVP 可不克隆</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/ag-ui-protocol/ag-ui">AG-UI</a></td>
+        <td>Agent ↔ 前端流</td>
+        <td>可选；自研 SSE 更简单</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a></td>
+        <td>Pi 增强 fork</td>
+        <td>需要子代理/LSP 时再 shallow clone</td>
+      </tr>
+    </table>
+  </section>
+
+</main>
+
+<footer>
+  生成时间：2026-06 · 仓库位于 OpenX/vendors ·
+  <a href="openx-foundation-survey.html">地基调研</a> ·
+  <a href="openx-stage-design.html">阶段设计</a>
+</footer>
+
+<script>
+document.querySelectorAll('.filter-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-bar button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const f = btn.dataset.filter;
+    document.querySelectorAll('#cards .card').forEach(card => {
+      if (f === 'all') card.classList.remove('hidden');
+      else card.classList.toggle('hidden', card.dataset.cat !== f);
+    });
+  });
+});
+</script>
+</body>
+</html>

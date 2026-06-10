@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenX 地基调研 — 市面热门项目对照</title>
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --panel: #1a1d24;
+      --inset: #0a0c10;
+      --brass: #c9a227;
+      --text: #e8e4dc;
+      --dim: #9a958a;
+      --green: #5cb85c;
+      --amber: #e8a838;
+      --red: #c55;
+      --teal: #3dd6c3;
+      --border: #2a2e38;
+      --font-ui: "Segoe UI", "Microsoft YaHei", sans-serif;
+      --font-display: Georgia, "Noto Serif SC", serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font-ui); background: var(--bg); color: var(--text); line-height: 1.55; }
+    header {
+      position: sticky; top: 0; z-index: 50;
+      background: #12151a; border-bottom: 2px solid #8a7020;
+      padding: 0.75rem 1.25rem;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    header h1 { font-family: var(--font-display); font-size: 1.15rem; color: var(--brass); }
+    nav a {
+      color: var(--dim); text-decoration: none; font-size: 0.78rem;
+      padding: 0.3rem 0.55rem; border: 1px solid var(--border); border-radius: 3px; margin-left: 0.25rem;
+    }
+    nav a:hover { color: var(--brass); }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.25rem; }
+    section { margin-bottom: 2.5rem; scroll-margin-top: 3.5rem; }
+    h2 {
+      font-family: var(--font-display); color: var(--brass);
+      font-size: 1.2rem; margin-bottom: 0.75rem;
+      padding-bottom: 0.35rem; border-bottom: 1px solid #8a7020;
+    }
+    h3 { color: var(--teal); font-size: 0.95rem; margin: 1rem 0 0.5rem; }
+    p, li { color: var(--dim); font-size: 0.88rem; }
+    p { margin-bottom: 0.6rem; }
+    ul { margin: 0.4rem 0 0.75rem 1.2rem; }
+    .panel {
+      background: linear-gradient(145deg, #22262e, #161920);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.1rem;
+      margin: 0.75rem 0;
+    }
+    .verdict {
+      border-left: 3px solid var(--brass);
+      padding-left: 0.75rem;
+      margin: 0.75rem 0;
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    table {
+      width: 100%; border-collapse: collapse; font-size: 0.78rem; margin: 0.75rem 0;
+    }
+    th, td { border: 1px solid var(--border); padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
+    th { background: var(--inset); color: var(--brass); }
+    td { color: var(--dim); }
+    .score { font-weight: 700; }
+    .score.hi { color: var(--green); }
+    .score.mid { color: var(--amber); }
+    .score.lo { color: var(--red); }
+    a { color: var(--teal); }
+    code { font-size: 0.75rem; background: var(--inset); padding: 0.1rem 0.3rem; border-radius: 2px; color: var(--teal); }
+    .tier {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+    .tier-card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.85rem;
+      background: var(--inset);
+    }
+    .tier-card h4 { color: var(--text); font-size: 0.9rem; margin-bottom: 0.35rem; }
+    .tier-card.recommend { border-color: var(--green); box-shadow: 0 0 0 1px rgba(92,184,92,0.2); }
+    .tier-card.skip { border-color: var(--red); opacity: 0.85; }
+    .badge {
+      display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.4rem;
+      border-radius: 2px; margin-right: 0.25rem; margin-bottom: 0.25rem;
+    }
+    .badge.g { background: #1a3a1a; color: var(--green); }
+    .badge.a { background: #3a2e1a; color: var(--amber); }
+    .badge.r { background: #3a1a1a; color: var(--red); }
+    .stack-diagram {
+      font-family: ui-monospace, monospace;
+      font-size: 0.72rem;
+      background: #050608;
+      padding: 1rem;
+      border-radius: 4px;
+      color: var(--teal);
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.45;
+    }
+    footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--dim); border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>OpenX 第二步 · 市面地基调研</h1>
+  <nav>
+    <a href="openx-stage-design.html">← 阶段设计</a>
+    <a href="#need">需求对照</a>
+    <a href="#matrix">对照表</a>
+    <a href="#rec">建议</a>
+    <a href="#stack">推荐栈</a>
+    <a href="#next">下一步</a>
+  </nav>
+</header>
+
+<main>
+
+  <section id="need">
+    <h2>一、我们要找的地基是什么</h2>
+    <div class="panel">
+      <p style="color: var(--text);">OpenX 不是「再做一个会干活的 Agent」，而是<strong>工头层</strong>：用户只关心目标与效果，执行黑盒。</p>
+      <p>MVP 已定：<strong>本机 PC</strong> · <strong>Goal 五态</strong> · <strong>用户立目标 + 效果确认</strong> · <strong>单 Executor</strong> · <strong>模板播报</strong>。</p>
+    </div>
+    <h3>按层拆：哪些可以借，哪些必须自研</h3>
+    <table>
+      <tr><th>层</th><th>需要什么</th><th>借地基的难度</th></tr>
+      <tr><td><strong>L1 目标看板 UI</strong></td><td>列表、筛选、详情、达标/返工</td><td>中等 —  several 有 Kanban，但心智多偏「Agent 自治」</td></tr>
+      <tr><td><strong>L2 任务/状态服务</strong></td><td>Goal CRUD、五态、SQLite、SSE</td><td>容易 — 多个 TS 项目同款栈</td></tr>
+      <tr><td><strong>L3 执行桥</strong></td><td>调一个本机 Executor，不回暴露 CLI 品牌</td><td>中等 — <strong>ACP</strong> 最接近「统一接 CLI」</td></tr>
+      <tr><td><strong>L4 执行/推理</strong></td><td>写代码、工具循环、沙箱</td><td><strong>不借</strong> — OpenHands / LangGraph 属此层，会跑偏</td></tr>
+      <tr><td><strong>L5 协议</strong></td><td>Agent 互操作、流式 UI</td><td>可选 — A2A / AG-UI 作远期，MVP 不必全上</td></tr>
+    </table>
+    <div class="verdict">
+      <strong>结论：</strong>找地基 = 找 <code>L1+L2</code> 的可复用壳，<code>L3</code> 用协议或薄适配；<strong>不要</strong>把整个产品建在 OpenHands / LangGraph 之上。
+    </div>
+  </section>
+
+  <section id="matrix">
+    <h2>二、热门项目对照（2025–2026）</h2>
+    <p>评分针对 OpenX MVP（工头 + 本机 + 用户立目标 + 效果确认）。3 = 很契合，2 = 部分可借，1 = 不适合当主地基。</p>
+
+    <table>
+      <tr>
+        <th>项目</th>
+        <th>Stars/热度</th>
+        <th>本质</th>
+        <th>看板</th>
+        <th>人工立目标</th>
+        <th>效果确认</th>
+        <th>本机 PC</th>
+        <th>隐藏 CLI 品牌</th>
+        <th>总分</th>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/bonaysoft/agent-kanban" target="_blank" rel="noopener">Agent Kanban</a></td>
+        <td>~300+ TS</td>
+        <td>Agent 优先 Kanban，多 CLI runtime</td>
+        <td class="score hi">3</td>
+        <td class="score lo">1</td>
+        <td class="score hi">3</td>
+        <td class="score mid">2</td>
+        <td class="score lo">1</td>
+        <td class="score mid">2.0</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/builderz-labs/mission-control" target="_blank" rel="noopener">Mission Control</a></td>
+        <td>较新，功能全</td>
+        <td>自托管 Agent 编排台，SQLite，32 面板</td>
+        <td class="score hi">3</td>
+        <td class="score mid">2</td>
+        <td class="score mid">2</td>
+        <td class="score hi">3</td>
+        <td class="score lo">1</td>
+        <td class="score mid">2.2</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/agent-cockpit/agent-cockpit" target="_blank" rel="noopener">Agent Cockpit</a></td>
+        <td>成长中</td>
+        <td>本机多会话管控，审批/时间线/Diff</td>
+        <td class="score mid">2</td>
+        <td class="score lo">1</td>
+        <td class="score hi">3</td>
+        <td class="score hi">3</td>
+        <td class="score lo">1</td>
+        <td class="score mid">2.0</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/langchain-ai/langgraph" target="_blank" rel="noopener">LangGraph</a> + <a href="https://docs.langchain.com/oss/python/langchain/ui" target="_blank" rel="noopener">Agent Chat UI</a></td>
+        <td>极高</td>
+        <td>编排框架 + 聊天/debug UI</td>
+        <td class="score lo">1</td>
+        <td class="score mid">2</td>
+        <td class="score lo">1</td>
+        <td class="score mid">2</td>
+        <td class="score hi">3</td>
+        <td class="score lo">1.4</td>
+      </tr>
+      <tr>
+        <td><a href="https://docs.openhands.dev/sdk/arch/overview" target="_blank" rel="noopener">OpenHands SDK</a></td>
+        <td>极高</td>
+        <td>软件工程 Agent 运行时 + 沙箱</td>
+        <td class="score lo">1</td>
+        <td class="score lo">1</td>
+        <td class="score mid">2</td>
+        <td class="score hi">3</td>
+        <td class="score hi">3</td>
+        <td class="score lo">1.4</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/a2aproject/A2A" target="_blank" rel="noopener">A2A Protocol</a> + <code>@a2a-js/sdk</code></td>
+        <td>LF 标准</td>
+        <td>Agent ↔ Agent 互操作</td>
+        <td class="score lo">1</td>
+        <td>—</td>
+        <td>—</td>
+        <td class="score mid">2</td>
+        <td class="score mid">2</td>
+        <td class="score lo">协议层</td>
+      </tr>
+      <tr>
+        <td><a href="https://agentclientprotocol.com/" target="_blank" rel="noopener">ACP</a></td>
+        <td>Zed/JetBrains</td>
+        <td>编辑器 ↔ CLI Agent（像 LSP）</td>
+        <td class="score lo">1</td>
+        <td>—</td>
+        <td>—</td>
+        <td class="score hi">3</td>
+        <td class="score hi">3</td>
+        <td class="score hi">执行桥</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/ag-ui-protocol/ag-ui" target="_blank" rel="noopener">AG-UI</a> + CopilotKit</td>
+        <td>生态活跃</td>
+        <td>Agent ↔ 前端 流式事件</td>
+        <td class="score lo">1</td>
+        <td>—</td>
+        <td>—</td>
+        <td class="score mid">2</td>
+        <td class="score hi">3</td>
+        <td class="score mid">UI 协议</td>
+      </tr>
+    </table>
+
+    <h3>关键差异说明</h3>
+    <ul>
+      <li><strong>Agent Kanban</strong>：有「In Review → 人 reject/complete」，和你们的<strong>效果确认</strong>很像；但官方 UI <strong>不让人创建任务</strong>（任务由 Agent/CLI 创建），和「用户立目标」<strong>相反</strong>。多 runtime（Codex/Cursor…）外露，和「用户不选工具」<strong>相反</strong>。技术栈可参考：React + Hono + D1 + SSE。</li>
+      <li><strong>Mission Control</strong>：SQLite、本机、Kanban、多 Agent — 像「加强版指挥台」，但功能面过宽（32 面板、多框架适配），MVP 易被拖进编排框架坑。</li>
+      <li><strong>Agent Cockpit</strong>：本机、审批、时间线很强，心智是「并行 coding 会话」，不是「目标达成」；适合抄<strong>审批/日志 UX</strong>，不适合整仓 fork。</li>
+      <li><strong>LangGraph / OpenHands</strong>：会把你们变成「又一个执行型 Agent 平台」，和工头定位冲突。</li>
+      <li><strong>ACP</strong>：不解决看板，但适合当<strong>唯一 Executor 桥</strong>：对用户只显示「执行位」，背后接任意 ACP Agent。</li>
+    </ul>
+  </section>
+
+  <section id="rec">
+    <h2>三、建议：怎么借，不整仓 fork 谁</h2>
+
+    <div class="tier">
+      <div class="tier-card recommend">
+        <h4>✅ 推荐路线（薄地基 + 自研工头）</h4>
+        <span class="badge g">主策略</span>
+        <ul>
+          <li><strong>自研</strong> Goal 模型、五态、看板 UI（沿用 <a href="openx-stage-design.html">stage-design</a> 原型）</li>
+          <li><strong>借鉴实现</strong>：Agent Kanban 的 SSE 推送、任务生命周期、review 闸门（改为人可创建 Goal）</li>
+          <li><strong>借鉴栈</strong>：Mission Control 的 SQLite + 单进程本机部署思路</li>
+          <li><strong>执行桥</strong>：本机 <code>Executor</code> 进程；远期用 <strong>ACP</strong> 接 Claude/Codex/OpenCode，对用户仍是一个「执行位」</li>
+        </ul>
+      </div>
+      <div class="tier-card">
+        <h4>⚠️ 可参考、不当作根仓库</h4>
+        <span class="badge a">零件库</span>
+        <ul>
+          <li>Agent Cockpit：审批 inbox、时间线、Diff 折叠（放进 Goal 详情）</li>
+          <li>AG-UI：若前端要标准化流式事件，可只借事件形态，不必上 CopilotKit 全家桶</li>
+          <li>A2A：等多 Executor / 远程再考虑，MVP 过重</li>
+        </ul>
+      </div>
+      <div class="tier-card skip">
+        <h4>❌ 不建议作为主地基</h4>
+        <span class="badge r">会跑偏</span>
+        <ul>
+          <li>LangGraph / CrewAI / AutoGen — 执行编排框架</li>
+          <li>OpenHands 全栈 — 沙箱 + 写代码 Agent</li>
+          <li>整仓 fork Agent Kanban — 产品哲学冲突（Agent-first vs 人立目标）</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <strong>一句话：</strong>市面<strong>没有</strong>现成「只做工头、用户立目标、隐藏 CLI」的成品；最接近的是 <strong>Agent Kanban / Mission Control</strong> 的<strong>看板 + 状态机 + 本机栈</strong>，但必须<strong>砍掉</strong>多 runtime 外露和 Agent 自治建任务，并加上你们的 Goal/验收/效果确认。
+    </div>
+  </section>
+
+  <section id="stack">
+    <h2>四、落在 OpenX 上的推荐组合（MVP）</h2>
+    <div class="stack-diagram">┌─────────────────────────────────────────┐
+│  OpenX Web（自研，机械朋克 UI）            │
+│  目标看板 · 详情 · 达标/返工 · 播报        │
+└──────────────────┬──────────────────────┘
+                   │ REST + SSE（自研，可参考 Kanban）
+┌──────────────────▼──────────────────────┐
+│  OpenX Server（自研）                     │
+│  Hono/Fastify + SQLite + Goal 五态       │
+│  工头播报（模板，无 LLM 也可）             │
+└──────────────────┬──────────────────────┘
+                   │ 内部 API（你们已定 v0.1）
+┌──────────────────▼──────────────────────┐
+│  Executor（薄层，可替换）                 │
+│  MVP: mock 或 单 CLI 子进程               │
+│  V2:  <strong>ACP Client</strong> → 任意注册表 Agent（用户不可见品牌） │
+└─────────────────────────────────────────┘
+
+<strong>不引入</strong>：LangGraph 图、OpenHands Docker 沙箱、Mission Control 32 面板</div>
+
+    <h3>为何 ACP 值得单独作为「执行桥协议」</h3>
+    <ul>
+      <li>定位是 <strong>Client(你们) ↔ Agent(CLI)</strong>，不是 Agent 互抢任务 — 和「单 Executor 黑盒」一致。</li>
+      <li>已覆盖 Claude Code、Codex、Gemini、Copilot、OpenCode 等（经适配器），满足「背后可换、面前不换」。</li>
+      <li>与 MCP 分工清晰：ACP 连 Agent，MCP 连工具 — 工头层不必碰 MCP。</li>
+      <li>代价：需实现一个 <strong>ACP Client 壳</strong>（或嵌 Zed 式 subprocess 管理），工作量在一两个 Sprint，小于维护 N 套 CLI 适配器。</li>
+    </ul>
+  </section>
+
+  <section id="next">
+    <h2>五、建议的验证步骤（1–2 周）</h2>
+    <table>
+      <tr><th>顺序</th><th>动作</th><th>产出</th></tr>
+      <tr>
+        <td>1</td>
+        <td>本地 clone <strong>Agent Kanban</strong>，只读走一遍：任务状态、SSE、review API</td>
+        <td>列「可抄清单」vs「要改清单」</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>浏览 <strong>Mission Control</strong> README + 跑起来看 Kanban 与 SQLite 结构</td>
+        <td>确认本机部署与表设计是否过重</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>读 <strong>ACP</strong> overview + 用一个官方 sample 连一个 CLI</td>
+        <td>验证 Executor 桥是否 2–3 天能通</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>在 OpenX  monorepo 起 <code>apps/server</code> + <code>apps/web</code>，<strong>不 fork</strong> 上述仓库，只抄协议与表意</td>
+        <td>P0 可演示闭环</td>
+      </tr>
+    </table>
+
+    <h3>决策检查（拍板用）</h3>
+    <ul>
+      <li>主地基 = <strong>自研工头 + SQLite</strong>，不是 fork OpenHands/LangGraph。</li>
+      <li>执行 = <strong>单 Executor</strong>；协议储备 = <strong>ACP</strong>（不是 A2A 优先）。</li>
+      <li>参考实现 #1 = <strong>Agent Kanban</strong>（生命周期 + review）；#2 = <strong>Mission Control</strong>（本机全家桶）。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>六、链接速查</h2>
+    <ul>
+      <li><a href="https://github.com/bonaysoft/agent-kanban">Agent Kanban</a> — agent-kanban.dev</li>
+      <li><a href="https://github.com/builderz-labs/mission-control">Mission Control</a></li>
+      <li><a href="https://github.com/agent-cockpit/agent-cockpit">Agent Cockpit</a></li>
+      <li><a href="https://agentclientprotocol.com/protocol/v1/overview">ACP 协议</a></li>
+      <li><a href="https://github.com/a2aproject/A2A">A2A</a> · <a href="https://github.com/ag-ui-protocol/ag-ui">AG-UI</a></li>
+      <li><a href="https://docs.openhands.dev/sdk/arch/overview">OpenHands SDK</a>（执行层，仅作边界对照）</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  OpenX 地基调研 · 与 <a href="openx-stage-design.html" style="color: var(--teal);">openx-stage-design.html</a> 配套 · 2026-06
+</footer>
+
+</body>
+</html>

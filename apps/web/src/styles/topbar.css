@@ -1,0 +1,69 @@
+.app-topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0.55rem var(--space-page-x) 0;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--shadow-soft);
+}
+
+.topbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.topbar-label {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.topbar-select {
+  min-width: 9rem;
+  max-width: 14rem;
+  padding: 0.35rem 0.65rem !important;
+  font-size: var(--text-sm) !important;
+  border-radius: 999px !important;
+}
+
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.topbar-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+}
+
+.topbar-led.connected {
+  background: var(--green);
+}
+
+.topbar-led.reconnecting {
+  background: var(--amber);
+}
+
+.topbar-model {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

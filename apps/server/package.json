@@ -1,0 +1,33 @@
+{
+  "name": "@openx/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-vm-modules node_modules/vitest/vitest.mjs run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.1",
+    "@openx/coach": "workspace:*",
+    "@openx/executor-acp": "workspace:*",
+    "@openx/executor-connect": "workspace:*",
+    "@openx/executor-core": "workspace:*",
+    "@openx/executor-mock": "workspace:*",
+    "@openx/executor-pi": "workspace:*",
+    "@openx/shared": "workspace:*",
+    "better-sqlite3": "^11.9.1",
+    "hono": "^4.7.4",
+    "nanoid": "^5.1.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

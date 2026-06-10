@@ -1,0 +1,89 @@
+/* 统一字号阶梯与文本角色 — 覆盖 panels 内零散 rem */
+
+:is(
+  .settings-hint,
+  .tools-tab-lead,
+  .goal-card-meta,
+  .goal-card-acceptance,
+  .sidebar-subtitle,
+  .sidebar-workspace-hint,
+  .sidebar-status,
+  .broadcast-bar,
+  .coach-status-badge,
+  .workspace-picker-hint-inline,
+  .tools-cli-hint,
+  .form-label,
+  .empty-hint,
+  .approve-confirm,
+  .chat-context-banner-hint,
+  .tools-template-card span,
+  .tools-skill-card span,
+  .tools-skill-desc,
+  .provider-chip-desc
+) {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  font-weight: var(--font-normal);
+}
+
+:is(
+  .tools-section-title,
+  .settings-section-title,
+  .tools-add-cli-head h4,
+  .chat-context-banner-title,
+  .goal-card-title,
+  .tools-cli-name,
+  .tools-skill-card strong,
+  .tools-skill-name,
+  .provider-chip-name
+) {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+
+:is(
+  .status-pill,
+  .executor-tag,
+  .sidebar-badge,
+  .tools-cli-kind,
+  .tools-cli-status,
+  .chat-context-tab-badge,
+  .tools-skill-badge
+) {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.01em;
+}
+
+:is(.chat-context-tab, .tools-tab, .tools-cli-chip) {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.chat-bubble {
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.log-line {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.mech-input,
+input:not([type="checkbox"]),
+textarea,
+select {
+  font-size: var(--text-base) !important;
+  line-height: var(--leading-normal);
+}
+
+.tools-tab-lead {
+  max-width: 42rem;
+  margin-bottom: 0.15rem;
+}
+

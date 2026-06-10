@@ -1,0 +1,169 @@
+/* 底部最新动态细条 */
+
+.log-strip {
+  flex: 0 0 var(--log-strip-h);
+  margin: 0 var(--space-page-x) var(--space-page-y);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: var(--log-strip-h);
+  box-shadow: var(--shadow-soft);
+}
+
+.log-strip.expanded {
+  flex: 0 0 min(42vh, 22rem);
+  min-height: min(42vh, 22rem);
+}
+
+.log-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: calc(var(--log-strip-h) - 2px);
+}
+
+.log-strip-sse {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--text-dim);
+}
+
+.log-strip-sse.connected {
+  color: var(--green);
+  background: rgba(52, 199, 89, 0.12);
+}
+
+.log-strip-sse.reconnecting {
+  color: var(--amber);
+  background: rgba(255, 149, 0, 0.12);
+}
+
+.log-strip-sse.disconnected {
+  color: var(--red);
+  background: rgba(255, 59, 48, 0.1);
+}
+
+.log-strip-label {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-strip-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.log-strip-chip {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.log-strip-chip.active {
+  border-color: rgba(0, 113, 227, 0.35);
+  color: var(--accent);
+  background: rgba(0, 113, 227, 0.08);
+}
+
+.log-strip-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.log-strip-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.log-strip-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+
+.log-strip-body.vertical {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  overflow-y: auto;
+  white-space: normal;
+  padding: 0.35rem 0.75rem 0.5rem;
+}
+
+.log-strip-body.paused {
+  opacity: 0.85;
+}
+
+.log-strip-empty {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.log-strip-line {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  flex-shrink: 0;
+}
+
+.log-strip-body.vertical .log-strip-line {
+  display: flex;
+  padding: 0.18rem 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.04);
+}
+
+.log-strip-line time {
+  color: var(--text-dim);
+  font-style: normal;
+}
+
+.log-strip-line em {
+  font-style: normal;
+  font-weight: var(--font-semibold);
+  min-width: 2.5rem;
+}
+
+.log-strip-line.info em {
+  color: var(--green);
+}
+.log-strip-line.warn em {
+  color: var(--amber);
+}
+.log-strip-line.error em {
+  color: var(--red);
+}
+.log-strip-line.debug em {
+  color: var(--text-dim);
+}

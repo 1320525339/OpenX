@@ -1,0 +1,20 @@
+{
+  "name": "openx",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @openx/server --filter @openx/web dev",
+    "dev:server": "pnpm --filter @openx/server dev",
+    "dev:web": "pnpm --filter @openx/web dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "connect:demo": "pnpm --filter @openx/connect-client build && node packages/connect-client/dist/cli.js",
+    "e2e:connect": "node scripts/e2e-connect-auto.mjs",
+    "e2e:acp": "node scripts/e2e-acp-run.mjs --mock"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

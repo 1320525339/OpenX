@@ -1,0 +1,62 @@
+import { useEffect } from "react";
+import type { Goal } from "@openx/shared";
+import { TaskDetailPanel } from "./TaskDetailPanel";
+
+type LogEntry = {
+  goalId: string;
+  level: string;
+  message: string;
+  timestamp: string;
+};
+
+type Props = {
+  goal: Goal | undefined;
+  logs: LogEntry[];
+  onBack: () => void;
+  onApprove: (id: string) => Promise<void>;
+  onRework: (id: string, reason?: string) => Promise<void>;
+  onStart: (id: string) => Promise<void>;
+};
+
+export function GoalDetailPage({
+  goal,
+  logs,
+  onBack,
+  onApprove,
+  onRework,
+  onStart,
+}: Props) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onBack();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onBack]);
+
+  return (
+    <div className="main-view goal-detail-page">
+      <header className="goal-detail-page-head">
+        <button type="button" className="btn btn-ghost goal-detail-back" onClick={onBack}>
+          ← 返回看板
+        </button>
+        {goal ? (
+          <span className="goal-detail-page-subtitle">{goal.title}</span>
+        ) : (
+          <span className="goal-detail-page-subtitle muted">目标不存在或已删除</span>
+        )}
+      </header>
+      <div className="goal-detail-page-body hyper-window-slot focus-tasks">
+        <TaskDetailPanel
+          goal={goal}
+          editMode={false}
+          selectedGoals={[]}
+          logs={logs}
+          onApprove={onApprove}
+          onRework={onRework}
+          onStart={onStart}
+        />
+      </div>
+    </div>
+  );
+}

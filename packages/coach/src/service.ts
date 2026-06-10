@@ -3,6 +3,7 @@ import {
   upgradeToModelConfig,
   type AgentChatResponse,
   type CoachChatContext,
+  type CoachChatTurn,
   type ModelSettingsSlice,
   type RefineInput,
   type RefinedGoal,
@@ -146,6 +147,7 @@ export async function coachChatReply(
   settings: ModelSettingsSlice,
   defaultConstraints: string[] = [],
   env?: LlmEnv,
+  chatHistory: CoachChatTurn[] = [],
 ): Promise<{
   message: string;
   refined?: RefinedGoal;
@@ -160,6 +162,7 @@ export async function coachChatReply(
         { ...context, defaultConstraints },
         upgraded,
         env,
+        chatHistory,
       );
       const merged = ensureWorkspaceInspectRefined(message, context, reply);
       return {

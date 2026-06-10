@@ -18,6 +18,7 @@ type Props = {
   onApprove: (id: string) => Promise<void>;
   onRework: (id: string, reason?: string) => Promise<void>;
   onStart: (id: string) => Promise<void>;
+  onOpenDetail?: (id: string) => void;
 };
 
 function statusLabel(goal: Goal): string {
@@ -33,6 +34,7 @@ export function TaskDetailPanel({
   onApprove,
   onRework,
   onStart,
+  onOpenDetail,
 }: Props) {
   if (editMode) {
     if (selectedGoals.length === 0) {
@@ -67,7 +69,18 @@ export function TaskDetailPanel({
     <section className="mech-panel task-detail-panel">
       <div className="mech-panel-head">
         <h3>{goal.title}</h3>
-        <span className={`status-pill ${goal.status}`}>{statusLabel(goal)}</span>
+        <div className="detail-head-actions">
+          {onOpenDetail && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => onOpenDetail(goal.id)}
+            >
+              全屏详情
+            </button>
+          )}
+          <span className={`status-pill ${goal.status}`}>{statusLabel(goal)}</span>
+        </div>
       </div>
       <div className="mech-panel-body panel-stack">
         <div className="panel-scroll">

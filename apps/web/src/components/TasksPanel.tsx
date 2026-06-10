@@ -20,6 +20,7 @@ type Props = {
   onFilterChange: (f: string) => void;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onOpenDetail?: (id: string) => void;
   onNewGoal: () => void;
   editMode: boolean;
   onEditModeChange: (edit: boolean) => void;
@@ -61,6 +62,7 @@ export function TasksPanel({
   onFilterChange,
   selectedId,
   onSelect,
+  onOpenDetail,
   onNewGoal,
   editMode,
   onEditModeChange,
@@ -198,6 +200,10 @@ export function TasksPanel({
                     onSelect(g.id);
                   }
                 }}
+                onDoubleClick={() => {
+                  if (editMode || !onOpenDetail) return;
+                  onOpenDetail(g.id);
+                }}
                 onKeyDown={(e) => {
                   if (e.key !== "Enter") return;
                   if (editMode) onToggleSelect(g.id);
@@ -251,6 +257,19 @@ export function TasksPanel({
                           ? `${g.parentGoalId ? " · " : ""}等待 ${g.dependsOn.length} 个前置`
                           : ""}
                       </p>
+                    )}
+
+                    {!editMode && selected && onOpenDetail && (
+                      <button
+                        type="button"
+                        className="goal-detail-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenDetail(g.id);
+                        }}
+                      >
+                        查看详情
+                      </button>
                     )}
 
                     {!editMode && (g.status === "draft" || g.status === "failed") &&

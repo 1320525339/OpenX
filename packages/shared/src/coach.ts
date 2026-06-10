@@ -31,6 +31,12 @@ export type CoachGoalBrief = {
   resultSummary?: string;
 };
 
+/** 助手多轮对话中的一条记录 */
+export type CoachChatTurn = {
+  role: "user" | "coach";
+  text: string;
+};
+
 export type CoachChatContext = {
   /** 全部任务一览（扁平列表） */
   goalsSummary?: string;

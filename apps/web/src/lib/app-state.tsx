@@ -61,6 +61,7 @@ type AppState = {
   settingsTab: "general" | "tools";
   loadError: string | null;
   coachReplyEvent: CoachReplyEvent | null;
+  detailGoalId: string | null;
 };
 
 type Action =
@@ -86,7 +87,9 @@ type Action =
   | { type: "toggle_log_strip" }
   | { type: "set_settings_tab"; tab: "general" | "tools" }
   | { type: "set_load_error"; error: string | null }
-  | { type: "coach_reply"; event: CoachReplyEvent };
+  | { type: "coach_reply"; event: CoachReplyEvent }
+  | { type: "open_goal_detail"; id: string }
+  | { type: "close_goal_detail" };
 
 const INITIAL_BROADCAST = "欢迎使用 OpenX — 说出目标，我会帮你整理、推进和提醒确认。";
 
@@ -110,6 +113,7 @@ const initialState: AppState = {
   settingsTab: "general",
   loadError: null,
   coachReplyEvent: null,
+  detailGoalId: null,
 };
 
 function viewDefaultFilter(view: AppView): string {
@@ -127,6 +131,7 @@ function reducer(state: AppState, action: Action): AppState {
         statusFilter: viewDefaultFilter(action.view),
         tasksEditMode: false,
         tasksSelectedIds: new Set(),
+        detailGoalId: null,
       };
     case "set_goals":
       return { ...state, goals: action.goals, loadError: null };
@@ -145,6 +150,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         goals: state.goals.filter((g) => g.id !== action.goalId),
         selectedId: state.selectedId === action.goalId ? null : state.selectedId,
+        detailGoalId: state.detailGoalId === action.goalId ? null : state.detailGoalId,
         tasksSelectedIds,
       };
     }
@@ -197,6 +203,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, loadError: action.error };
     case "coach_reply":
       return { ...state, coachReplyEvent: action.event };
+    case "open_goal_detail":
+      return { ...state, detailGoalId: action.id, selectedId: action.id };
+    case "close_goal_detail":
+      return { ...state, detailGoalId: null };
     default:
       return state;
   }

@@ -8,6 +8,8 @@ import { BroadcastTicker } from "./components/BroadcastTicker";
 import { LogStrip } from "./components/LogStrip";
 import { SideNav } from "./components/SideNav";
 import { TopBar } from "./components/TopBar";
+import { SplitWorkspace } from "./components/SplitWorkspace";
+import { GoalDetailPage } from "./components/GoalDetailPage";
 import { AppProvider, useAppState } from "./lib/app-state";
 import { api } from "./api";
 import "./styles/app.css";
@@ -17,6 +19,7 @@ import "./styles/settings-tools.css";
 import "./styles/typography.css";
 import "./styles/topbar.css";
 import "./styles/log-strip.css";
+import "./styles/hyperos-workspace.css";
 
 function AppContent() {
   const {
@@ -36,6 +39,12 @@ function AppContent() {
   } = useAppState();
 
   const { settings } = state;
+  const detailGoal = state.detailGoalId
+    ? state.goals.find((g) => g.id === state.detailGoalId)
+    : undefined;
+
+  const openGoalDetail = (id: string) => dispatch({ type: "open_goal_detail", id });
+  const closeGoalDetail = () => dispatch({ type: "close_goal_detail" });
 
   return (
     <div className="app-shell app-shell-nav">
@@ -78,59 +87,91 @@ function AppContent() {
             </div>
           ) : (
             <>
-              {(state.view === "home" || state.view === "running" || state.view === "review") && (
-                <div className="main-view home-view">
-                  <div className="home-view-tasks">
-                    <TasksPanel
-                      goals={filteredGoals}
-                      allGoals={state.goals}
-                      filter={state.statusFilter}
-                      onFilterChange={(filter) =>
-                        dispatch({ type: "set_status_filter", filter })
-                      }
-                      selectedId={state.selectedId}
-                      onSelect={(id) => dispatch({ type: "set_selected", id })}
-                      onNewGoal={() => dispatch({ type: "set_show_new_goal", show: true })}
-                      editMode={state.tasksEditMode}
-                      onEditModeChange={(edit) =>
-                        dispatch({ type: "set_tasks_edit_mode", edit })
-                      }
-                      selectedIds={state.tasksSelectedIds}
-                      onToggleSelect={(id) => dispatch({ type: "toggle_task_select", id })}
-                      onSelectAllVisible={() =>
-                        dispatch({
-                          type: "set_tasks_selected",
-                          ids: new Set(filteredGoals.map((g) => g.id)),
-                        })
-                      }
-                      onClearSelection={() => dispatch({ type: "clear_tasks_selection" })}
-                      onBatchAction={handleTasksBatchAction}
-                      {...goalActions}
-                    />
-                  </div>
-                  <div className="home-view-side">
-                    {state.view === "home" ? (
-                      <ChatPanel
-                        goals={state.goals}
-                        selectedGoal={selected}
-                        autoExecute={settings.autoExecute}
-                        executors={state.executors}
-                        defaultExecutorId={settings.defaultExecutorId}
-                        onRefreshed={refreshGoals}
-                        coachReplyEvent={state.coachReplyEvent}
-                      />
-                    ) : (
-                      <TaskDetailPanel
-                        goal={selected}
-                        editMode={state.tasksEditMode}
-                        selectedGoals={tasksSelectedGoals}
-                        logs={state.logs}
-                        {...goalActions}
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
+              {state.detailGoalId &&
+                (state.view === "home" ||
+                  state.view === "running" ||
+                  state.view === "review") && (
+                  <GoalDetailPage
+                    goal={detailGoal}
+                    logs={state.logs}
+                    onBack={closeGoalDetail}
+                    {...goalActions}
+                  />
+                )}
+
+              {!state.detailGoalId &&
+                (state.view === "home" ||
+                  state.view === "running" ||
+                  state.view === "review") && (
+                  <SplitWorkspace
+                    className="main-view home-view"
+                    left={
+                      <div
+                        className={`home-view-tasks hyper-window-slot${state.selectedId ? " focus-tasks" : ""}`}
+                      >
+                        <TasksPanel
+                          goals={filteredGoals}
+                          allGoals={state.goals}
+                          filter={state.statusFilter}
+                          onFilterChange={(filter) =>
+                            dispatch({ type: "set_status_filter", filter })
+                          }
+                          selectedId={state.selectedId}
+                          onSelect={(id) => dispatch({ type: "set_selected", id })}
+                          onOpenDetail={openGoalDetail}
+                          onNewGoal={() =>
+                            dispatch({ type: "set_show_new_goal", show: true })
+                          }
+                          editMode={state.tasksEditMode}
+                          onEditModeChange={(edit) =>
+                            dispatch({ type: "set_tasks_edit_mode", edit })
+                          }
+                          selectedIds={state.tasksSelectedIds}
+                          onToggleSelect={(id) =>
+                            dispatch({ type: "toggle_task_select", id })
+                          }
+                          onSelectAllVisible={() =>
+                            dispatch({
+                              type: "set_tasks_selected",
+                              ids: new Set(filteredGoals.map((g) => g.id)),
+                            })
+                          }
+                          onClearSelection={() =>
+                            dispatch({ type: "clear_tasks_selection" })
+                          }
+                          onBatchAction={handleTasksBatchAction}
+                          {...goalActions}
+                        />
+                      </div>
+                    }
+                    right={
+                      <div
+                        className={`home-view-side hyper-window-slot${state.view === "home" ? " focus-assistant" : ""}`}
+                      >
+                        {state.view === "home" ? (
+                          <ChatPanel
+                            goals={state.goals}
+                            selectedGoal={selected}
+                            autoExecute={settings.autoExecute}
+                            executors={state.executors}
+                            defaultExecutorId={settings.defaultExecutorId}
+                            onRefreshed={refreshGoals}
+                            coachReplyEvent={state.coachReplyEvent}
+                          />
+                        ) : (
+                          <TaskDetailPanel
+                            goal={selected}
+                            editMode={state.tasksEditMode}
+                            selectedGoals={tasksSelectedGoals}
+                            logs={state.logs}
+                            onOpenDetail={openGoalDetail}
+                            {...goalActions}
+                          />
+                        )}
+                      </div>
+                    }
+                  />
+                )}
 
               {state.view === "assistant" && (
                 <div className="main-view single-view">

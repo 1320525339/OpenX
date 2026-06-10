@@ -72,30 +72,43 @@ coachRoutes.get("/messages", (c) => {
 });
 
 coachRoutes.post("/chat", async (c) => {
-  const input = CoachChatInputSchema.parse(await c.req.json());
-  const settings = loadSettings();
-  saveCoachMessage(input.goalId ?? null, "user", input.message);
-  const ctx = buildCoachChatContext(input.goalId);
-  if (input.skillIds?.length) {
-    const catalog = listSkillCatalog(loadSkillManifest());
-    ctx.enabledSkills = catalog
-      .filter((s) => input.skillIds!.includes(s.id))
-      .map((s) => ({ id: s.id, name: s.name, desc: s.desc }));
+  try {
+    const input = CoachChatInputSchema.parse(await c.req.json());
+    const settings = loadSettings();
+    const goalKey = input.goalId ?? null;
+    const chatHistory = listCoachMessages(goalKey, 24).map((m) => ({
+      role: m.role,
+      text: m.text,
+    }));
+    saveCoachMessage(goalKey, "user", input.message);
+    const ctx = buildCoachChatContext(input.goalId);
+    if (input.skillIds?.length) {
+      const catalog = listSkillCatalog(loadSkillManifest());
+      ctx.enabledSkills = catalog
+        .filter((s) => input.skillIds!.includes(s.id))
+        .map((s) => ({ id: s.id, name: s.name, desc: s.desc }));
+    }
+    const { message, refined, llmError, quotaExceeded } = await coachChatReply(
+      input.message,
+      ctx,
+      settings,
+      settings.defaultConstraints,
+      undefined,
+      chatHistory,
+    );
+    saveCoachMessage(goalKey, "coach", message);
+    const payload = {
+      type: "coach.reply" as const,
+      message,
+      refined,
+      meta: { llmError, quotaExceeded },
+      timestamp: new Date().toISOString(),
+    };
+    broadcast(payload);
+    return c.json(payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[coach] /chat failed:", err);
+    return c.json({ error: msg }, 500);
   }
-  const { message, refined, llmError, quotaExceeded } = await coachChatReply(
-    input.message,
-    ctx,
-    settings,
-    settings.defaultConstraints,
-  );
-  saveCoachMessage(input.goalId ?? null, "coach", message);
-  const payload = {
-    type: "coach.reply" as const,
-    message,
-    refined,
-    meta: { llmError, quotaExceeded },
-    timestamp: new Date().toISOString(),
-  };
-  broadcast(payload);
-  return c.json(payload);
 });

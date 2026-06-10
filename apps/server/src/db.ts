@@ -425,7 +425,8 @@ export function listCoachMessages(goalId?: string | null, limit = 80) {
   return database
     .prepare(
       `SELECT id, goal_id as goalId, role, text, created_at as timestamp
-       FROM coach_messages ORDER BY id DESC LIMIT ?`,
+       FROM coach_messages WHERE goal_id IS NULL
+       ORDER BY id DESC LIMIT ?`,
     )
     .all(limit)
     .reverse() as {

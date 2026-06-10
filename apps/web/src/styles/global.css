@@ -12,7 +12,15 @@
   --green: #34c759;
   --red: #ff3b30;
   --amber: #ff9500;
-  --sidebar-w: 13.5rem;
+  --sidebar-w: 10.75rem;
+  --hyper-window-radius: 24px;
+  --hyper-window-bg: rgba(255, 255, 255, 0.98);
+  --hyper-window-shadow:
+    0 10px 40px rgba(15, 23, 42, 0.07),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  --hyper-window-shadow-hover:
+    0 16px 48px rgba(15, 23, 42, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.95) inset;
   --log-strip-h: 2.35rem;
   --border: rgba(15, 23, 42, 0.08);
   --glow-amber: 0 16px 36px rgba(230, 134, 0, 0.14);

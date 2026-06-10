@@ -67,6 +67,18 @@ export function ChatPanel({
     reason: string;
   } | null>(null);
   const { skills: catalogSkills } = useSkillCatalog();
+  const lastCoachReplyTsRef = useRef<string | null>(null);
+
+  const handleContextChange = useCallback(
+    ({ skills }: { skills: Record<string, boolean> }) => {
+      setChatSkillIds(
+        Object.entries(skills)
+          .filter(([, on]) => on)
+          .map(([id]) => id),
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     setExecutorId(defaultExecutorChoice(executors, defaultExecutorId));
@@ -132,6 +144,9 @@ export function ChatPanel({
 
   useEffect(() => {
     if (!coachReplyEvent) return;
+    if (lastCoachReplyTsRef.current === coachReplyEvent.timestamp) return;
+    lastCoachReplyTsRef.current = coachReplyEvent.timestamp;
+
     stickToBottomRef.current = true;
     setMessages((m) => {
       const last = m[m.length - 1];
@@ -148,7 +163,7 @@ export function ChatPanel({
     if (coachReplyEvent.refined) {
       setRefinedPreview(coachReplyEvent.refined);
     }
-  }, [coachReplyEvent?.timestamp]);
+  }, [coachReplyEvent]);
 
   useEffect(() => {
     if (!refinedPreview) {
@@ -371,13 +386,7 @@ export function ChatPanel({
             <div className="chat-composer">
               <ChatContextPicker
                 skillCatalog={catalogSkills}
-                onContextChange={({ skills }) => {
-                  setChatSkillIds(
-                    Object.entries(skills)
-                      .filter(([, on]) => on)
-                      .map(([id]) => id),
-                  );
-                }}
+                onContextChange={handleContextChange}
               />
               <textarea
                 className="mech-textarea"

@@ -28,6 +28,8 @@ import {
 
   type CoachChatContext,
 
+  type CoachChatTurn,
+
   type ModelSettingsSlice,
 
   type RefineInput,
@@ -45,6 +47,7 @@ import {
   COACH_REFINE_SYSTEM,
 
   buildAgentSystemPrompt,
+  buildChatUserPrompt,
 
   buildRefineUserPrompt,
 
@@ -354,6 +357,8 @@ export async function coachAgentReplyLlm(
 
   env?: LlmEnv,
 
+  chatHistory: CoachChatTurn[] = [],
+
 ): Promise<AgentChatResponse> {
 
   const creds = resolveLlmCredentials(settings, "coach", env);
@@ -376,7 +381,7 @@ export async function coachAgentReplyLlm(
 
       system: buildAgentSystemPrompt(context),
 
-      prompt: `${message.trim()}\n\n字段 message 必填；需要派单时填 refined。`,
+      prompt: buildChatUserPrompt(message, chatHistory),
 
     });
 

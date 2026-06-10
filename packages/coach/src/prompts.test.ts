@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentSystemPrompt,
+  buildChatUserPrompt,
   buildWorkspaceInspectRefined,
   isWorkspaceInspectIntent,
 } from "./prompts.js";
@@ -34,6 +35,19 @@ describe("buildWorkspaceInspectRefined", () => {
     expect(refined.executionPrompt).toContain("C:\\Projects\\demo");
     expect(refined.executionPrompt).toContain("看看文件夹里有什么");
     expect(refined.constraints.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildChatUserPrompt", () => {
+  it("includes prior turns before current message", () => {
+    const prompt = buildChatUserPrompt("继续刚才那个", [
+      { role: "user", text: "帮我整理登录 API" },
+      { role: "coach", text: "好的，我先看一下任务情况。" },
+    ]);
+    expect(prompt).toContain("对话历史");
+    expect(prompt).toContain("帮我整理登录 API");
+    expect(prompt).toContain("继续刚才那个");
+    expect(prompt.indexOf("帮我整理登录 API")).toBeLessThan(prompt.indexOf("继续刚才那个"));
   });
 });
 

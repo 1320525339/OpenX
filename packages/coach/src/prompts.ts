@@ -10,7 +10,12 @@ export const COACH_REFINE_SYSTEM = `# OpenX 工头 · 目标整理
 
 语言：简体中文。executionPrompt 应像 Mission Control / Aider Architect 给工人的 brief：清晰、可执行、无歧义。`;
 
-import type { CoachChatContext, CoachGoalBrief, GoalFeedback } from "@openx/shared";
+import type {
+  CoachChatContext,
+  CoachChatTurn,
+  CoachGoalBrief,
+  GoalFeedback,
+} from "@openx/shared";
 
 function formatFeedbackBlock(feedback?: GoalFeedback): string {
   if (!feedback) return "";
@@ -267,6 +272,39 @@ export function buildAgentSystemPrompt(context: CoachChatContext): string {
     sectionExamples(),
     sectionRuntimeContext(context),
   ].join("\n\n");
+}
+
+const DEFAULT_HISTORY_CHAR_BUDGET = 12_000;
+
+/** 将历史轮次与当前用户消息拼成单次 LLM user prompt */
+export function buildChatUserPrompt(
+  message: string,
+  history: CoachChatTurn[] = [],
+  maxHistoryChars = DEFAULT_HISTORY_CHAR_BUDGET,
+): string {
+  const lines: string[] = [];
+
+  if (history.length > 0) {
+    lines.push("## 对话历史（同一助手会话，请连贯理解上文）");
+    let used = 0;
+    for (const turn of history) {
+      const label = turn.role === "user" ? "用户" : "工头";
+      const line = `${label}：${turn.text.trim()}`;
+      if (used + line.length > maxHistoryChars) {
+        lines.push("…（更早的历史已省略）");
+        break;
+      }
+      lines.push(line);
+      used += line.length;
+    }
+    lines.push("");
+  }
+
+  lines.push("## 当前用户消息");
+  lines.push(message.trim());
+  lines.push("");
+  lines.push("字段 message 必填；需要派单时填 refined。");
+  return lines.join("\n");
 }
 
 /** @deprecated 使用 buildAgentSystemPrompt */

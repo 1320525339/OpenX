@@ -35,9 +35,12 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
     setSkills(loadSkillSelection(skillCatalog));
   }, [skillCatalog.map((s) => `${s.id}:${s.installed}`).join("|")]);
 
+  const onContextChangeRef = useRef(onContextChange);
+  onContextChangeRef.current = onContextChange;
+
   useEffect(() => {
-    onContextChange?.({ skills, mcps, agentId });
-  }, [skills, mcps, agentId, onContextChange]);
+    onContextChangeRef.current?.({ skills, mcps, agentId });
+  }, [skills, mcps, agentId]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {

@@ -1,67 +1,133 @@
-import type { ExecutorInfo, ModelRuntime } from "../api";
+import { useMemo } from "react";
+import type { Conversation, Goal, Project } from "@openx/shared";
+import type { AppView } from "./SideNav";
+import { goalStatusText } from "../lib/goal-detail";
 
-export type ExecutorScope = "all" | string;
-
-type Props = {
-  executorScope: ExecutorScope;
-  onExecutorScopeChange: (scope: ExecutorScope) => void;
-  executors: ExecutorInfo[];
-  sseStatus: "connected" | "reconnecting" | "disconnected";
-  coachRuntime?: ModelRuntime | null;
+const FILTER_LABELS: Record<string, string> = {
+  all: "全部",
+  draft: "先放着",
+  running: "正在推进",
+  awaiting_review: "等你确认",
+  done: "已完成",
+  failed: "卡住了",
+  rework: "需要返工",
+  cancelled: "已取消",
 };
 
-export function TopBar({
-  executorScope,
-  onExecutorScopeChange,
-  executors,
-  sseStatus,
-  coachRuntime,
-}: Props) {
-  const standbyLabel =
-    sseStatus === "connected"
-      ? "待命"
-      : sseStatus === "reconnecting"
-        ? "连接中"
-        : "已断开";
+type Props = {
+  view: AppView;
+  goals: Goal[];
+  statusFilter: string;
+  filteredCount: number;
+  detailGoal?: Goal;
+  selectedProject?: Project;
+  selectedConversation?: Conversation;
+  sseStatus: "connected" | "reconnecting" | "disconnected";
+  onUrgentClick?: (goalId: string) => void;
+  onNewGoal?: () => void;
+};
 
-  const coachMode = coachRuntime?.ready ? "智能" : "基础";
-  const modelLabel = coachRuntime?.ready
-    ? `${coachRuntime.slug ?? "模型"} · ${coachRuntime.model ?? ""}`
-    : "规则模板";
+function countByStatus(goals: Goal[], status: Goal["status"]) {
+  return goals.filter((g) => g.status === status).length;
+}
+
+export function TopBar({
+  view,
+  goals,
+  statusFilter,
+  filteredCount,
+  detailGoal,
+  selectedProject,
+  selectedConversation,
+  sseStatus,
+  onUrgentClick,
+  onNewGoal,
+}: Props) {
+  const stats = useMemo(
+    () => ({
+      total: goals.length,
+      running: countByStatus(goals, "running"),
+      review: countByStatus(goals, "awaiting_review"),
+    }),
+    [goals],
+  );
+
+  const urgentGoal = useMemo(() => {
+    const review = goals.find((g) => g.status === "awaiting_review");
+    if (review) return review;
+    return goals.find((g) => g.status === "failed") ?? null;
+  }, [goals]);
+
+  const sseWarning =
+    sseStatus === "disconnected"
+      ? "与后台断开"
+      : sseStatus === "reconnecting"
+        ? "连接中…"
+        : null;
+
+  let primary = "";
+  let secondary = "";
+
+  if (detailGoal) {
+    primary = detailGoal.title;
+    secondary = `${goalStatusText(detailGoal)} · ${detailGoal.progress}%`;
+  } else if (view === "conversation" && selectedConversation) {
+    primary = selectedConversation.title;
+    secondary = selectedProject
+      ? `${selectedProject.name} · ${FILTER_LABELS[statusFilter] ?? statusFilter} ${filteredCount}`
+      : `${FILTER_LABELS[statusFilter] ?? statusFilter} ${filteredCount}`;
+    if (stats.running > 0 || stats.review > 0) {
+      secondary += ` · ${stats.running} 进行中 · ${stats.review} 待确认`;
+    }
+  } else if (view === "project" && selectedProject) {
+    primary = selectedProject.name;
+    const projectGoalCount = goals.length;
+    secondary =
+      projectGoalCount > 0
+        ? `${projectGoalCount} 个任务 · ${selectedProject.workspaceDir}`
+        : selectedProject.workspaceDir;
+  } else if (view === "console") {
+    primary = "调度台";
+    secondary = `${stats.running} 进行中 · ${stats.review} 待确认 · 系统任务池`;
+  } else if (view === "home") {
+    primary = "首页";
+    const urgent = goals.filter(
+      (g) =>
+        g.status === "awaiting_review" ||
+        g.status === "failed" ||
+        g.effectStatus === "rework",
+    ).length;
+    secondary = urgent > 0 ? `${urgent} 项需要你关注` : "跨项目态势";
+  }
 
   return (
     <header className="app-topbar" aria-label="运行台顶栏">
-      <div className="topbar-group">
-        <label className="topbar-label" htmlFor="executor-scope">
-          执行范围
-        </label>
-        <select
-          id="executor-scope"
-          className="topbar-select"
-          value={executorScope}
-          onChange={(e) => onExecutorScopeChange(e.target.value)}
-        >
-          <option value="all">全部</option>
-          {executors.map((ex) => (
-            <option key={ex.id} value={ex.id}>
-              {ex.displayName}
-              {!ex.available ? "（离线）" : ""}
-            </option>
-          ))}
-        </select>
+      <div className="topbar-primary">
+        <span className="topbar-title">{primary}</span>
+        {secondary ? <span className="topbar-meta">{secondary}</span> : null}
       </div>
 
-      <div className="topbar-status">
-        <span className={`topbar-led ${sseStatus}`} aria-hidden />
-        <span>{standbyLabel}</span>
-        <span className={`coach-status-badge${coachRuntime?.ready ? " llm" : ""}`}>
-          {coachMode}模式
-        </span>
-        {coachRuntime?.ready && (
-          <span className="topbar-model" title={coachRuntime.baseUrl}>
-            {modelLabel}
-          </span>
-        )}
+      <div className="topbar-actions">
+        {sseWarning ? (
+          <span className={`topbar-alert ${sseStatus}`}>{sseWarning}</span>
+        ) : null}
+
+        {!detailGoal && urgentGoal && onUrgentClick && view === "home" ? (
+          <button
+            type="button"
+            className="topbar-urgent"
+            onClick={() => onUrgentClick(urgentGoal.id)}
+          >
+            「{urgentGoal.title}」
+            {urgentGoal.status === "awaiting_review" ? "等你确认" : "卡住了"} →
+          </button>
+        ) : null}
+
+        {!detailGoal && view === "conversation" && onNewGoal ? (
+          <button type="button" className="btn compact primary" onClick={onNewGoal}>
+            ＋ 新目标
+          </button>
+        ) : null}
       </div>
     </header>
   );

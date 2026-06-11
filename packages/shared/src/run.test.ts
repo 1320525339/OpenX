@@ -64,6 +64,27 @@ describe("applyRunStreamEvent", () => {
     expect(state.active).toBe(false);
     expect(state.liveText).toBe("done");
   });
+
+  it("accumulates thinking deltas", () => {
+    let state = createEmptyRunState("g1");
+    state = applyRunStreamEvent(state, {
+      type: "run.start",
+      runId: "r1",
+      executorId: "pi",
+      timestamp: ts,
+    });
+    state = applyRunStreamEvent(state, {
+      type: "thinking.delta",
+      delta: "let me ",
+      timestamp: ts,
+    });
+    state = applyRunStreamEvent(state, {
+      type: "thinking.delta",
+      delta: "think",
+      timestamp: ts,
+    });
+    expect(state.thinkingText).toBe("let me think");
+  });
 });
 
 describe("applyRunDelta", () => {
@@ -81,5 +102,24 @@ describe("applyRunDelta", () => {
       timestamp: ts,
     });
     expect(state.events.some((e) => e.type === "tool.start")).toBe(true);
+  });
+
+  it("applies tool.update with toolCallId", () => {
+    let state = createEmptyRunState("g1");
+    state = applyRunDelta(state, {
+      type: "tool.start",
+      tool: "read",
+      toolCallId: "tc-1",
+      timestamp: ts,
+    });
+    state = applyRunDelta(state, {
+      type: "tool.update",
+      tool: "read",
+      toolCallId: "tc-1",
+      outputPreview: "partial output",
+      timestamp: ts,
+    });
+    const update = state.events.find((e) => e.type === "tool.update");
+    expect(update && "outputPreview" in update && update.outputPreview).toBe("partial output");
   });
 });

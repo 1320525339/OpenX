@@ -13,6 +13,10 @@
     "./skills-path": {
       "types": "./dist/skills-path.d.ts",
       "import": "./dist/skills-path.js"
+    },
+    "./agents-path": {
+      "types": "./dist/agents-path.d.ts",
+      "import": "./dist/agents-path.js"
     }
   },
   "scripts": {

@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Settings } from "@openx/shared";
+import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
 
 /** 将 settings.workspaceRoot 解析为绝对路径 */
 export function resolveWorkspaceRoot(workspaceRoot: string): string {
@@ -15,11 +16,13 @@ export function normalizeWorkspaceRootForStorage(workspaceRoot: string): string 
 
 export type SettingsWithWorkspaceResolved = Settings & {
   workspaceResolved: string;
+  systemWorkspaceResolved: string;
 };
 
 export function withWorkspaceResolved(settings: Settings): SettingsWithWorkspaceResolved {
   return {
     ...settings,
     workspaceResolved: resolveWorkspaceRoot(settings.workspaceRoot),
+    systemWorkspaceResolved: resolveSystemWorkspaceRoot(settings),
   };
 }

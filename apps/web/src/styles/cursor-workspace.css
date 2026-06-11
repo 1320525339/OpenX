@@ -1,0 +1,483 @@
+/* Cursor 极简工作区：助手 + 目标双栏 */
+
+.cursor-workspace {
+  --split-divider-w: var(--pane-divider-hit, 7px);
+}
+
+/* 分隔线样式见 layout-shell.css */
+
+.cursor-workspace .split-workspace-divider,
+.cursor-workspace .pane-divider {
+  border: none;
+  background: transparent;
+}
+
+.cursor-workspace .split-workspace-divider::before,
+.cursor-workspace .pane-divider::before {
+  display: none;
+}
+
+/* ── 面板通用 ── */
+
+.cursor-workspace .workspace-pane .mech-panel-head {
+  display: none;
+}
+
+.cursor-workspace .workspace-pane .mech-panel-body {
+  padding: 0;
+}
+
+/* ── 目标区工具栏（Cursor Tab 风格） ── */
+
+.cursor-workspace .tasks-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+.cursor-workspace .filter-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+
+.cursor-workspace .filter-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.cursor-workspace .filter-tabs .filter-chip {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.cursor-workspace .filter-tabs .filter-chip:hover {
+  color: var(--text);
+  background: transparent;
+}
+
+.cursor-workspace .filter-tabs .filter-chip.active {
+  color: var(--text);
+  background: transparent;
+  border-bottom-color: var(--text);
+  font-weight: 600;
+}
+
+.cursor-workspace .tasks-edit-toggle {
+  flex-shrink: 0;
+  margin-bottom: 0.35rem;
+  font-size: 0.72rem;
+}
+
+.cursor-workspace .btn-text {
+  padding: 0.2rem 0.35rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.cursor-workspace .btn-text:hover {
+  color: var(--accent);
+  background: var(--hover-bg);
+}
+
+/* ── 目标列表：紧凑行 ── */
+
+.cursor-workspace .panel-scroll {
+  gap: 0 !important;
+}
+
+.cursor-workspace .goal-card {
+  padding: 0.5rem 0.15rem;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.cursor-workspace .goal-card:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.cursor-workspace .goal-card.selected {
+  background: rgba(0, 0, 0, 0.03);
+  border-bottom-color: var(--border);
+}
+
+.cursor-workspace .goal-card.awaiting_review.selected {
+  background: rgba(255, 149, 0, 0.04);
+}
+
+.cursor-workspace .progress-ring {
+  width: 1.85rem;
+  height: 1.85rem;
+  font-size: 0.58rem;
+  border-width: 2px;
+}
+
+.cursor-workspace .goal-card-title {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.cursor-workspace .goal-card:not(.selected) .progress-bar {
+  opacity: 0.55;
+}
+
+.cursor-workspace .goal-card.selected .progress-bar {
+  height: 2px;
+  margin-top: 0.35rem;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.cursor-workspace .goal-card.selected .progress-bar span {
+  background: var(--text-dim);
+}
+
+.cursor-workspace .goal-card-acceptance {
+  font-size: 0.68rem;
+  margin-top: 0.25rem;
+  -webkit-line-clamp: 2;
+}
+
+.cursor-workspace .goal-card-meta {
+  font-size: 0.65rem;
+  margin-top: 0.2rem;
+}
+
+.cursor-workspace .status-pill,
+.cursor-workspace .executor-tag {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.65rem;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.cursor-workspace .goal-actions {
+  margin-top: 0.45rem;
+  gap: 0.3rem;
+}
+
+.cursor-workspace .goal-actions .btn {
+  padding: 0.32rem 0.65rem;
+  font-size: 0.72rem;
+}
+
+.cursor-workspace .goal-actions .btn.primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: var(--primary-bg);
+}
+
+.cursor-workspace .goal-actions .btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.cursor-workspace .tasks-panel-footer {
+  padding-top: 0.35rem;
+  border-top: 0;
+}
+
+.cursor-workspace .tasks-new-goal {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.cursor-workspace .tasks-new-goal:hover {
+  color: var(--accent);
+}
+
+.cursor-workspace .empty-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding: 0.75rem 0.15rem;
+}
+
+/* ── 助手对话：Cursor 聊天风格 ── */
+
+.cursor-workspace .chat-panel-body {
+  height: 100%;
+}
+
+.cursor-workspace .chat-scroll-region {
+  flex: 1 1 auto;
+}
+
+.cursor-workspace .chat-thread {
+  padding-block: 0.5rem 0.75rem;
+}
+
+.cursor-workspace .chat-turn {
+  margin-bottom: 0.85rem;
+}
+
+.cursor-workspace .chat-turn-user {
+  align-items: flex-end;
+}
+
+.cursor-workspace .chat-bubble {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.cursor-workspace .chat-bubble.coach {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  width: 100%;
+  max-width: 100%;
+}
+
+.cursor-workspace .chat-bubble.user {
+  background: var(--bubble-user-bg);
+  color: var(--bubble-user-fg);
+  max-width: min(100%, 28rem);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+}
+
+.cursor-workspace .chat-bubble.warn {
+  background: rgba(255, 149, 0, 0.08);
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+}
+
+.cursor-workspace .chat-dock {
+  padding-top: 0;
+  overflow: visible;
+}
+
+.cursor-workspace .chat-dock-inner {
+  padding-block: 0.4rem 0.35rem;
+}
+
+.cursor-workspace .chat-context-tabs {
+  gap: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+
+.cursor-workspace .chat-context-tab {
+  font-size: var(--type-meta);
+  font-weight: var(--weight-regular);
+  padding: 0.28rem 0.4rem 0.32rem;
+}
+
+.cursor-workspace .chat-context-tab.open {
+  font-weight: var(--weight-medium);
+  border-bottom-color: var(--accent);
+  background: transparent;
+}
+
+.cursor-workspace .chat-composer-actions .btn.primary {
+  padding: 0.32rem 0.7rem;
+  font-size: var(--type-body);
+}
+
+.cursor-workspace .chat-composer-actions .btn.primary:disabled {
+  opacity: 0.35;
+}
+
+.cursor-workspace .chat-context-banner {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-dropdown);
+}
+
+.cursor-workspace .refined-preview {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ── 任务详情侧栏（我的任务页） ── */
+
+.cursor-workspace .task-detail-panel .mech-panel-head {
+  display: flex;
+  padding: 0.35rem 0 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.cursor-workspace .task-detail-panel .mech-panel-head h3 {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* ── 调度台 ── */
+
+.console-workspace .console-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow: auto;
+}
+
+.console-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.65rem 0.75rem;
+}
+
+.console-section-pool {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+}
+
+.console-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.console-section-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.console-section-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.console-muted {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.console-cli-list,
+.console-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.console-cli-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.console-cli-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.console-cli-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.console-review-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.console-review-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.console-review-title {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.console-review-meta {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  color: var(--orange, #c2410c);
+}
+
+.console-cli-card-online {
+  border-color: rgba(22, 163, 74, 0.35);
+  background: rgba(22, 163, 74, 0.04);
+}
+
+.console-cli-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.console-cli-kind {
+  font-size: 0.6875rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.console-cli-kind.connect {
+  border-color: rgba(37, 99, 235, 0.35);
+  color: #2563eb;
+}
+
+.console-cli-kind.acp {
+  border-color: rgba(124, 58, 237, 0.35);
+  color: #7c3aed;
+}
+
+.console-cli-status-ok {
+  color: #15803d;
+}
+
+.console-hint {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.console-section-pool .tasks-panel {
+  flex: 1;
+  min-height: 0;
+}

@@ -7,6 +7,8 @@ import {
   GOAL_API_TEST_TIMEOUT_MS,
   MOCK_PI_TIMEOUT_MS,
   REAL_ENV_TIMEOUT_MS,
+  seedTestProjectAndConversation,
+  TEST_CONVERSATION_ID,
   waitForGoalStatus,
 } from "./test-helpers.js";
 
@@ -38,10 +40,15 @@ async function patch(path: string, body: unknown) {
   });
 }
 
+function goalBody(body: Record<string, unknown> = {}) {
+  return { conversationId: TEST_CONVERSATION_ID, ...body };
+}
+
 describe("goals API", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
     enableMockPi();
   });
 
@@ -52,11 +59,11 @@ describe("goals API", () => {
   });
 
   it("deletes goal permanently", async () => {
-    const create = await post("/api/goals", {
+    const create = await post("/api/goals", goalBody({
       userDraft: "待删除",
       executorId: "pi",
       autoStart: false,
-    });
+    }));
     expect(create.status).toBe(201);
     const { goal } = (await create.json()) as { goal: { id: string } };
 
@@ -70,8 +77,8 @@ describe("goals API", () => {
   });
 
   it("batch deletes multiple goals", async () => {
-    const a = await post("/api/goals", { userDraft: "A", executorId: "pi", autoStart: false });
-    const b = await post("/api/goals", { userDraft: "B", executorId: "pi", autoStart: false });
+    const a = await post("/api/goals", goalBody({ userDraft: "A", executorId: "pi", autoStart: false }));
+    const b = await post("/api/goals", goalBody({ userDraft: "B", executorId: "pi", autoStart: false }));
     const ga = (await a.json()) as { goal: { id: string } };
     const gb = (await b.json()) as { goal: { id: string } };
 
@@ -98,28 +105,30 @@ describe("goals API", () => {
       }),
     });
 
-    const res = await post("/api/goals", {
+    const res = await post("/api/goals", goalBody({
       userDraft: "写单元测试",
       executorId: "pi",
       autoStart: false,
-    });
+    }));
     expect(res.status).toBe(201);
     const { goal } = (await res.json()) as { goal: { status: string; executorId: string } };
     expect(goal.status).toBe("draft");
-    expect(goal.executorId).toBe("pi");
+    // executorId 等于默认执行器时视为未明确选择，允许规则推荐覆盖（去偏置后
+    // 本地任务可能推荐 ACP CLI），结果依赖本机检测到的执行器，仅断言非空
+    expect(goal.executorId).toBeTruthy();
   });
 
   it(
     "creates and auto-starts with Pi executor",
     async () => {
-      const res = await post("/api/goals", {
+      const res = await post("/api/goals", goalBody({
         userDraft: "只回复 OK，不要调用任何工具",
         title: "Pi 冒烟",
         acceptance: "回复包含 OK",
         executionPrompt: "只回复 OK，不要调用任何工具，不要读写文件。",
         executorId: "pi",
         autoStart: true,
-      });
+      }));
       expect(res.status).toBe(201);
       const { goal } = (await res.json()) as { goal: { status: string; id: string } };
       expect(goal.status).toBe("running");
@@ -135,13 +144,13 @@ describe("goals API", () => {
   it(
     "approve only from awaiting_review",
     async () => {
-      const create = await post("/api/goals", {
+      const create = await post("/api/goals", goalBody({
         userDraft: "只回复 OK，不要调用任何工具",
         title: "验收流",
         acceptance: "回复包含 OK",
         executionPrompt: "只回复 OK，不要调用任何工具。",
         autoStart: false,
-      });
+      }));
       const { goal } = (await create.json()) as { goal: { id: string } };
 
       const badApprove = await post(`/api/goals/${goal.id}/approve`);
@@ -164,13 +173,13 @@ describe("goals API", () => {
   it(
     "rework only from awaiting_review",
     async () => {
-      const create = await post("/api/goals", {
+      const create = await post("/api/goals", goalBody({
         userDraft: "只回复 OK，不要调用任何工具",
         title: "返工流",
         acceptance: "回复包含 OK",
         executionPrompt: "只回复 OK，不要调用任何工具。",
         autoStart: false,
-      });
+      }));
       const { goal } = (await create.json()) as { goal: { id: string } };
 
       const bad = await post(`/api/goals/${goal.id}/rework`, { reason: "太早" });
@@ -199,6 +208,7 @@ describe("coach API", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
   });
 
   afterEach(() => {
@@ -228,7 +238,10 @@ describe("coach API", () => {
   it(
     "coach chat returns reply via real LLM",
     async () => {
-      const res = await post("/api/coach/chat", { message: "最近任务情况" });
+      const res = await post("/api/coach/chat", {
+        conversationId: TEST_CONVERSATION_ID,
+        message: "最近任务情况",
+      });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { message: string };
       expect(body.message.length).toBeGreaterThan(0);
@@ -239,8 +252,13 @@ describe("coach API", () => {
   it(
     "persists coach messages",
     async () => {
-      await post("/api/coach/chat", { message: "你好" });
-      const res = await app.request("/api/coach/messages");
+      await post("/api/coach/chat", {
+        conversationId: TEST_CONVERSATION_ID,
+        message: "你好",
+      });
+      const res = await app.request(
+        `/api/coach/messages?conversationId=${TEST_CONVERSATION_ID}`,
+      );
       const { messages } = (await res.json()) as {
         messages: { role: string; text: string }[];
       };
@@ -344,6 +362,7 @@ describe("connect API", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
     resetConnections();
     enableMockPi();
   });
@@ -371,14 +390,14 @@ describe("connect API", () => {
       };
       expect(conn.executorId).toBe("pi");
 
-      const create = await post("/api/goals", {
+      const create = await post("/api/goals", goalBody({
         userDraft: "只回复 OK，不要调用任何工具",
         title: "connect 测试",
         acceptance: "回复包含 OK",
         executionPrompt: "只回复 OK，不要调用任何工具。",
         executorId: "pi",
         autoStart: false,
-      });
+      }));
       expect(create.status).toBe(201);
       const { goal } = (await create.json()) as { goal: { id: string } };
 
@@ -407,4 +426,18 @@ describe("connect API", () => {
     },
     GOAL_API_TEST_TIMEOUT_MS,
   );
+});
+
+describe("catalog API", () => {
+  it("returns machine-readable API catalog", async () => {
+    const res = await app.request("/api/catalog");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      meta: { endpointCount: number; mcpServerId: string };
+      endpoints: { id: string; path: string }[];
+    };
+    expect(body.meta.mcpServerId).toBe("openx");
+    expect(body.meta.endpointCount).toBeGreaterThan(40);
+    expect(body.endpoints.some((e) => e.id === "goals_create")).toBe(true);
+  });
 });

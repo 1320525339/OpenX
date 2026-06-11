@@ -1,0 +1,222 @@
+/* 三栏壳层：侧栏 | 任务 | 对话 — 统一分割线与贴边布局 */
+
+:root {
+  --pane-divider-hit: 7px;
+}
+
+/* ── 应用壳：可拖拽侧栏 + 主栏 ── */
+
+.app-shell-split {
+  display: grid;
+  align-items: stretch;
+  height: var(--shell-h);
+  max-height: var(--shell-h);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.app-shell-split > .app-sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+.app-shell-split > .app-main-column {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-shell-divider.pane-divider {
+  align-self: stretch;
+}
+
+/* ── 统一分割线：细线居中，热区与视觉一致 ── */
+
+.pane-divider {
+  position: relative;
+  flex-shrink: 0;
+  touch-action: none;
+  z-index: 3;
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pane-divider-vertical {
+  width: var(--pane-divider-hit);
+  cursor: col-resize;
+}
+
+.pane-divider-horizontal {
+  height: var(--pane-divider-hit);
+  width: 100%;
+  cursor: row-resize;
+}
+
+.pane-divider::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  background: var(--divider);
+  transition: background 0.12s ease;
+}
+
+.pane-divider-vertical::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.pane-divider-horizontal::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.pane-divider:hover::after,
+.pane-divider:focus-visible::after,
+body.split-dragging .pane-divider::after {
+  background: var(--divider-hover);
+}
+
+.pane-divider:focus-visible {
+  outline: none;
+}
+
+/* ── 工作区分栏 ── */
+
+.split-workspace {
+  --split-divider-w: var(--pane-divider-hit);
+}
+
+.split-workspace-left,
+.split-workspace-right {
+  padding: 0;
+}
+
+.split-workspace-divider,
+.split-workspace .pane-divider {
+  border: none;
+  background: transparent;
+}
+
+.split-workspace-divider::before {
+  display: none;
+}
+
+.split-workspace-swap {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    opacity 0.15s ease;
+}
+
+.pane-divider:hover .split-workspace-swap,
+.pane-divider:focus-within .split-workspace-swap {
+  opacity: 1;
+}
+
+.split-workspace-swap svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.split-workspace-swap:hover {
+  color: var(--accent);
+  border-color: rgba(0, 113, 227, 0.35);
+}
+
+.split-workspace-swap:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+body.split-dragging .split-workspace-swap {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+body.split-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.split-dragging * {
+  cursor: col-resize !important;
+}
+
+/* ── 工作区面板：统一内边距与顶栏分隔线 ── */
+
+.app-minimal .app-main {
+  padding: 0;
+}
+
+.app-minimal .app-topbar {
+  padding-inline: var(--space-page-x);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-minimal .workspace-pane {
+  padding-inline: var(--space-page-x);
+  box-sizing: border-box;
+}
+
+.app-minimal .tasks-toolbar,
+.app-minimal .workspace-pane-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  min-height: 2.05rem;
+  margin-inline: calc(-1 * var(--space-page-x));
+  padding-inline: var(--space-page-x);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-minimal .workspace-pane-head-title {
+  font-size: var(--type-meta);
+  color: var(--text-dim);
+  padding-bottom: 0.32rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-minimal .cursor-workspace .chat-column {
+  padding-inline: 0;
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+}
+
+.app-minimal .cursor-workspace .chat-dock {
+  margin-inline: calc(-1 * var(--space-page-x));
+  padding-inline: var(--space-page-x);
+  border-top: 1px solid var(--border);
+}

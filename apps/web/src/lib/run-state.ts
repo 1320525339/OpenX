@@ -64,3 +64,28 @@ export function hydrateRunState(
 ): Record<string, GoalRunState> {
   return { ...runs, [goalId]: run };
 }
+
+/** SSE 断线后对账：在本地更完整时保留本地，否则采用服务端快照 */
+export function reconcileRunState(
+  existing: GoalRunState | undefined,
+  fetched: GoalRunState,
+): GoalRunState {
+  if (!existing) return fetched;
+  const localScore =
+    existing.events.length * 1000 +
+    existing.liveText.length +
+    (existing.thinkingText?.length ?? 0);
+  const remoteScore =
+    fetched.events.length * 1000 +
+    fetched.liveText.length +
+    (fetched.thinkingText?.length ?? 0);
+  if (localScore > remoteScore) {
+    return {
+      ...existing,
+      active: fetched.active,
+      runId: fetched.runId || existing.runId,
+      executorId: fetched.executorId || existing.executorId,
+    };
+  }
+  return fetched;
+}

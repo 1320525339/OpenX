@@ -1,0 +1,25 @@
+{
+  "name": "@openx/mcp-openx",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "openx-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "test": "node --experimental-vm-modules node_modules/vitest/vitest.mjs run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "@openx/shared": "workspace:*",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

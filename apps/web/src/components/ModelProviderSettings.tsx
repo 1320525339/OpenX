@@ -79,6 +79,11 @@ function addManualModel(editor: EditorState, modelId: string): EditorState | nul
   };
 }
 
+function roleStatusLabel(runtime: ModelRuntime | undefined): string {
+  if (!runtime) return "—";
+  return runtime.ready ? "已连接" : "待配置";
+}
+
 export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
   const [templates, setTemplates] = useState<LlmTemplateInfo[]>([]);
   const [status, setStatus] = useState<{ coach: ModelRuntime; pi: ModelRuntime } | null>(null);
@@ -92,6 +97,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
 
   const providers = settings.providers ?? {};
   const modelRefs = listConfiguredModelRefs(settings);
+  const hasZen = Object.values(providers).some((p) => p.source?.template === "opencode-zen");
 
   const refreshStatus = useCallback(() => {
     void api.getModelStatus().then(setStatus).catch(() => setStatus(null));
@@ -211,7 +217,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
   };
 
   const removeProvider = async (slug: string) => {
-    if (!confirm(`确定删除渠道「${slug}」？将从 config.json 移除。`)) return;
+    if (!confirm(`确定删除渠道「${slug}」？`)) return;
     setBusy(true);
     try {
       const result = await api.deleteModelProvider(slug);
@@ -244,92 +250,94 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
   const others = templates.filter((t) => !t.popular);
 
   return (
-    <div className="model-provider-settings">
-      <h4 className="settings-section-title">LLM 模型 · JSON 渠道池</h4>
-      <p className="settings-hint">
-        配置写入 ~/.openx/config.json 的 providers 字段。新增/删除与 JSON 一一对应。
-      </p>
+    <section className="settings-section model-provider-settings">
+      <h4 className="settings-section-title">模型渠道</h4>
 
-      <div className="provider-quick-actions">
+      {!hasZen && !editor && (
+        <div className="provider-quick-actions">
+          <button
+            type="button"
+            className="btn primary compact"
+            disabled={busy}
+            onClick={() => void applyZenPreset()}
+          >
+            应用 OpenCode Zen 免费预设
+          </button>
+        </div>
+      )}
+
+      <div className="model-role-grid">
+        <div className="model-role-field">
+          <label className="field-label">助手模型</label>
+          <select
+            className="field-input"
+            value={settings.model?.coach ?? ""}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                model: { ...settings.model!, coach: e.target.value },
+              })
+            }
+          >
+            {modelRefs.map((m) => (
+              <option key={m.ref} value={m.ref}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <span className={`model-role-status${status?.coach.ready ? " ok" : ""}`}>
+            {roleStatusLabel(status?.coach)}
+          </span>
+        </div>
+
+        <div className="model-role-field">
+          <label className="field-label">Pi 执行模型</label>
+          <select
+            className="field-input"
+            value={settings.model?.pi ?? ""}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                model: { ...settings.model!, pi: e.target.value },
+              })
+            }
+          >
+            {modelRefs.map((m) => (
+              <option key={m.ref} value={m.ref}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <span className={`model-role-status${status?.pi.ready ? " ok" : ""}`}>
+            {roleStatusLabel(status?.pi)}
+          </span>
+        </div>
+      </div>
+
+      <div className="model-role-actions">
         <button
           type="button"
-          className="btn primary compact"
-          disabled={busy}
-          onClick={() => void applyZenPreset()}
+          className="btn compact"
+          disabled={testing}
+          onClick={() => void testProvider()}
         >
-          应用 OpenCode Zen 免费预设
+          {testing ? "测试中…" : "测试助手连接"}
         </button>
-      </div>
-
-      <div className={`provider-current${status?.coach.ready ? " connected" : ""}`}>
-        <div className="provider-current-head">
-          <strong>助手（Coach）</strong>
-          <span className={`provider-status${status?.coach.ready ? " ok" : ""}`}>
-            {status?.coach.ready ? "已连接" : "待配置"}
-          </span>
-        </div>
-        {status?.coach.ref && (
-          <p className="settings-hint">
-            {status.coach.ref}
-            {status.coach.baseUrl ? ` · ${status.coach.baseUrl}` : ""}
-          </p>
+        {hasZen && !editor && (
+          <button
+            type="button"
+            className="btn compact"
+            disabled={busy}
+            onClick={() => void applyZenPreset()}
+          >
+            重置 Zen 预设
+          </button>
         )}
       </div>
-
-      <div className={`provider-current${status?.pi.ready ? " connected" : ""}`}>
-        <div className="provider-current-head">
-          <strong>执行（Pi）</strong>
-          <span className={`provider-status${status?.pi.ready ? " ok" : ""}`}>
-            {status?.pi.ready ? "已连接" : "待配置"}
-          </span>
-        </div>
-        {status?.pi.ref && (
-          <p className="settings-hint">
-            {status.pi.ref}
-            {status.pi.baseUrl ? ` · ${status.pi.baseUrl}` : ""}
-          </p>
-        )}
-      </div>
-
-      <label className="field-label">助手模型</label>
-      <select
-        className="field-input"
-        value={settings.model?.coach ?? ""}
-        onChange={(e) =>
-          onChange({
-            ...settings,
-            model: { ...settings.model!, coach: e.target.value },
-          })
-        }
-      >
-        {modelRefs.map((m) => (
-          <option key={m.ref} value={m.ref}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-
-      <label className="field-label">Pi 执行模型</label>
-      <select
-        className="field-input"
-        value={settings.model?.pi ?? ""}
-        onChange={(e) =>
-          onChange({
-            ...settings,
-            model: { ...settings.model!, pi: e.target.value },
-          })
-        }
-      >
-        {modelRefs.map((m) => (
-          <option key={m.ref} value={m.ref}>
-            {m.label}
-          </option>
-        ))}
-      </select>
 
       <div className="provider-section-label">已配置渠道</div>
       {Object.keys(providers).length === 0 ? (
-        <p className="settings-hint">暂无渠道，请从下方模板添加。</p>
+        <p className="settings-hint settings-hint-tight">暂无渠道，请从下方模板添加。</p>
       ) : (
         <ul className="provider-list">
           {Object.entries(providers).map(([slug, config]) => (
@@ -337,15 +345,15 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
               <div>
                 <strong>{config.name}</strong>
                 <span className="provider-list-slug">{slug}</span>
-                <p className="settings-hint">{config.api.baseUrl}</p>
+                <p className="settings-hint settings-hint-tight">{config.api.baseUrl}</p>
               </div>
               <div className="provider-list-actions">
-                <button type="button" className="btn" onClick={() => startEdit(slug)}>
+                <button type="button" className="btn compact" onClick={() => startEdit(slug)}>
                   编辑
                 </button>
                 <button
                   type="button"
-                  className="btn"
+                  className="btn compact"
                   disabled={busy}
                   onClick={() => void removeProvider(slug)}
                 >
@@ -396,7 +404,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
             {editor.mode === "add" ? "新增渠道" : "编辑渠道"}
           </h4>
 
-          <label className="field-label">Slug（JSON key）</label>
+          <label className="field-label">Slug</label>
           <input
             className="field-input"
             value={editor.slug}
@@ -489,10 +497,10 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
               </button>
             </div>
           </div>
-          {fetchNotice && <p className="settings-hint">{fetchNotice}</p>}
+          {fetchNotice && <p className="settings-hint settings-hint-tight">{fetchNotice}</p>}
           {Object.keys(editor.config.models).length === 0 ? (
-            <p className="settings-hint">
-              暂无模型。请填写 API Key 后点击「自动获取模型列表」，或手动添加模型 ID。
+            <p className="settings-hint settings-hint-tight">
+              填写 API Key 后获取模型列表，或手动添加模型 ID。
             </p>
           ) : (
             <ul className="provider-model-list">
@@ -529,16 +537,16 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
           <div className="provider-editor-actions">
             <button
               type="button"
-              className="btn"
+              className="btn compact"
               disabled={testing}
               onClick={() => void testProvider(editor.slug, editor.config)}
             >
               {testing ? "测试中…" : "测试连接"}
             </button>
-            <button type="button" className="btn primary" disabled={busy} onClick={() => void saveProvider()}>
-              {busy ? "保存中…" : "写入 JSON"}
+            <button type="button" className="btn primary compact" disabled={busy} onClick={() => void saveProvider()}>
+              {busy ? "保存中…" : "保存渠道"}
             </button>
-            <button type="button" className="btn" onClick={() => setEditor(null)}>
+            <button type="button" className="btn compact" onClick={() => setEditor(null)}>
               取消
             </button>
           </div>
@@ -546,15 +554,6 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
       )}
 
       {error && <p className="settings-hint warn">{error}</p>}
-
-      <button
-        type="button"
-        className="btn provider-test-btn"
-        disabled={testing}
-        onClick={() => void testProvider()}
-      >
-        {testing ? "测试中…" : "测试当前助手模型"}
-      </button>
-    </div>
+    </section>
   );
 }

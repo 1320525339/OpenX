@@ -5,15 +5,21 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from "react";
 import type {
   BatchGoalsAction,
+  CoachIntent,
+  CoachMessageRecord,
+  Conversation,
   Goal,
   GoalRunState,
+  Project,
   RefinedGoal,
   SseEvent,
 } from "@openx/shared";
+import { SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
 import {
   api,
   connectEvents,
@@ -21,9 +27,21 @@ import {
   type ModelRuntime,
   type SettingsResponse,
 } from "../api";
-import { handleRunEnded, handleRunEvent, handleRunStarted } from "./run-state";
+import {
+  handleRunEnded,
+  handleRunEvent,
+  handleRunStarted,
+  hydrateRunState,
+  reconcileRunState,
+} from "./run-state";
+import {
+  islandAlertFromGoalChange,
+  islandAlertFromMessage,
+  type IslandAlert,
+} from "./island-alert";
 import type { AppView } from "../components/SideNav";
-import type { ExecutorScope } from "../components/TopBar";
+
+export type ExecutorScope = "all" | string;
 
 export type LogEntry = {
   goalId: string;
@@ -35,20 +53,34 @@ export type LogEntry = {
 export type SseStatus = "connected" | "reconnecting" | "disconnected";
 
 export type CoachReplyEvent = {
+  conversationId: string;
   message: string;
   timestamp: string;
+  intent?: CoachIntent;
   refined?: RefinedGoal;
+  suggestRefine?: boolean;
   meta?: { llmError?: string; quotaExceeded?: boolean };
+};
+
+export type CoachStreamState = {
+  conversationId: string;
+  streamId: string;
+  text: string;
 };
 
 type AppState = {
   view: AppView;
+  projects: Project[];
+  conversations: Conversation[];
+  selectedProjectId: string | null;
+  selectedConversationId: string | null;
+  expandedProjectIds: Set<string>;
   goals: Goal[];
   selectedId: string | null;
   settings: SettingsResponse | null;
   executors: ExecutorInfo[];
   coachRuntime: ModelRuntime | null;
-  broadcastHistory: string[];
+  islandAlert: IslandAlert | null;
   sseStatus: SseStatus;
   logs: LogEntry[];
   runs: Record<string, GoalRunState>;
@@ -61,11 +93,22 @@ type AppState = {
   settingsTab: "general" | "tools";
   loadError: string | null;
   coachReplyEvent: CoachReplyEvent | null;
+  coachStream: CoachStreamState | null;
+  coachMessageEvent: CoachMessageRecord | null;
   detailGoalId: string | null;
 };
 
 type Action =
-  | { type: "set_view"; view: AppView }
+  | { type: "set_view"; view: AppView; statusFilter?: string }
+  | { type: "set_workspace_tree"; projects: Project[]; conversations: Conversation[] }
+  | { type: "open_console"; projectId: string; conversationId: string }
+  | { type: "open_project"; projectId: string }
+  | { type: "open_conversation"; projectId: string; conversationId: string; goalId?: string }
+  | { type: "toggle_project_expanded"; projectId: string }
+  | { type: "upsert_project"; project: Project }
+  | { type: "upsert_conversation"; conversation: Conversation }
+  | { type: "remove_project"; projectId: string }
+  | { type: "remove_conversation"; conversationId: string }
   | { type: "set_goals"; goals: Goal[] }
   | { type: "patch_goal"; goal: Goal }
   | { type: "remove_goal"; goalId: string }
@@ -73,7 +116,9 @@ type Action =
   | { type: "set_settings"; settings: SettingsResponse }
   | { type: "set_executors"; executors: ExecutorInfo[] }
   | { type: "set_coach_runtime"; runtime: ModelRuntime | null }
-  | { type: "push_broadcast"; message: string }
+  | { type: "show_island"; alert: IslandAlert }
+  | { type: "dismiss_island" }
+  | { type: "push_broadcast"; message: string; goalId?: string; kind?: IslandAlert["kind"] }
   | { type: "set_sse_status"; status: SseStatus }
   | { type: "append_log"; log: LogEntry }
   | { type: "set_runs"; updater: (prev: Record<string, GoalRunState>) => Record<string, GoalRunState> }
@@ -88,19 +133,39 @@ type Action =
   | { type: "set_settings_tab"; tab: "general" | "tools" }
   | { type: "set_load_error"; error: string | null }
   | { type: "coach_reply"; event: CoachReplyEvent }
+  | {
+      type: "coach_delta";
+      event: {
+        conversationId: string;
+        streamId: string;
+        delta: string;
+        timestamp: string;
+      };
+    }
+  | {
+      type: "coach_stream_end";
+      conversationId: string;
+      streamId: string;
+    }
+  | { type: "coach_message"; message: CoachMessageRecord }
   | { type: "open_goal_detail"; id: string }
   | { type: "close_goal_detail" };
 
-const INITIAL_BROADCAST = "欢迎使用 OpenX — 说出目标，我会帮你整理、推进和提醒确认。";
+const LAST_CONV_KEY = "openx.lastConversationId";
 
 const initialState: AppState = {
-  view: "home",
+  view: "console",
+  projects: [],
+  conversations: [],
+  selectedProjectId: SYSTEM_PROJECT_ID,
+  selectedConversationId: SYSTEM_MAIN_CONVERSATION_ID,
+  expandedProjectIds: new Set(),
   goals: [],
   selectedId: null,
   settings: null,
   executors: [],
   coachRuntime: null,
-  broadcastHistory: [INITIAL_BROADCAST],
+  islandAlert: null,
   sseStatus: "reconnecting",
   logs: [],
   runs: {},
@@ -113,12 +178,12 @@ const initialState: AppState = {
   settingsTab: "general",
   loadError: null,
   coachReplyEvent: null,
+  coachStream: null,
+  coachMessageEvent: null,
   detailGoalId: null,
 };
 
-function viewDefaultFilter(view: AppView): string {
-  if (view === "running") return "running";
-  if (view === "review") return "awaiting_review";
+function viewDefaultFilter(_view: AppView): string {
   return "all";
 }
 
@@ -128,20 +193,141 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         view: action.view,
-        statusFilter: viewDefaultFilter(action.view),
+        statusFilter: action.statusFilter ?? viewDefaultFilter(action.view),
         tasksEditMode: false,
         tasksSelectedIds: new Set(),
         detailGoalId: null,
+        ...(action.view === "home"
+          ? { selectedProjectId: null, selectedConversationId: null }
+          : {}),
       };
+    case "set_workspace_tree":
+      return {
+        ...state,
+        projects: action.projects,
+        conversations: action.conversations,
+      };
+    case "open_console": {
+      try {
+        localStorage.setItem(LAST_CONV_KEY, action.conversationId);
+      } catch {
+        /* ignore */
+      }
+      return {
+        ...state,
+        view: "console",
+        selectedProjectId: action.projectId,
+        selectedConversationId: action.conversationId,
+        detailGoalId: null,
+        tasksEditMode: false,
+        tasksSelectedIds: new Set(),
+      };
+    }
+    case "open_project": {
+      const expanded = new Set(state.expandedProjectIds);
+      expanded.add(action.projectId);
+      return {
+        ...state,
+        view: "project",
+        selectedProjectId: action.projectId,
+        selectedConversationId: null,
+        detailGoalId: null,
+        expandedProjectIds: expanded,
+      };
+    }
+    case "open_conversation": {
+      const expanded = new Set(state.expandedProjectIds);
+      expanded.add(action.projectId);
+      try {
+        localStorage.setItem(LAST_CONV_KEY, action.conversationId);
+      } catch {
+        /* ignore */
+      }
+      return {
+        ...state,
+        view: "conversation",
+        selectedProjectId: action.projectId,
+        selectedConversationId: action.conversationId,
+        selectedId: action.goalId ?? state.selectedId,
+        detailGoalId: null,
+        expandedProjectIds: expanded,
+      };
+    }
+    case "toggle_project_expanded": {
+      const next = new Set(state.expandedProjectIds);
+      if (next.has(action.projectId)) next.delete(action.projectId);
+      else next.add(action.projectId);
+      return { ...state, expandedProjectIds: next };
+    }
+    case "upsert_project": {
+      const idx = state.projects.findIndex((p) => p.id === action.project.id);
+      const projects =
+        idx >= 0
+          ? state.projects.map((p, i) => (i === idx ? action.project : p))
+          : [...state.projects, action.project];
+      const expanded = new Set(state.expandedProjectIds);
+      expanded.add(action.project.id);
+      return { ...state, projects, expandedProjectIds: expanded };
+    }
+    case "upsert_conversation": {
+      const idx = state.conversations.findIndex((c) => c.id === action.conversation.id);
+      const conversations =
+        idx >= 0
+          ? state.conversations.map((c, i) => (i === idx ? action.conversation : c))
+          : [action.conversation, ...state.conversations];
+      return { ...state, conversations };
+    }
+    case "remove_project": {
+      const convIds = new Set(
+        state.conversations.filter((c) => c.projectId === action.projectId).map((c) => c.id),
+      );
+      const expanded = new Set(state.expandedProjectIds);
+      expanded.delete(action.projectId);
+      return {
+        ...state,
+        projects: state.projects.filter((p) => p.id !== action.projectId),
+        conversations: state.conversations.filter((c) => c.projectId !== action.projectId),
+        goals: state.goals.filter((g) => !convIds.has(g.conversationId)),
+        expandedProjectIds: expanded,
+        selectedProjectId:
+          state.selectedProjectId === action.projectId ? null : state.selectedProjectId,
+        selectedConversationId: convIds.has(state.selectedConversationId ?? "")
+          ? null
+          : state.selectedConversationId,
+        view:
+          state.selectedProjectId === action.projectId ||
+          convIds.has(state.selectedConversationId ?? "")
+            ? "home"
+            : state.view,
+      };
+    }
+    case "remove_conversation": {
+      return {
+        ...state,
+        conversations: state.conversations.filter((c) => c.id !== action.conversationId),
+        goals: state.goals.filter((g) => g.conversationId !== action.conversationId),
+        selectedConversationId:
+          state.selectedConversationId === action.conversationId
+            ? null
+            : state.selectedConversationId,
+        view:
+          state.selectedConversationId === action.conversationId ? "home" : state.view,
+      };
+    }
     case "set_goals":
       return { ...state, goals: action.goals, loadError: null };
     case "patch_goal": {
       const idx = state.goals.findIndex((g) => g.id === action.goal.id);
+      const prev = idx >= 0 ? state.goals[idx] : undefined;
       const goals =
         idx >= 0
           ? state.goals.map((g, i) => (i === idx ? action.goal : g))
           : [action.goal, ...state.goals];
-      return { ...state, goals };
+      const islandAlert =
+        prev != null
+          ? (islandAlertFromGoalChange(prev, action.goal) ?? state.islandAlert)
+          : state.islandAlert;
+      return { ...state, goals, islandAlert };
     }
     case "remove_goal": {
       const tasksSelectedIds = new Set(state.tasksSelectedIds);
@@ -162,10 +348,17 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, executors: action.executors };
     case "set_coach_runtime":
       return { ...state, coachRuntime: action.runtime };
+    case "show_island":
+      return { ...state, islandAlert: action.alert };
+    case "dismiss_island":
+      return { ...state, islandAlert: null };
     case "push_broadcast":
       return {
         ...state,
-        broadcastHistory: [...state.broadcastHistory.slice(-4), action.message],
+        islandAlert: islandAlertFromMessage(action.message, {
+          goalId: action.goalId,
+          kind: action.kind ?? "info",
+        }),
       };
     case "set_sse_status":
       return { ...state, sseStatus: action.status };
@@ -201,8 +394,42 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, settingsTab: action.tab };
     case "set_load_error":
       return { ...state, loadError: action.error };
+    case "coach_delta": {
+      const { conversationId, streamId, delta } = action.event;
+      const prev = state.coachStream;
+      if (
+        prev &&
+        prev.conversationId === conversationId &&
+        prev.streamId === streamId
+      ) {
+        return {
+          ...state,
+          coachStream: { ...prev, text: prev.text + delta },
+        };
+      }
+      return {
+        ...state,
+        coachStream: { conversationId, streamId, text: delta },
+      };
+    }
+    case "coach_stream_end": {
+      const stream = state.coachStream;
+      if (
+        stream &&
+        stream.conversationId === action.conversationId &&
+        stream.streamId === action.streamId
+      ) {
+        return { ...state, coachStream: null };
+      }
+      return state;
+    }
+    case "coach_message":
+      return { ...state, coachMessageEvent: action.message };
     case "coach_reply":
-      return { ...state, coachReplyEvent: action.event };
+      return {
+        ...state,
+        coachReplyEvent: action.event,
+      };
     case "open_goal_detail":
       return { ...state, detailGoalId: action.id, selectedId: action.id };
     case "close_goal_detail":
@@ -216,9 +443,13 @@ type AppContextValue = {
   state: AppState;
   dispatch: React.Dispatch<Action>;
   refreshGoals: () => Promise<void>;
+  refreshProjects: () => Promise<void>;
   refreshMeta: () => Promise<void>;
   refreshExecutors: () => Promise<void>;
+  createProject: (workspaceDir: string) => Promise<Project | null>;
+  createConversation: (projectId: string) => Promise<Conversation | null>;
   saveWorkspace: (path: string) => Promise<void>;
+  saveSystemWorkspace: (path: string) => Promise<void>;
   goalActions: {
     onApprove: (id: string) => Promise<void>;
     onRework: (id: string, reason?: string) => Promise<void>;
@@ -227,16 +458,40 @@ type AppContextValue = {
   };
   handleTasksBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
   filteredGoals: Goal[];
+  conversationGoals: Goal[];
   selected: Goal | undefined;
-  runningCount: number;
-  reviewCount: number;
+  selectedProject: Project | undefined;
+  selectedConversation: Conversation | undefined;
+  inboxBadgeCount: number;
+  consoleBadgeCount: number;
   tasksSelectedGoals: Goal[];
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+function collectRunReconcileGoalIds(
+  runs: Record<string, GoalRunState>,
+  goals: Goal[],
+  conversationId: string | null,
+): string[] {
+  const ids = new Set<string>();
+  for (const [goalId, run] of Object.entries(runs)) {
+    if (run.active) ids.add(goalId);
+  }
+  for (const goal of goals) {
+    if (goal.status !== "running" && goal.status !== "awaiting_review") continue;
+    if (conversationId && goal.conversationId !== conversationId) continue;
+    ids.add(goal.id);
+  }
+  return [...ids];
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const hydratedRunIdsRef = useRef(new Set<string>());
+  const restoredConvRef = useRef(false);
 
   const refreshGoals = useCallback(async () => {
     try {
@@ -255,17 +510,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "set_executors", executors });
   }, []);
 
+  const reconcileActiveRuns = useCallback(async () => {
+    const snapshot = stateRef.current;
+    const goalIds = collectRunReconcileGoalIds(
+      snapshot.runs,
+      snapshot.goals,
+      snapshot.selectedConversationId,
+    );
+    if (goalIds.length === 0) return;
+
+    await Promise.all(
+      goalIds.map(async (goalId) => {
+        try {
+          const { run } = await api.getGoalRun(goalId);
+          if (!run) return;
+          dispatch({
+            type: "set_runs",
+            updater: (prev) => ({
+              ...prev,
+              [goalId]: reconcileRunState(prev[goalId], run),
+            }),
+          });
+        } catch {
+          /* ignore reconcile errors */
+        }
+      }),
+    );
+  }, []);
+
   const refreshMeta = useCallback(async () => {
     try {
-      const [settings, executorsRes, modelStatus] = await Promise.all([
-        api.getSettings(),
-        api.getExecutors(),
-        api.getModelStatus().catch(() => null),
-      ]);
+      const settings = await api.getSettings();
       dispatch({ type: "set_settings", settings });
-      dispatch({ type: "set_executors", executors: executorsRes.executors });
-      dispatch({ type: "set_coach_runtime", runtime: modelStatus?.coach ?? null });
       dispatch({ type: "set_load_error", error: null });
+
+      void api
+        .getExecutors()
+        .then((executorsRes) => {
+          dispatch({ type: "set_executors", executors: executorsRes.executors });
+        })
+        .catch(() => {
+          /* 执行器探测可后台重试 */
+        });
+
+      void api
+        .getModelStatus()
+        .then((modelStatus) => {
+          dispatch({ type: "set_coach_runtime", runtime: modelStatus?.coach ?? null });
+        })
+        .catch(() => {
+          /* ignore */
+        });
     } catch (err) {
       dispatch({
         type: "set_load_error",
@@ -274,10 +569,195 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshBootstrap = useCallback(async () => {
+    try {
+      const boot = await api.getBootstrap();
+      dispatch({ type: "set_settings", settings: boot.settings });
+      dispatch({
+        type: "set_workspace_tree",
+        projects: boot.projects,
+        conversations: boot.conversations,
+      });
+      dispatch({ type: "upsert_project", project: boot.system.project });
+      dispatch({ type: "upsert_conversation", conversation: boot.system.conversation });
+      dispatch({
+        type: "set_coach_runtime",
+        runtime: {
+          ready: boot.coach.ready,
+          slug: boot.coach.slug,
+          model: boot.coach.model,
+          baseUrl: boot.coach.baseUrl,
+          error: boot.coach.error,
+        },
+      });
+      dispatch({ type: "set_load_error", error: null });
+
+      void api
+        .getExecutors()
+        .then((executorsRes) => {
+          dispatch({ type: "set_executors", executors: executorsRes.executors });
+        })
+        .catch(() => {
+          /* 执行器探测可后台重试 */
+        });
+    } catch (err) {
+      // 旧版 server 或无 /api/bootstrap 时降级为拆分 API，避免整页卡在加载失败
+      try {
+        const settings = await api.getSettings();
+        dispatch({ type: "set_settings", settings });
+        const projectsRes = await api.getProjects();
+        dispatch({
+          type: "set_workspace_tree",
+          projects: projectsRes.projects,
+          conversations: projectsRes.conversations,
+        });
+        void api
+          .getSystemConsole()
+          .then((consoleRes) => {
+            dispatch({ type: "upsert_project", project: consoleRes.project });
+            dispatch({ type: "upsert_conversation", conversation: consoleRes.conversation });
+          })
+          .catch(() => {
+            /* 调度台元数据可稍后刷新 */
+          });
+        const modelStatus = await api.getModelStatus().catch(() => null);
+        dispatch({
+          type: "set_coach_runtime",
+          runtime: modelStatus?.coach ?? null,
+        });
+        dispatch({ type: "set_load_error", error: null });
+
+        void api
+          .getExecutors()
+          .then((executorsRes) => {
+            dispatch({ type: "set_executors", executors: executorsRes.executors });
+          })
+          .catch(() => {
+            /* 执行器探测可后台重试 */
+          });
+      } catch (fallbackErr) {
+        dispatch({
+          type: "set_load_error",
+          error:
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : err instanceof Error
+                ? err.message
+                : "加载启动数据失败",
+        });
+      }
+    }
+  }, []);
+
+  const refreshProjects = useCallback(async () => {
+    try {
+      const projectsRes = await api.getProjects();
+      dispatch({
+        type: "set_workspace_tree",
+        projects: projectsRes.projects,
+        conversations: projectsRes.conversations,
+      });
+      void api.getSystemConsole().then((consoleRes) => {
+        dispatch({ type: "upsert_project", project: consoleRes.project });
+        dispatch({ type: "upsert_conversation", conversation: consoleRes.conversation });
+      }).catch(() => {
+        /* 调度台元数据可稍后由 ConsolePage 刷新 */
+      });
+    } catch (err) {
+      dispatch({
+        type: "set_load_error",
+        error: err instanceof Error ? err.message : "加载项目失败",
+      });
+    }
+  }, []);
+
+  const createProject = useCallback(
+    async (workspaceDir: string) => {
+      try {
+        const { project } = await api.createProject({ workspaceDir });
+        dispatch({ type: "upsert_project", project });
+        const { conversation } = await api.createConversation(project.id);
+        dispatch({ type: "upsert_conversation", conversation });
+        dispatch({
+          type: "open_conversation",
+          projectId: project.id,
+          conversationId: conversation.id,
+        });
+        return project;
+      } catch (err) {
+        dispatch({
+          type: "push_broadcast",
+          message: `添加项目失败：${err instanceof Error ? err.message : String(err)}`,
+          kind: "error",
+        });
+        return null;
+      }
+    },
+    [],
+  );
+
+  const createConversation = useCallback(async (projectId: string) => {
+    try {
+      const { conversation } = await api.createConversation(projectId);
+      dispatch({ type: "upsert_conversation", conversation });
+      dispatch({
+        type: "open_conversation",
+        projectId,
+        conversationId: conversation.id,
+      });
+      return conversation;
+    } catch (err) {
+      dispatch({
+        type: "push_broadcast",
+        message: `创建对话失败：${err instanceof Error ? err.message : String(err)}`,
+        kind: "error",
+      });
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     void refreshGoals();
-    void refreshMeta();
-  }, [refreshGoals, refreshMeta]);
+    void refreshBootstrap();
+  }, [refreshGoals, refreshBootstrap]);
+
+  useEffect(() => {
+    if (restoredConvRef.current || state.conversations.length === 0) return;
+    restoredConvRef.current = true;
+
+    let last: string | null = null;
+    try {
+      last = localStorage.getItem(LAST_CONV_KEY);
+    } catch {
+      /* ignore */
+    }
+
+    if (last) {
+      const conv = state.conversations.find((c) => c.id === last);
+      if (conv) {
+        if (conv.id === SYSTEM_MAIN_CONVERSATION_ID) {
+          dispatch({
+            type: "open_console",
+            projectId: SYSTEM_PROJECT_ID,
+            conversationId: SYSTEM_MAIN_CONVERSATION_ID,
+          });
+        } else {
+          dispatch({
+            type: "open_conversation",
+            projectId: conv.projectId,
+            conversationId: conv.id,
+          });
+        }
+        return;
+      }
+    }
+
+    dispatch({
+      type: "open_console",
+      projectId: SYSTEM_PROJECT_ID,
+      conversationId: SYSTEM_MAIN_CONVERSATION_ID,
+    });
+  }, [state.conversations]);
 
   useEffect(() => {
     return connectEvents({
@@ -319,18 +799,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (event.type === "log.append") {
           dispatch({ type: "append_log", log: event });
         }
-        if (event.type === "narration.append") {
-          dispatch({ type: "push_broadcast", message: event.message });
+        if (event.type === "coach.delta") {
+          dispatch({
+            type: "coach_delta",
+            event: {
+              conversationId: event.conversationId,
+              streamId: event.streamId,
+              delta: event.delta,
+              timestamp: event.timestamp,
+            },
+          });
+        }
+        if (event.type === "coach.stream.end") {
+          dispatch({
+            type: "coach_stream_end",
+            conversationId: event.conversationId,
+            streamId: event.streamId,
+          });
+        }
+        if (event.type === "coach.message") {
+          dispatch({ type: "coach_message", message: event.message });
         }
         if (event.type === "coach.reply") {
           dispatch({
             type: "coach_reply",
             event: {
+              conversationId: event.conversationId,
               message: event.message,
               timestamp: event.timestamp,
+              intent: event.intent,
               refined: event.refined,
+              suggestRefine: event.suggestRefine,
               meta: event.meta,
             },
+          });
+        }
+        if (event.type === "narration.append") {
+          dispatch({
+            type: "push_broadcast",
+            message: event.message,
+            kind: "info",
           });
         }
       },
@@ -340,7 +848,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onOpen: () => dispatch({ type: "set_sse_status", status: "connected" }),
       onError: () => dispatch({ type: "set_sse_status", status: "reconnecting" }),
     });
-  }, [refreshGoals]);
+  }, [refreshGoals, refreshProjects, reconcileActiveRuns]);
+
+  useEffect(() => {
+    const goalIds = new Set<string>();
+    if (state.selectedId) goalIds.add(state.selectedId);
+    if (state.detailGoalId) goalIds.add(state.detailGoalId);
+
+    for (const goalId of goalIds) {
+      if (hydratedRunIdsRef.current.has(goalId)) continue;
+      hydratedRunIdsRef.current.add(goalId);
+      void api.getGoalRun(goalId).then(({ run }) => {
+        if (!run || (run.events.length === 0 && !run.liveText)) return;
+        dispatch({
+          type: "set_runs",
+          updater: (prev) => {
+            const existing = prev[goalId];
+            if (existing?.active) return prev;
+            if (
+              existing &&
+              existing.events.length >= run.events.length &&
+              existing.liveText.length >= run.liveText.length
+            ) {
+              return prev;
+            }
+            return hydrateRunState(prev, goalId, run);
+          },
+        });
+      }).catch(() => {
+        /* ignore hydrate errors */
+      });
+    }
+  }, [state.selectedId, state.detailGoalId]);
+
+  useEffect(() => {
+    if (!state.selectedConversationId) return;
+    const activeGoals = state.goals.filter(
+      (g) =>
+        g.conversationId === state.selectedConversationId &&
+        (g.status === "running" || g.status === "awaiting_review"),
+    );
+    for (const goal of activeGoals) {
+      if (hydratedRunIdsRef.current.has(goal.id)) continue;
+      hydratedRunIdsRef.current.add(goal.id);
+      void api.getGoalRun(goal.id).then(({ run }) => {
+        if (!run || (run.events.length === 0 && !run.liveText)) return;
+        dispatch({
+          type: "set_runs",
+          updater: (prev) => {
+            const existing = prev[goal.id];
+            if (existing?.active) return prev;
+            if (
+              existing &&
+              existing.events.length >= run.events.length &&
+              existing.liveText.length >= run.liveText.length
+            ) {
+              return prev;
+            }
+            return hydrateRunState(prev, goal.id, run);
+          },
+        });
+      }).catch(() => {
+        /* ignore hydrate errors */
+      });
+    }
+  }, [state.selectedConversationId, state.goals]);
 
   const saveWorkspace = useCallback(
     async (path: string) => {
@@ -349,6 +921,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "set_settings", settings: saved });
     },
     [state.settings],
+  );
+
+  const saveSystemWorkspace = useCallback(
+    async (path: string) => {
+      if (!state.settings) return;
+      const saved = await api.putSettings({
+        ...state.settings,
+        systemWorkspaceRoot: path,
+      });
+      dispatch({ type: "set_settings", settings: saved });
+      await refreshProjects();
+    },
+    [state.settings, refreshProjects],
   );
 
   const goalActions = useMemo(
@@ -360,6 +945,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({
             type: "push_broadcast",
             message: `确认失败：${err instanceof Error ? err.message : String(err)}`,
+            kind: "error",
           });
         }
       },
@@ -370,16 +956,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({
             type: "push_broadcast",
             message: `返工失败：${err instanceof Error ? err.message : String(err)}`,
+            kind: "error",
           });
         }
       },
       onStart: async (id: string) => {
         try {
-          await api.startGoal(id);
+          const goal = state.goals.find((g) => g.id === id);
+          if (goal?.status === "failed") {
+            await api.retryGoal(id);
+          } else {
+            await api.startGoal(id);
+          }
         } catch (err) {
           dispatch({
             type: "push_broadcast",
             message: `启动失败：${err instanceof Error ? err.message : String(err)}`,
+            kind: "error",
           });
         }
       },
@@ -390,11 +983,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({
             type: "push_broadcast",
             message: `取消失败：${err instanceof Error ? err.message : String(err)}`,
+            kind: "error",
           });
         }
       },
     }),
-    [],
+    [state.goals],
   );
 
   const handleTasksBatchAction = useCallback(
@@ -413,6 +1007,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({
             type: "push_broadcast",
             message: `批量操作：成功 ${ok.length}，失败 ${failed.length}${sample ? `（${sample}）` : ""}`,
+            kind: "warning",
           });
         } else if (ok.length > 0) {
           const labels: Record<BatchGoalsAction, string> = {
@@ -421,35 +1016,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
             approve: "已确认完成",
             delete: "已删除",
           };
-          dispatch({ type: "push_broadcast", message: `${labels[action]} ${ok.length} 个目标` });
+          dispatch({
+            type: "push_broadcast",
+            message: `${labels[action]} ${ok.length} 个目标`,
+            kind: "success",
+          });
         }
       } catch (err) {
         dispatch({
           type: "push_broadcast",
           message: `批量操作失败：${err instanceof Error ? err.message : String(err)}`,
+          kind: "error",
         });
       }
     },
     [],
   );
 
-  const scopedGoals = useMemo(() => {
-    if (state.executorScope === "all") return state.goals;
-    return state.goals.filter((g) => g.executorId === state.executorScope);
-  }, [state.goals, state.executorScope]);
+  const conversationGoals = useMemo(() => {
+    if (!state.selectedConversationId) return [];
+    let scoped = state.goals.filter(
+      (g) => g.conversationId === state.selectedConversationId,
+    );
+    if (state.executorScope !== "all") {
+      scoped = scoped.filter((g) => g.executorId === state.executorScope);
+    }
+    return scoped;
+  }, [state.goals, state.selectedConversationId, state.executorScope]);
 
   const filteredGoals = useMemo(() => {
     const { statusFilter } = state;
-    if (statusFilter === "all") return scopedGoals;
+    if (statusFilter === "all") return conversationGoals;
     if (statusFilter === "rework") {
-      return scopedGoals.filter((g) => g.effectStatus === "rework");
+      return conversationGoals.filter((g) => g.effectStatus === "rework");
     }
-    return scopedGoals.filter((g) => g.status === statusFilter);
-  }, [scopedGoals, state.statusFilter]);
+    return conversationGoals.filter((g) => g.status === statusFilter);
+  }, [conversationGoals, state.statusFilter]);
 
   const selected = state.goals.find((g) => g.id === state.selectedId);
-  const runningCount = state.goals.filter((g) => g.status === "running").length;
-  const reviewCount = state.goals.filter((g) => g.status === "awaiting_review").length;
+  const selectedProject = state.projects.find((p) => p.id === state.selectedProjectId);
+  const selectedConversation = state.conversations.find(
+    (c) => c.id === state.selectedConversationId,
+  );
+  const inboxBadgeCount = state.goals.filter(
+    (g) =>
+      g.status === "awaiting_review" ||
+      g.status === "failed" ||
+      g.effectStatus === "rework",
+  ).length;
+  const consoleBadgeCount = useMemo(() => {
+    const systemActive = state.goals.filter(
+      (g) =>
+        g.conversationId === SYSTEM_MAIN_CONVERSATION_ID &&
+        (g.status === "running" || g.status === "awaiting_review"),
+    ).length;
+    const crossReview = state.goals.filter(
+      (g) =>
+        g.conversationId !== SYSTEM_MAIN_CONVERSATION_ID &&
+        g.status === "awaiting_review",
+    ).length;
+    return systemActive + crossReview;
+  }, [state.goals]);
   const tasksSelectedGoals = useMemo(
     () => state.goals.filter((g) => state.tasksSelectedIds.has(g.id)),
     [state.goals, state.tasksSelectedIds],
@@ -459,15 +1086,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     state,
     dispatch,
     refreshGoals,
+    refreshProjects,
     refreshMeta,
     refreshExecutors,
+    createProject,
+    createConversation,
     saveWorkspace,
+    saveSystemWorkspace,
     goalActions,
     handleTasksBatchAction,
     filteredGoals,
+    conversationGoals,
     selected,
-    runningCount,
-    reviewCount,
+    selectedProject,
+    selectedConversation,
+    inboxBadgeCount,
+    consoleBadgeCount,
     tasksSelectedGoals,
   };
 

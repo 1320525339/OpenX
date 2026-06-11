@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { RunDeltaEventSchema } from "@openx/shared";
+import { GoalDeliverableSchema, RunDeltaEventSchema } from "@openx/shared";
 import { getGoalById } from "../db.js";
 import { internalOnly } from "../internal-auth.js";
 import {
@@ -9,6 +9,7 @@ import {
   updateGoalProgress,
 } from "../goal-lifecycle.js";
 import { emitGoalRunEvent } from "../run-service.js";
+import { maybeAutoReview } from "../auto-review.js";
 
 export const internalRoutes = new Hono();
 internalRoutes.use("*", internalOnly);
@@ -29,9 +30,16 @@ internalRoutes.post("/goals/:id/progress", async (c) => {
 internalRoutes.post("/goals/:id/complete", async (c) => {
   const goalId = c.req.param("id");
   if (!getGoalById(goalId)) return c.json({ error: "Not found" }, 404);
-  const body = (await c.req.json()) as { resultSummary?: string };
-  const result = markGoalComplete(goalId, body.resultSummary ?? "");
+  const body = (await c.req.json()) as {
+    resultSummary?: string;
+    deliverables?: unknown;
+  };
+  const deliverables = body.deliverables
+    ? GoalDeliverableSchema.array().parse(body.deliverables)
+    : undefined;
+  const result = markGoalComplete(goalId, body.resultSummary ?? "", deliverables);
   if (!result.ok) return c.json({ error: result.error }, result.status);
+  void maybeAutoReview(goalId);
   return c.json({ ok: true });
 });
 

@@ -12,11 +12,16 @@ import {
   updateGoal,
 } from "./db.js";
 import type { Goal } from "@openx/shared";
+import {
+  seedTestProjectAndConversation,
+  TEST_CONVERSATION_ID,
+} from "./test-helpers.js";
 
 function makeGoal(overrides: Partial<Goal> = {}): Goal {
   const now = new Date().toISOString();
   return {
     id: nanoid(),
+    conversationId: TEST_CONVERSATION_ID,
     title: "测试目标",
     acceptance: "完成",
     executionPrompt: "执行",
@@ -36,6 +41,7 @@ describe("goal chain", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
   });
 
   afterEach(() => {

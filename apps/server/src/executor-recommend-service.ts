@@ -1,6 +1,7 @@
 import {
   collectGoalIntentText,
   detectGoalIntent,
+  EXECUTOR_AUTO,
   isClearRuleWinner,
   recommendExecutorId,
   type ExecutorRecommendation,
@@ -47,9 +48,13 @@ export async function resolveGoalExecutorId(
   settings: Settings,
   executors: ExecutorRow[],
 ): Promise<{ executorId: string; recommendReason?: string }> {
-  const requested = input.executorId ?? settings.defaultExecutorId;
-  if (input.executorId != null && input.executorId !== settings.defaultExecutorId) {
+  if (input.executorId != null) {
     return { executorId: input.executorId };
+  }
+
+  const requested = settings.defaultExecutorId;
+  if (requested !== EXECUTOR_AUTO) {
+    return { executorId: requested };
   }
 
   const rec = await recommendExecutorForGoal(input, executors, settings);

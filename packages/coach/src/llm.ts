@@ -10,7 +10,7 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
-import { generateObject } from "ai";
+import { generateObject, streamText } from "ai";
 
 import { z } from "zod";
 
@@ -47,13 +47,14 @@ import {
   COACH_REFINE_SYSTEM,
 
   buildAgentSystemPrompt,
+  buildChatStreamSystemPrompt,
   buildChatUserPrompt,
 
   buildRefineUserPrompt,
 
 } from "./prompts.js";
 
-import { formatCoachLlmError, isCoachParseError } from "./llm-errors.js";
+import { formatCoachLlmError, isCoachParseError, isCoachTimeoutError } from "./llm-errors.js";
 
 const JSON_ONLY_SUFFIX =
   "\n\n请以 JSON 对象回复，不要输出 markdown 代码块或推理过程。";
@@ -61,12 +62,30 @@ const JSON_ONLY_SUFFIX =
 const JSON_RETRY_SUFFIX =
   "\n\n重要：只输出一个合法 JSON 对象，字段必须完整，禁止空回复。";
 
+const COACH_LLM_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENX_COACH_LLM_TIMEOUT_MS ?? "45000",
+  10,
+);
+
+function coachLlmAbortSignal(): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), COACH_LLM_TIMEOUT_MS);
+  if (typeof timer === "object" && "unref" in timer) {
+    timer.unref();
+  }
+  return {
+    signal: controller.signal,
+    cancel: () => clearTimeout(timer),
+  };
+}
+
 async function generateCoachObject<T>(options: {
   model: ReturnType<ReturnType<typeof createOpenAICompatible>>;
   schema: z.ZodTypeAny;
   system: string;
   prompt: string;
 }): Promise<T> {
+  const { signal, cancel } = coachLlmAbortSignal();
   try {
     const { object } = await generateObject({
       model: options.model,
@@ -74,19 +93,29 @@ async function generateCoachObject<T>(options: {
       system: options.system,
       prompt: `${options.prompt.trim()}${JSON_ONLY_SUFFIX}`,
       temperature: 0,
+      abortSignal: signal,
     });
     return object as T;
   } catch (err) {
+    if (isCoachTimeoutError(err)) throw err;
     if (!isCoachParseError(err)) throw err;
-    const { object } = await generateObject({
-      model: options.model,
-      schema: options.schema,
-      system: `${options.system}\n\n你必须只输出 JSON，content 字段不能为空。`,
-      prompt: `${options.prompt.trim()}${JSON_RETRY_SUFFIX}`,
-      temperature: 0,
-      maxRetries: 0,
-    });
-    return object as T;
+    const retry = coachLlmAbortSignal();
+    try {
+      const { object } = await generateObject({
+        model: options.model,
+        schema: options.schema,
+        system: `${options.system}\n\n你必须只输出 JSON，content 字段不能为空。`,
+        prompt: `${options.prompt.trim()}${JSON_RETRY_SUFFIX}`,
+        temperature: 0,
+        maxRetries: 0,
+        abortSignal: retry.signal,
+      });
+      return object as T;
+    } finally {
+      retry.cancel();
+    }
+  } finally {
+    cancel();
   }
 }
 
@@ -174,6 +203,8 @@ const RefinedSubGoalLooseSchema = z.object({
 
   priority: z.enum(["low", "medium", "high", "critical"]).optional(),
 
+  dependsOnIndex: z.array(z.number().int().min(0)).optional(),
+
 });
 
 
@@ -181,9 +212,8 @@ const RefinedSubGoalLooseSchema = z.object({
 /** 兼容模型把 constraints 写成 string 的情况 */
 
 const AgentChatResponseLooseSchema = z.object({
-
   message: z.string(),
-
+  intent: z.enum(["task", "progress", "consult", "chitchat", "rework"]).optional(),
   refined: z
 
     .object({
@@ -195,6 +225,10 @@ const AgentChatResponseLooseSchema = z.object({
       executionPrompt: z.string(),
 
       constraints: z.union([z.array(z.string()), z.string()]).optional(),
+
+      executorId: z.string().optional(),
+
+      priority: z.enum(["low", "medium", "high", "critical"]).optional(),
 
       subGoals: z.array(RefinedSubGoalLooseSchema).optional(),
 
@@ -243,6 +277,8 @@ function parseSubGoals(raw?: z.infer<typeof RefinedSubGoalLooseSchema>[]): Refin
 
     priority: sg.priority,
 
+    dependsOnIndex: sg.dependsOnIndex,
+
   }));
 
 }
@@ -250,33 +286,29 @@ function parseSubGoals(raw?: z.infer<typeof RefinedSubGoalLooseSchema>[]): Refin
 
 
 function parseAgentReply(raw: z.infer<typeof AgentChatResponseLooseSchema>): AgentChatResponse {
-
-  if (!raw.refined) return { message: raw.message };
+  if (!raw.refined) return { message: raw.message, intent: raw.intent };
 
   const constraints = normalizeConstraints(raw.refined.constraints);
-
   const subGoals = parseSubGoals(raw.refined.subGoals);
 
   return {
-
     message: raw.message,
-
+    intent: raw.intent,
     refined: {
-
       title: raw.refined.title,
-
       acceptance: raw.refined.acceptance,
-
       executionPrompt: raw.refined.executionPrompt,
-
       constraints,
-
+      executorId:
+        raw.refined.executorId &&
+        raw.refined.executorId !== EXECUTOR_AUTO &&
+        isValidExecutorId(raw.refined.executorId)
+          ? raw.refined.executorId
+          : undefined,
+      priority: raw.refined.priority,
       subGoals,
-
     },
-
   };
-
 }
 
 
@@ -347,6 +379,55 @@ export async function refineGoalLlm(
 
 
 
+export type CoachChatStreamLlmOptions = {
+  promptMode?: "tool_continuation";
+};
+
+export async function coachChatStreamLlm(
+  message: string,
+  context: CoachChatContext & { defaultConstraints?: string[] },
+  settings: ModelSettingsSlice,
+  onDelta: (delta: string) => Promise<void>,
+  env?: LlmEnv,
+  chatHistory: CoachChatTurn[] = [],
+  options?: CoachChatStreamLlmOptions,
+): Promise<string> {
+  const creds = resolveLlmCredentials(settings, "coach", env);
+  if (!creds) {
+    throw new Error("模型未配置：请在设置中添加渠道并选择模型");
+  }
+
+  const { signal, cancel } = coachLlmAbortSignal();
+  try {
+    const result = streamText({
+      model: createModel(creds),
+      system: buildChatStreamSystemPrompt(context),
+      prompt: buildChatUserPrompt(message, chatHistory, undefined, {
+        jsonMode:
+          options?.promptMode === "tool_continuation"
+            ? "tool_continuation"
+            : false,
+      }),
+      temperature: 0.3,
+      abortSignal: signal,
+    });
+    let full = "";
+    for await (const delta of result.textStream) {
+      full += delta;
+      await onDelta(delta);
+    }
+    return full.trim();
+  } catch (err) {
+    wrapLlmError(err);
+  } finally {
+    cancel();
+  }
+}
+
+export type CoachAgentReplyLlmOptions = {
+  promptMode?: "tool_continuation";
+};
+
 export async function coachAgentReplyLlm(
 
   message: string,
@@ -358,6 +439,8 @@ export async function coachAgentReplyLlm(
   env?: LlmEnv,
 
   chatHistory: CoachChatTurn[] = [],
+
+  options?: CoachAgentReplyLlmOptions,
 
 ): Promise<AgentChatResponse> {
 
@@ -381,7 +464,12 @@ export async function coachAgentReplyLlm(
 
       system: buildAgentSystemPrompt(context),
 
-      prompt: buildChatUserPrompt(message, chatHistory),
+      prompt: buildChatUserPrompt(message, chatHistory, undefined, {
+        jsonMode:
+          options?.promptMode === "tool_continuation"
+            ? "tool_continuation"
+            : undefined,
+      }),
 
     });
 

@@ -1,5 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { listCoachMessages, resetDb, saveCoachMessage } from "./db.js";
+import { nanoid } from "nanoid";
+import { createEmptyRunState } from "@openx/shared";
+import {
+  hasCoachExecutionMessage,
+  listCoachMessages,
+  resetDb,
+  saveCoachExecutionMessage,
+  saveCoachMessage,
+  insertProject,
+  insertConversation,
+} from "./db.js";
+
+function seedConversation(id = "conv-a", projectId = `proj-${id}`) {
+  const now = new Date().toISOString();
+  insertProject({
+    id: projectId,
+    name: "Test",
+    workspaceDir: process.cwd(),
+    createdAt: now,
+  });
+  insertConversation({
+    id,
+    projectId,
+    title: "对话A",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
 
 describe("coach messages scope", () => {
   beforeEach(() => {
@@ -12,26 +40,73 @@ describe("coach messages scope", () => {
     delete process.env.OPENX_DB_PATH;
   });
 
-  it("global thread only includes goal_id IS NULL", () => {
-    saveCoachMessage(null, "user", "全局你好");
-    saveCoachMessage("goal-a", "user", "目标A专用");
-    saveCoachMessage(null, "coach", "全局回复");
+  it("conversation thread only includes its own messages", () => {
+    const convA = seedConversation("conv-a");
+    const convB = seedConversation("conv-b");
+    saveCoachMessage(convA, "user", "A你好");
+    saveCoachMessage(convA, "coach", "A回复");
+    saveCoachMessage(convB, "user", "B不应出现");
 
-    const globalMsgs = listCoachMessages(null);
-    expect(globalMsgs.map((m) => m.text)).toEqual(["全局你好", "全局回复"]);
+    const msgs = listCoachMessages(convA);
+    expect(msgs.map((m) => (m.kind === "text" ? m.text : m.kind))).toEqual([
+      "A你好",
+      "A回复",
+    ]);
   });
 
-  it("goal thread includes goal messages and global messages", () => {
-    saveCoachMessage(null, "user", "全局上下文");
-    saveCoachMessage("goal-a", "user", "关于A的问题");
-    saveCoachMessage("goal-a", "coach", "A的回复");
-    saveCoachMessage("goal-b", "user", "B不应出现");
+  it("different conversations are isolated", () => {
+    const convA = seedConversation("conv-a", "proj-a");
+    const now = new Date().toISOString();
+    insertConversation({
+      id: "conv-b",
+      projectId: "proj-a",
+      title: "对话B",
+      createdAt: now,
+      updatedAt: now,
+    });
+    saveCoachMessage(convA, "user", "仅A");
+    saveCoachMessage("conv-b", "user", "仅B");
 
-    const scoped = listCoachMessages("goal-a");
-    expect(scoped.map((m) => m.text)).toEqual([
-      "全局上下文",
-      "关于A的问题",
-      "A的回复",
-    ]);
+    expect(
+      listCoachMessages(convA)
+        .filter((m) => m.kind === "text")
+        .map((m) => m.text),
+    ).toEqual(["仅A"]);
+    expect(
+      listCoachMessages("conv-b")
+        .filter((m) => m.kind === "text")
+        .map((m) => m.text),
+    ).toEqual(["仅B"]);
+  });
+
+  it("persists execution snapshot messages", () => {
+    const convA = seedConversation("conv-a");
+    const run = {
+      ...createEmptyRunState("goal-1"),
+      runId: "run-1",
+      liveText: "done",
+      events: [
+        {
+          type: "text.delta" as const,
+          delta: "done",
+          timestamp: "2026-06-08T00:00:00.000Z",
+        },
+      ],
+    };
+    saveCoachExecutionMessage(convA, {
+      goalId: "goal-1",
+      goalTitle: "任务A",
+      goalStatus: "awaiting_review",
+      runId: "run-1",
+      run,
+    });
+    expect(hasCoachExecutionMessage(convA, "goal-1", "run-1")).toBe(true);
+    const msgs = listCoachMessages(convA);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.kind).toBe("execution");
+    if (msgs[0]?.kind === "execution") {
+      expect(msgs[0].execution.goalTitle).toBe("任务A");
+      expect(msgs[0].execution.run.liveText).toBe("done");
+    }
   });
 });

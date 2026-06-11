@@ -3,11 +3,16 @@ import { nanoid } from "nanoid";
 import type { Goal } from "@openx/shared";
 import { insertGoal, resetDb } from "./db.js";
 import { buildCoachChatContext, resolveNorthStarGoal } from "./coach-context.js";
+import {
+  seedTestProjectAndConversation,
+  TEST_CONVERSATION_ID,
+} from "./test-helpers.js";
 
 function makeGoal(overrides: Partial<Goal> & Pick<Goal, "title">): Goal {
   const now = new Date().toISOString();
   return {
     id: nanoid(),
+    conversationId: TEST_CONVERSATION_ID,
     title: overrides.title,
     acceptance: overrides.acceptance ?? "验收通过",
     executionPrompt: overrides.executionPrompt ?? "执行",
@@ -31,6 +36,7 @@ describe("coach-context", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
   });
 
   afterEach(() => {
@@ -67,7 +73,7 @@ describe("coach-context", () => {
     });
     insertGoal(sub);
 
-    const ctx = buildCoachChatContext(sub.id);
+    const ctx = buildCoachChatContext(TEST_CONVERSATION_ID, sub.id);
     expect(ctx.northStar?.title).toBe("搭建登录");
     expect(ctx.northStar?.acceptance).toBe("可登录");
     expect(ctx.subGoals?.some((g) => g.title === "写 API")).toBe(true);

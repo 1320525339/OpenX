@@ -1,5 +1,5 @@
-import type { SkillCatalogEntry } from "@openx/shared";
-import { CORE_SKILLS } from "@openx/shared";
+import type { AgentCatalogEntry, SkillCatalogEntry } from "@openx/shared";
+import { CORE_SKILLS, COACH_AGENT_ROLES } from "@openx/shared";
 
 export type CoachSkill = {
   id: string;
@@ -54,11 +54,21 @@ export const COACH_MCPS: CoachMcp[] = [
   { id: "filesystem", name: "文件 MCP", desc: "通过 MCP 读写与检索文件" },
 ];
 
-export const COACH_AGENTS: CoachAgent[] = [
-  { id: "coach", name: "工头助手", desc: "拆解目标、对话协调、跟踪进展" },
-  { id: "pi", name: "Pi 执行器", desc: "在本机工作目录写代码、跑命令" },
-  { id: "reviewer", name: "审查员", desc: "检查产出与验收标准（规划中）" },
-];
+export const COACH_AGENTS: CoachAgent[] = Object.entries(COACH_AGENT_ROLES).map(
+  ([id, role]) => ({
+    id,
+    name: role.name,
+    desc: role.desc,
+  }),
+);
+
+export function catalogToCoachAgents(catalog: AgentCatalogEntry[]): CoachAgent[] {
+  return catalog.map((a) => ({
+    id: a.id,
+    name: a.name,
+    desc: a.desc,
+  }));
+}
 
 const SKILLS_KEY = "openx.tools.skills";
 const SKILLS_BINDINGS_KEY = "openx.tools.skillBindings";
@@ -162,8 +172,11 @@ export function saveMcpSelection(next: Record<string, boolean>) {
   localStorage.setItem(MCPS_KEY, JSON.stringify(next));
 }
 
-export function loadAgentSelection(): string {
-  return localStorage.getItem(AGENT_KEY) ?? "coach";
+export function loadAgentSelection(catalog: CoachAgent[] = COACH_AGENTS): string {
+  const raw = localStorage.getItem(AGENT_KEY) ?? "coach";
+  const stored = raw === "pi" ? "coder" : raw;
+  if (catalog.some((a) => a.id === stored)) return stored;
+  return catalog[0]?.id ?? "coach";
 }
 
 export function saveAgentSelection(agentId: string) {

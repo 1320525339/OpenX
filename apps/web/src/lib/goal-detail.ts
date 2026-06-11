@@ -9,9 +9,7 @@ const PRIORITY_LABELS: Record<Goal["priority"], string> = {
 };
 
 export function goalStatusText(goal: Goal): string {
-  if (goal.effectStatus === "rework") return "需要返工";
-  if (goal.status === "running") return "正在推进";
-  if (goal.status === "awaiting_review") return "等你确认";
+  if (goal.effectStatus === "rework" && goal.status !== "done") return "需要返工";
   return GOAL_STATUS_LABELS[goal.status] ?? goal.status;
 }
 
@@ -29,6 +27,24 @@ export function truncate(text: string, max = 320): string {
   const t = text.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max)}…`;
+}
+
+const PERSONA_LABELS: Record<string, string> = {
+  coach: "工头助手",
+  coder: "编码助手",
+  reviewer: "审查员",
+};
+
+export function formatDispatchSummary(goal: Goal): string | null {
+  const dc = goal.dispatchContext;
+  if (!dc) return null;
+  const parts: string[] = [];
+  if (dc.agentId) {
+    parts.push(`Persona: ${PERSONA_LABELS[dc.agentId] ?? dc.agentId}`);
+  }
+  if (dc.mcpIds?.length) parts.push(`MCP: ${dc.mcpIds.join(", ")}`);
+  if (dc.skillIds?.length) parts.push(`Skills: ${dc.skillIds.join(", ")}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export { PRIORITY_LABELS };

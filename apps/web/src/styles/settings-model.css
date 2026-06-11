@@ -34,8 +34,17 @@
   white-space: nowrap;
 }
 
+.settings-section {
+  margin-top: 1.25rem;
+  padding-top: 0.15rem;
+}
+
+.settings-section:first-child {
+  margin-top: 0;
+}
+
 .settings-section-title {
-  margin: 1.1rem 0 0.5rem;
+  margin: 0 0 0.55rem;
   font-size: var(--text-base);
   font-weight: var(--font-semibold);
   color: var(--text);
@@ -49,6 +58,62 @@
   line-height: var(--leading-relaxed);
 }
 
+.settings-hint-tight {
+  margin-bottom: 0.45rem;
+}
+
+.settings-field-narrow {
+  max-width: 8rem;
+}
+
+.settings-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settings-panel-footer .btn.primary {
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+}
+
+.settings-footer-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-xs);
+}
+
+.model-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.45rem;
+}
+
+.model-role-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.model-role-status {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.model-role-status.ok {
+  color: var(--green);
+}
+
+.model-role-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
 .settings-hint.warn {
   color: var(--amber);
 }
@@ -60,10 +125,10 @@
 .provider-current {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 0.75rem 0.85rem;
-  margin-bottom: 0.65rem;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: var(--shadow-soft);
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.55rem;
+  background: transparent;
+  box-shadow: none;
 }
 
 .provider-current.connected {
@@ -111,36 +176,28 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 0.28rem;
-  padding: 0.8rem 0.9rem;
+  padding: 0.65rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.78);
+  border-radius: var(--radius-sm);
+  background: var(--btn-bg);
   color: var(--text);
   cursor: pointer;
   text-align: left;
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
   transition:
-    border-color 0.16s ease,
-    background 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease;
+    border-color 0.12s ease,
+    background 0.12s ease;
 }
 
 .provider-chip:hover:not(:disabled) {
-  border-color: rgba(0, 102, 232, 0.32);
-  background: rgba(255, 255, 255, 0.96);
-  transform: translateY(-1px);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
-}
-
-.provider-chip:active:not(:disabled) {
-  transform: translateY(0);
+  border-color: var(--btn-hover-border);
+  background: var(--btn-hover-bg);
 }
 
 .provider-chip:focus-visible {
-  outline: none;
-  border-color: rgba(0, 102, 232, 0.42);
-  box-shadow: 0 0 0 4px rgba(0, 102, 232, 0.12);
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
 }
 
 .provider-chip:disabled {
@@ -149,9 +206,9 @@
 }
 
 .provider-chip.active {
-  border-color: rgba(0, 102, 232, 0.4);
-  background: rgba(0, 102, 232, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(0, 102, 232, 0.12);
+  border-color: var(--accent);
+  background: var(--btn-tab-active-bg);
+  box-shadow: none;
 }
 
 .provider-chip-name {

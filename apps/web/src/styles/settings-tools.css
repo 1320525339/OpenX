@@ -3,6 +3,11 @@
 
 .page-panel {
   height: 100%;
+  min-height: 0;
+}
+
+.main-view.single-view.settings-page > .page-panel {
+  height: auto;
 }
 
 .tools-scroll {
@@ -40,10 +45,16 @@
   gap: 0.2rem;
   padding: 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
+  border-radius: var(--radius-sm);
+  background: var(--btn-bg);
   cursor: pointer;
   font-size: 0.72rem;
+  box-shadow: none;
+}
+
+.tools-skill-card:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--btn-hover-border);
 }
 
 .tools-skill-card strong {
@@ -70,23 +81,25 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0.28rem 0.65rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--btn-bg);
   color: var(--text-dim);
   font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
+  box-shadow: none;
 }
 
 .tools-tab:hover {
-  border-color: rgba(0, 113, 227, 0.28);
+  border-color: var(--btn-hover-border);
+  background: var(--btn-hover-bg);
   color: var(--text);
 }
 
 .tools-tab.active {
-  border-color: rgba(0, 113, 227, 0.42);
-  background: rgba(0, 113, 227, 0.08);
+  border-color: var(--accent);
+  background: var(--btn-tab-active-bg);
   color: var(--accent);
 }
 
@@ -129,6 +142,38 @@
 
 .tools-cli-card.unavailable {
   opacity: 0.82;
+}
+
+.tools-cli-card.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tools-cli-card.clickable:hover,
+.tools-cli-card.clickable:focus-visible {
+  border-color: rgba(0, 113, 227, 0.35);
+  box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.08);
+  outline: none;
+}
+
+.tools-cli-config-hint {
+  margin-top: 0.35rem;
+  color: var(--accent);
+  font-size: var(--text-sm);
+}
+
+.tools-acp-config-modal {
+  max-width: 480px;
+}
+
+.tools-acp-config-lead code,
+.tools-acp-config-dir code {
+  font-size: 0.85em;
+}
+
+.tools-acp-config-dir {
+  margin-bottom: 0.75rem;
+  word-break: break-all;
 }
 
 .tools-cli-card-head {
@@ -293,18 +338,18 @@
 
 .tools-skill-row {
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   padding: 0;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--btn-bg);
   overflow: hidden;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+  box-shadow: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 
 .tools-skill-row:hover {
-  border-color: rgba(0, 113, 227, 0.18);
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  border-color: var(--btn-hover-border);
+  background: var(--btn-hover-bg);
+  box-shadow: none;
 }
 
 .tools-skill-row.enabled {
@@ -453,12 +498,35 @@
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  padding: 0.55rem;
+  padding: 0.55rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
+  border-radius: var(--radius-md);
+  background: var(--context-option-bg);
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.tools-agent-template:hover {
+  border-color: var(--border-strong);
+  background: var(--context-option-hover-bg);
+}
+
+.tools-agent-template:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.tools-agent-template.active {
+  border-color: var(--accent);
+  background: var(--context-option-active-bg);
+}
+
+.tools-agent-persona-select {
+  width: 100%;
+  margin-bottom: 0.45rem;
 }
 
 .tools-agent-template strong {
@@ -551,7 +619,47 @@
   margin-top: 0.15rem;
 }
 
-.tools-add-cli-actions {
+.refined-recommend-hint,
+.refined-context-hint {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  margin: 0 0 0.45rem;
+}
+
+.refined-edit-area {
+  min-height: 2.5rem;
+  font-size: var(--text-sm);
+}
+
+.refined-constraints {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+}
+
+.tools-mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.tools-mcp-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.tools-mcp-row .mech-switch {
+  grid-column: 1 / -1;
+}
+
+.tools-mcp-actions {
   display: flex;
   gap: 0.4rem;
   justify-content: flex-end;

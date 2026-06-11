@@ -5,7 +5,7 @@ import {
   refineGoal,
 } from "@openx/coach";
 import {
-  canTransition,
+  DEFAULT_AUTO_REVIEW,
   type Goal,
   type RefinedSubGoal,
   type SubGoalInput,
@@ -25,6 +25,8 @@ import {
 import { dispatchGoal, tryDispatchDependents } from "./orchestrator.js";
 import { loadSettings } from "./settings-store.js";
 import { broadcast } from "./sse.js";
+import { buildGoalDispatchContext } from "./goal-dispatch.js";
+import { claimGoalForDispatch } from "./goal-lifecycle.js";
 
 export function refinedSubGoalsToInput(subs: RefinedSubGoal[]): SubGoalInput[] {
   return subs.map((sg) => ({
@@ -35,6 +37,9 @@ export function refinedSubGoalsToInput(subs: RefinedSubGoal[]): SubGoalInput[] {
     constraints: sg.constraints,
     executorId: sg.executorId ?? "pi",
     priority: sg.priority,
+    agentId: sg.agentId,
+    mcpIds: sg.mcpIds,
+    skillIds: sg.skillIds,
   }));
 }
 
@@ -54,15 +59,15 @@ function resolveChainAnchor(parentId: string): string {
 }
 
 function startRunnableDraft(goal: Goal): void {
-  if (!canTransition(goal.status, "running")) return;
   if (!areDependenciesMet(goal)) return;
-  goal.status = "running";
-  goal.progress = 0;
-  goal.updatedAt = new Date().toISOString();
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  appendLog(goal.id, "info", `任务启动，执行器：${goal.executorId}`);
-  void dispatchGoal(goal.id);
+  const claimed = claimGoalForDispatch(goal.id, ["draft"]);
+  if (!claimed) return;
+  claimed.progress = 0;
+  claimed.updatedAt = new Date().toISOString();
+  updateGoal(claimed);
+  broadcast({ type: "goal.updated", goal: claimed });
+  appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
+  void dispatchGoal(claimed.id);
 }
 
 export async function createSubGoalsUnderParent(
@@ -86,6 +91,7 @@ export async function createSubGoalsUnderParent(
     const childNow = new Date().toISOString();
     const child: Goal = {
       id: nanoid(),
+      conversationId: parent.conversationId,
       title: sub.title ?? subRefined.title,
       acceptance: sub.acceptance ?? subRefined.acceptance,
       userDraft: sub.userDraft,
@@ -93,8 +99,12 @@ export async function createSubGoalsUnderParent(
       constraints: sub.constraints ?? subRefined.constraints,
       executorId: sub.executorId ?? settings.defaultExecutorId,
       parentGoalId: parentId,
-      dependsOn: sub.dependsOn ?? [chainPrevId],
+      dependsOn: sub.dependsOn ?? (children.length === 0 ? [] : [chainPrevId]),
       priority: sub.priority ?? "medium",
+      autoReview: parent.autoReview ?? DEFAULT_AUTO_REVIEW,
+      maxIterations: parent.maxIterations,
+      iterationCount: 0,
+      dispatchContext: buildGoalDispatchContext(sub, undefined, parent),
       status: "draft",
       progress: 0,
       createdAt: childNow,
@@ -114,6 +124,118 @@ export async function createSubGoalsUnderParent(
   }
 
   return children;
+}
+
+function matchChildByTitle(children: Goal[], title: string): Goal | undefined {
+  const norm = title.trim().toLowerCase();
+  const exact = children.find((c) => c.title.trim().toLowerCase() === norm);
+  if (exact) return exact;
+  return children.find(
+    (c) =>
+      c.title.toLowerCase().includes(norm) || norm.includes(c.title.toLowerCase()),
+  );
+}
+
+function resetParentAfterReviewFail(parent: Goal): void {
+  if (parent.status !== "awaiting_review") return;
+  parent.status = "draft";
+  parent.progress = Math.min(parent.progress, 90);
+  parent.updatedAt = new Date().toISOString();
+  updateGoal(parent);
+  broadcast({ type: "goal.updated", goal: parent });
+}
+
+/** 父目标合成验收 fail：优先精准打回子任务，否则创建修补子任务 */
+export async function routeParentReviewFail(
+  parentId: string,
+  verdict: import("@openx/coach").ReviewVerdict,
+): Promise<Goal[]> {
+  const parent = getGoalById(parentId);
+  if (!parent) return [];
+
+  const children = listChildGoals(parentId);
+  const targets =
+    verdict.reworkTargets?.filter((t) => t.childTitle?.trim() && t.instruction?.trim()) ??
+    [];
+
+  const reopened: Goal[] = [];
+  for (const target of targets) {
+    const child = matchChildByTitle(children, target.childTitle);
+    if (!child || child.status !== "done") continue;
+    const { reopenChildGoalForReview } = await import("./goal-actions.js");
+    const ok = await reopenChildGoalForReview(child.id, parent, target.instruction, verdict.reason);
+    if (ok) {
+      const updated = getGoalById(child.id);
+      if (updated) reopened.push(updated);
+    }
+  }
+
+  if (reopened.length > 0) {
+    resetParentAfterReviewFail(parent);
+    appendLog(
+      parentId,
+      "warn",
+      `父目标合成验收未通过，已打回 ${reopened.length} 个子任务：${reopened.map((g) => g.title).join("、")}`,
+    );
+    return reopened;
+  }
+
+  return spawnReviewFixSubGoals(parentId, verdict.reason, verdict.reworkInstruction);
+}
+
+/** 父目标合成验收未通过：创建修补子任务并自动启动（compose:feedback 闭环） */
+export function spawnReviewFixSubGoals(
+  parentId: string,
+  reason: string,
+  reworkInstruction?: string,
+): Goal[] {
+  const parent = getGoalById(parentId);
+  if (!parent) return [];
+
+  const settings = loadSettings();
+  const instruction = reworkInstruction?.trim() || reason;
+  const now = new Date().toISOString();
+  const fix: Goal = {
+    id: nanoid(),
+    conversationId: parent.conversationId,
+    title: `修补 · ${parent.title}`.slice(0, 120),
+    acceptance: instruction,
+    userDraft: `审查员指出父目标未完全达标：${reason}`,
+    executionPrompt: [
+      `父目标「${parent.title}」合成验收未通过。`,
+      `问题：${reason}`,
+      reworkInstruction ? `修改清单：\n${reworkInstruction}` : "",
+      "请修复并提交可验证证据（文件路径、测试输出等）。",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    constraints: parent.constraints,
+    executorId:
+      parent.executorId === "auto" ? settings.defaultExecutorId : parent.executorId,
+    parentGoalId: parentId,
+    dependsOn: [],
+    priority: parent.priority,
+    autoReview: parent.autoReview ?? DEFAULT_AUTO_REVIEW,
+    maxIterations: parent.maxIterations,
+    iterationCount: 0,
+    dispatchContext: parent.dispatchContext,
+    status: "draft",
+    progress: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  insertGoal(fix);
+  broadcast({ type: "goal.updated", goal: fix });
+  appendLog(
+    parentId,
+    "warn",
+    `父目标合成验收未通过，已创建修补子任务「${fix.title}」`,
+  );
+
+  resetParentAfterReviewFail(parent);
+
+  startRunnableDraft(fix);
+  return [fix];
 }
 
 function hasActiveSiblingDrafts(
@@ -146,7 +268,7 @@ export async function autoDraftNextSubGoals(
   if (hasActiveSiblingDrafts(siblings, focusGoalId)) return [];
 
   const settings = loadSettings();
-  const context = buildCoachChatContext(focusGoalId);
+  const context = buildCoachChatContext(focus.conversationId, focusGoalId);
   const siblingBriefs = siblings.map((g) => ({
     id: g.id,
     title: g.title,

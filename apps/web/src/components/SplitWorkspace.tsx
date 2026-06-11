@@ -1,12 +1,12 @@
 import {
   useCallback,
-  useEffect,
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { PaneDivider } from "./PaneDivider";
+import { usePaneResize } from "../lib/use-pane-resize";
 
 const STORAGE_KEY = "openx.workspaceSplit";
 const SWAPPED_KEY = "openx.workspaceSwapped";
@@ -22,18 +22,6 @@ function loadSwapped(): boolean {
   }
 }
 
-function loadRatio(): number {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_RATIO;
-    const n = Number.parseFloat(raw);
-    if (!Number.isFinite(n)) return DEFAULT_RATIO;
-    return Math.min(MAX_RATIO, Math.max(MIN_RATIO, n));
-  } catch {
-    return DEFAULT_RATIO;
-  }
-}
-
 type Props = {
   left: ReactNode;
   right: ReactNode;
@@ -41,23 +29,15 @@ type Props = {
 };
 
 export function SplitWorkspace({ left, right, className = "" }: Props) {
-  const [ratio, setRatio] = useState(loadRatio);
+  const { value: ratio, valueRef: ratioRef, setValue: setRatio, beginDrag, onDividerPointerMove, endDrag, nudgeRatio, persist } =
+    usePaneResize({
+      storageKey: STORAGE_KEY,
+      defaultRatio: DEFAULT_RATIO,
+      minRatio: MIN_RATIO,
+      maxRatio: MAX_RATIO,
+    });
   const [swapped, setSwapped] = useState(loadSwapped);
-  const ratioRef = useRef(ratio);
   const containerRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef(false);
-
-  useEffect(() => {
-    ratioRef.current = ratio;
-  }, [ratio]);
-
-  const persistRatio = useCallback(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, String(ratioRef.current));
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   const persistSwapped = useCallback((value: boolean) => {
     try {
@@ -74,41 +54,18 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
     setRatio(inverted);
     setSwapped(nextSwapped);
     persistSwapped(nextSwapped);
-    persistRatio();
-  }, [swapped, persistSwapped, persistRatio]);
+    persist();
+  }, [swapped, persistSwapped, persist, setRatio, ratioRef]);
 
-  const onDividerPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    document.body.classList.add("split-dragging");
-  }, []);
-
-  const onDividerPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const next = (e.clientX - rect.left) / rect.width;
-    const clamped = Math.min(MAX_RATIO, Math.max(MIN_RATIO, next));
-    ratioRef.current = clamped;
-    setRatio(clamped);
-  }, []);
-
-  const endDrag = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      document.body.classList.remove("split-dragging");
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      }
-      persistRatio();
+  const onDividerPointerMoveWrapped = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      onDividerPointerMove(e, containerRef.current);
     },
-    [persistRatio],
+    [onDividerPointerMove],
   );
 
-  const leftPct = `${(ratio * 100).toFixed(2)}%`;
-  const rightPct = `${((1 - ratio) * 100).toFixed(2)}%`;
+  const leftFr = Math.max(1, Math.round(ratio * 1000));
+  const rightFr = Math.max(1, Math.round((1 - ratio) * 1000));
 
   const firstPane = swapped ? right : left;
   const secondPane = swapped ? left : right;
@@ -119,33 +76,24 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
       className={`split-workspace${swapped ? " split-workspace-swapped" : ""} ${className}`.trim()}
       style={
         {
-          "--split-left": leftPct,
-          "--split-right": rightPct,
+          gridTemplateColumns: `minmax(0, ${leftFr}fr) var(--pane-divider-hit) minmax(0, ${rightFr}fr)`,
         } as CSSProperties
       }
     >
       <div className="split-workspace-left">{firstPane}</div>
-      <div
-        className="split-workspace-divider"
-        role="separator"
-        aria-orientation="vertical"
-        aria-valuenow={Math.round(ratio * 100)}
-        aria-valuemin={Math.round(MIN_RATIO * 100)}
-        aria-valuemax={Math.round(MAX_RATIO * 100)}
-        aria-label="调整左右窗口宽度"
-        tabIndex={0}
-        onPointerDown={onDividerPointerDown}
-        onPointerMove={onDividerPointerMove}
+      <PaneDivider
+        ariaLabel="调整任务与对话宽度"
+        ariaValueNow={Math.round(ratio * 100)}
+        ariaValueMin={Math.round(MIN_RATIO * 100)}
+        ariaValueMax={Math.round(MAX_RATIO * 100)}
+        onPointerDown={beginDrag}
+        onPointerMove={onDividerPointerMoveWrapped}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onKeyDown={(e) => {
           if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
           e.preventDefault();
-          const delta = e.key === "ArrowLeft" ? -0.03 : 0.03;
-          const next = Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratioRef.current + delta));
-          ratioRef.current = next;
-          setRatio(next);
-          persistRatio();
+          nudgeRatio(e.key === "ArrowLeft" ? -0.03 : 0.03);
         }}
       >
         <button
@@ -175,7 +123,7 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
             />
           </svg>
         </button>
-      </div>
+      </PaneDivider>
       <div className="split-workspace-right">{secondPane}</div>
     </div>
   );

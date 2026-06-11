@@ -23,6 +23,9 @@ export function mapRefinedSubGoals(subGoals: RefinedSubGoal[], defaultExecutorId
     constraints: sg.constraints,
     executorId: sg.executorId ?? fallback,
     priority: sg.priority,
+    agentId: sg.agentId,
+    mcpIds: sg.mcpIds,
+    skillIds: sg.skillIds,
   }));
 }
 

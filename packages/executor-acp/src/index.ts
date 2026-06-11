@@ -27,10 +27,15 @@ import {
   createRunEmitter,
   type ExecutorAdapter,
   type ExecutorContext,
+  type ExecutorDetectEntry,
   type RunEventEmitter,
 } from "@openx/executor-core";
 import { handleAcpSessionUpdate } from "./session-updates.js";
 import { acpSpawnOptions } from "./spawn-win.js";
+import {
+  buildCodexAcpSpawnArgs,
+  buildCodexAcpSpawnEnv,
+} from "./codex-spawn.js";
 
 type ActiveRun = {
   proc: ChildProcess;
@@ -139,17 +144,58 @@ async function runAcpTurn(
   const promptText = buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
     isRework: ctx.isRework,
     priorSummaries: ctx.priorSummaries,
+    priorReviewRounds: ctx.priorReviewRounds,
+    agentRole: ctx.agentRole,
+    workspaceRoot: ctx.workspaceRoot,
   });
+  const mcpServers = ctx.mcpServers ?? [];
+  const spawnCreds =
+    runtimeId === "acp:codex" &&
+    ctx.spawnEnv?.OPENAI_API_KEY &&
+    ctx.spawnEnv.OPENAI_BASE_URL &&
+    ctx.spawnEnv.OPENAI_MODEL
+      ? {
+          apiKey: ctx.spawnEnv.OPENAI_API_KEY,
+          baseUrl: ctx.spawnEnv.OPENAI_BASE_URL,
+          model: ctx.spawnEnv.OPENAI_MODEL,
+        }
+      : runtimeId === "acp:claude" &&
+          ctx.spawnEnv?.ANTHROPIC_MODEL &&
+          (ctx.spawnEnv.ANTHROPIC_API_KEY || ctx.spawnEnv.ANTHROPIC_AUTH_TOKEN) &&
+          ctx.spawnEnv.ANTHROPIC_BASE_URL
+        ? {
+            apiKey:
+              ctx.spawnEnv.ANTHROPIC_AUTH_TOKEN ??
+              ctx.spawnEnv.ANTHROPIC_API_KEY ??
+              "",
+            baseUrl: ctx.spawnEnv.ANTHROPIC_BASE_URL,
+            model: ctx.spawnEnv.ANTHROPIC_MODEL,
+          }
+        : null;
+
+  const extraArgs =
+    runtimeId === "acp:codex" && spawnCreds ? buildCodexAcpSpawnArgs(spawnCreds) : [];
+
+  const procEnv =
+    runtimeId === "acp:codex" && spawnCreds
+      ? { ...process.env, ...ctx.spawnEnv, ...buildCodexAcpSpawnEnv(spawnCreds) }
+      : runtimeId === "acp:claude" && ctx.spawnEnv
+        ? { ...process.env, ...ctx.spawnEnv }
+        : ctx.spawnEnv
+          ? { ...process.env, ...ctx.spawnEnv }
+          : undefined;
+
   const state = { assistantText: "", toolCount: 0, toolNames: new Map<string, string>() };
   const run = createRunEmitter(ctx);
 
   const proc = spawn(
     spawnCfg.command,
-    spawnCfg.args,
+    [...spawnCfg.args, ...extraArgs],
     acpSpawnOptions({
       cwd: workspaceRoot,
       stdio: ["pipe", "pipe", "pipe"],
       forceShell: process.env.OPENX_ACP_MOCK === "1" ? false : undefined,
+      env: procEnv,
     }),
   );
   activeRuns.set(goal.id, { proc, abortSent: false });
@@ -180,10 +226,10 @@ async function runAcpTurn(
     let sessionId: string;
     if (opts?.resumeSessionId) {
       sessionId = opts.resumeSessionId;
-      await conn.loadSession({ sessionId, cwd: workspaceRoot, mcpServers: [] });
+      await conn.loadSession({ sessionId, cwd: workspaceRoot, mcpServers });
       await callbacks.onProgress(22, "ACP 会话已恢复");
     } else {
-      const opened = await conn.newSession({ cwd: workspaceRoot, mcpServers: [] });
+      const opened = await conn.newSession({ cwd: workspaceRoot, mcpServers });
       sessionId = opened.sessionId;
       await callbacks.onProgress(22, "ACP 会话已创建");
     }
@@ -204,10 +250,29 @@ async function runAcpTurn(
 }
 
 async function runAcpGoal(ctx: ExecutorContext, runtimeId: AcpRuntimeId): Promise<void> {
-  parkedSessions.delete(ctx.goal.id);
+  const parked = parkedSessions.get(ctx.goal.id);
+  const resumeSteer =
+    ctx.isRework &&
+    parked?.runtimeId === runtimeId &&
+    Boolean(parked.sessionId);
+  if (!resumeSteer) {
+    parkedSessions.delete(ctx.goal.id);
+  }
   const { callbacks } = ctx;
   try {
-    const turn = await runAcpTurn(ctx, runtimeId);
+    if (resumeSteer && parked) {
+      await callbacks.onLog(
+        "info",
+        `[${runtimeId}] 返工续跑：loadSession + steer（保留 ACP 上下文）`,
+      );
+    }
+    const turn = await runAcpTurn(
+      ctx,
+      runtimeId,
+      resumeSteer && parked
+        ? { resumeSessionId: parked.sessionId, steer: true }
+        : undefined,
+    );
     await callbacks.onProgress(100, "ACP 完成");
     await callbacks.onComplete(turn.summary);
     parkedSessions.set(ctx.goal.id, { sessionId: turn.sessionId, runtimeId });
@@ -221,12 +286,23 @@ export async function detectAcpRuntime(
   runtimeId: AcpRuntimeId,
 ): Promise<{ available: boolean; hint?: string }> {
   const cfg = ACP_RUNTIMES[runtimeId];
+  const probeArgs = [...cfg.args, "--help"];
   return new Promise((resolve) => {
-    const proc = spawn(cfg.command, ["--version"], acpSpawnOptions({ stdio: "ignore", forceShell: true }));
+    const proc = spawn(
+      cfg.command,
+      probeArgs,
+      acpSpawnOptions({ stdio: "ignore", forceShell: true }),
+    );
+    const timer = setTimeout(() => {
+      proc.kill("SIGTERM");
+      resolve({ available: false, hint: `${cfg.label} 检测超时` });
+    }, 45_000);
     proc.on("error", () => {
+      clearTimeout(timer);
       resolve({ available: false, hint: `${cfg.label} 未安装（${cfg.command}）` });
     });
     proc.on("exit", (code) => {
+      clearTimeout(timer);
       resolve(
         code === 0
           ? { available: true }
@@ -239,9 +315,21 @@ export async function detectAcpRuntime(
 export const acpExecutor: ExecutorAdapter = {
   id: "acp",
   displayName: "ACP CLI 执行器",
+  executionModel: "push",
+  matchExecutorId: (goalExecutorId) => goalExecutorId.startsWith("acp:"),
 
   async detect() {
     return { available: true, hint: "按 acp:* runtime 单独检测" };
+  },
+
+  async detectEntries() {
+    const entries: ExecutorDetectEntry[] = [];
+    for (const runtimeId of Object.keys(ACP_RUNTIMES) as AcpRuntimeId[]) {
+      const cfg = ACP_RUNTIMES[runtimeId];
+      const det = await detectAcpRuntime(runtimeId);
+      entries.push({ id: runtimeId, displayName: cfg.label, ...det });
+    }
+    return entries;
   },
 
   async run(ctx: ExecutorContext) {

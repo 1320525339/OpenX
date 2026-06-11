@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "openx": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\13205\\Desktop\\Demo\\OpenX\\packages\\mcp-openx\\dist\\index.js"
+      ],
+      "env": {
+        "OPENX_API_BASE": "http://127.0.0.1:3921"
+      }
+    }
+  }
+}

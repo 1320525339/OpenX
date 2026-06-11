@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BatchGoalsAction, Goal } from "@openx/shared";
-import { EXECUTOR_AUTO } from "@openx/shared";
-import { executorDisplayLabel } from "../lib/executors";
+import { EXECUTOR_AUTO, CONNECT_ANY_EXECUTOR_ID } from "@openx/shared";
+import { connectClaimStatus, executorDisplayLabel } from "../lib/executors";
 import { goalsEligibleForAction } from "../lib/goal-batch";
+import { buildGoalContext, formatDispatchSummary, goalStatusText, truncate } from "../lib/goal-detail";
+import { buildGoalTreeList } from "../lib/goal-list";
+import { GoalTaskExpandBody, goalResultTeaser } from "./GoalTaskExpandBody";
+import { GoalTaskActions, goalHasTaskActions } from "./GoalTaskActions";
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "全部" },
@@ -10,7 +14,9 @@ const FILTERS: { key: string; label: string }[] = [
   { key: "running", label: "正在推进" },
   { key: "awaiting_review", label: "等你确认" },
   { key: "done", label: "已完成" },
+  { key: "failed", label: "卡住了" },
   { key: "rework", label: "需要返工" },
+  { key: "cancelled", label: "已取消" },
 ];
 
 type Props = {
@@ -22,6 +28,7 @@ type Props = {
   onSelect: (id: string) => void;
   onOpenDetail?: (id: string) => void;
   onNewGoal: () => void;
+  hideFooterNewGoal?: boolean;
   editMode: boolean;
   onEditModeChange: (edit: boolean) => void;
   selectedIds: Set<string>;
@@ -32,22 +39,17 @@ type Props = {
   onApprove: (id: string) => Promise<void>;
   onRework: (id: string, reason?: string) => Promise<void>;
   onStart: (id: string) => Promise<void>;
+  /** 对话区任务芯片点击定位：滚动到对应任务并高亮 */
+  locateRequest?: { goalId: string; tick: number } | null;
+  showConnectClaimStatus?: boolean;
+  /** 项目看板：按对话标注任务来源 */
+  conversationTitles?: Record<string, string>;
 };
 
 function countForFilter(goals: Goal[], key: string): number {
   if (key === "all") return goals.length;
   if (key === "rework") return goals.filter((g) => g.effectStatus === "rework").length;
   return goals.filter((g) => g.status === key).length;
-}
-
-function userStatusLabel(goal: Goal): string {
-  if (goal.effectStatus === "rework") return "需要返工";
-  if (goal.status === "draft") return "先放着";
-  if (goal.status === "running") return "正在推进";
-  if (goal.status === "awaiting_review") return "等你确认";
-  if (goal.status === "done") return "已完成";
-  if (goal.status === "failed") return "卡住了";
-  return goal.status;
 }
 
 function executorLabel(executorId: Goal["executorId"]): string {
@@ -64,6 +66,7 @@ export function TasksPanel({
   onSelect,
   onOpenDetail,
   onNewGoal,
+  hideFooterNewGoal = false,
   editMode,
   onEditModeChange,
   selectedIds,
@@ -74,18 +77,26 @@ export function TasksPanel({
   onApprove,
   onRework,
   onStart,
+  locateRequest,
+  showConnectClaimStatus = false,
+  conversationTitles,
 }: Props) {
-  const [approveId, setApproveId] = useState<string | null>(null);
-  const [reworkId, setReworkId] = useState<string | null>(null);
-  const [reworkReason, setReworkReason] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
+  const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  const doneRate =
-    allGoals.length > 0
-      ? Math.round(
-          (allGoals.filter((g) => g.status === "done").length / allGoals.length) * 100,
-        )
-      : 0;
+  useEffect(() => {
+    if (!locateRequest) return;
+    setExpandedGoalId(locateRequest.goalId);
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-goal-id="${locateRequest.goalId}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("locate-flash");
+    const timer = setTimeout(() => el.classList.remove("locate-flash"), 1800);
+    return () => clearTimeout(timer);
+  }, [locateRequest]);
 
   const selectedGoals = allGoals.filter((g) => selectedIds.has(g.id));
   const startN = goalsEligibleForAction(selectedGoals, "start").length;
@@ -133,48 +144,46 @@ export function TasksPanel({
     onEditModeChange(false);
   };
 
+  const treeGoals = buildGoalTreeList(goals);
+
   return (
-    <section className={`mech-panel${editMode ? " tasks-panel-editing" : ""}`}>
-      <div className="mech-panel-head">
-        <div className="tasks-panel-head-left">
-          <h3>目标</h3>
-          <span className="coach-badge">
-            {allGoals.length} 个目标 · 完成 {doneRate}%
-          </span>
-        </div>
-        {editMode ? (
-          <button type="button" className="btn tasks-edit-toggle" onClick={exitEditMode}>
-            完成
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn tasks-edit-toggle"
-            onClick={() => onEditModeChange(true)}
-          >
-            编辑
-          </button>
-        )}
-      </div>
+    <section className={`mech-panel tasks-panel${editMode ? " tasks-panel-editing" : ""}`}>
       <div className="mech-panel-body panel-stack">
-        <div className="filter-row">
-          {FILTERS.map(({ key, label }) => {
-            const n = countForFilter(allGoals, key);
-            return (
-              <button
-                key={key}
-                type="button"
-                className={`filter-chip${filter === key ? " active" : ""}`}
-                onClick={() => onFilterChange(key)}
-              >
-                {label}
-                {n > 0 ? ` (${n})` : ""}
-              </button>
-            );
-          })}
+        <div className="tasks-toolbar">
+          <div className="filter-row filter-tabs" role="tablist" aria-label="目标筛选">
+            {FILTERS.map(({ key, label }) => {
+              const n = countForFilter(allGoals, key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === key}
+                  className={`filter-chip${filter === key ? " active" : ""}`}
+                  onClick={() => onFilterChange(key)}
+                >
+                  {label}
+                  {n > 0 ? ` ${n}` : ""}
+                </button>
+              );
+            })}
+          </div>
+          {editMode ? (
+            <button type="button" className="btn-text tasks-edit-toggle" onClick={exitEditMode}>
+              完成
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-text tasks-edit-toggle"
+              onClick={() => onEditModeChange(true)}
+            >
+              编辑
+            </button>
+          )}
         </div>
 
-        <div className="panel-scroll" style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+        <div ref={listRef} className="panel-scroll" style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           {goals.length === 0 && (
             <p className="empty-hint">
               {filter === "all"
@@ -182,32 +191,41 @@ export function TasksPanel({
                 : "这里暂时没有目标。"}
             </p>
           )}
-          {goals.map((g) => {
+          {treeGoals.map(({ goal: g, depth }) => {
             const selected = editMode ? selectedIds.has(g.id) : selectedId === g.id;
-            const showApprove = !editMode && g.status === "awaiting_review" && selected;
-            const showReworkForm = reworkId === g.id;
+            const expanded = !editMode && expandedGoalId === g.id;
+            const { parent, dependencies } = buildGoalContext(allGoals, g);
+            const resultTeaser = goalResultTeaser(g);
+            const actionHandlers = {
+              onStart,
+              onApprove,
+              onRework,
+              onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
+            };
+            const showCollapsedActions =
+              !editMode && !expanded && goalHasTaskActions(g, actionHandlers);
+
+            const handleCardClick = () => {
+              if (editMode) {
+                onToggleSelect(g.id);
+                return;
+              }
+              onSelect(g.id);
+              setExpandedGoalId((prev) => (prev === g.id ? null : g.id));
+            };
 
             return (
               <div
                 key={g.id}
+                data-goal-id={g.id}
                 role="button"
                 tabIndex={0}
-                className={`goal-card${selected ? " selected" : ""}${g.status === "awaiting_review" ? " awaiting_review" : ""}${editMode ? " edit-mode" : ""}`}
-                onClick={() => {
-                  if (editMode) {
-                    onToggleSelect(g.id);
-                  } else {
-                    onSelect(g.id);
-                  }
-                }}
-                onDoubleClick={() => {
-                  if (editMode || !onOpenDetail) return;
-                  onOpenDetail(g.id);
-                }}
+                className={`goal-card${selected ? " selected" : ""}${expanded ? " expanded" : ""}${g.status === "awaiting_review" ? " awaiting_review" : ""}${editMode ? " edit-mode" : ""}${depth > 0 ? " goal-card-child" : ""}`}
+                style={depth > 0 ? { marginLeft: `${depth * 0.75}rem` } : undefined}
+                onClick={handleCardClick}
                 onKeyDown={(e) => {
                   if (e.key !== "Enter") return;
-                  if (editMode) onToggleSelect(g.id);
-                  else onSelect(g.id);
+                  handleCardClick();
                 }}
               >
                 <div className="goal-card-head">
@@ -223,23 +241,54 @@ export function TasksPanel({
                       />
                     </label>
                   ) : (
-                    <div className="progress-ring">{g.progress}%</div>
+                    <div
+                      className="progress-ring"
+                      style={{ ["--goal-progress" as string]: `${g.progress}%` }}
+                    >
+                      {g.progress}%
+                    </div>
                   )}
                   <div className="goal-card-body">
                     <div className="goal-card-title-row">
                       <strong className="goal-card-title">{g.title}</strong>
+                      {conversationTitles?.[g.conversationId] ? (
+                        <span className="goal-card-conv" title="所属对话">
+                          {conversationTitles[g.conversationId]}
+                        </span>
+                      ) : null}
                       <span className={`status-pill ${g.status}`}>
-                        {userStatusLabel(g)}
+                        {goalStatusText(g)}
                       </span>
                       {g.effectStatus === "rework" && (
                         <span className="status-pill rework-tag">再改一下</span>
                       )}
                       <span className="executor-tag">{executorLabel(g.executorId)}</span>
+                      {!editMode && (
+                        <span
+                          className={`goal-card-chevron${expanded ? " open" : ""}`}
+                          aria-hidden
+                        />
+                      )}
+                      {showConnectClaimStatus ? (
+                        (() => {
+                          const claim = connectClaimStatus(g);
+                          return claim ? (
+                            <span
+                              className={`status-pill ${g.executorId === CONNECT_ANY_EXECUTOR_ID ? "draft" : "running"}`}
+                            >
+                              {claim}
+                            </span>
+                          ) : null;
+                        })()
+                      ) : null}
                     </div>
-                    {!editMode && (
+                    {!editMode && !expanded && g.status === "running" && (
                       <div className="progress-bar">
                         <span style={{ width: `${g.progress}%` }} />
                       </div>
+                    )}
+                    {!editMode && !expanded && resultTeaser && (
+                      <p className="goal-card-result-teaser">{truncate(resultTeaser, 140)}</p>
                     )}
                     {editMode && (
                       <p className="goal-card-meta">
@@ -247,140 +296,37 @@ export function TasksPanel({
                         {g.parentGoalId ? " · 子目标" : ""}
                       </p>
                     )}
-                    {g.acceptance && (
-                      <p className="goal-card-acceptance">{g.acceptance}</p>
+                    {!expanded && formatDispatchSummary(g) && (
+                      <p className="goal-card-dispatch">{formatDispatchSummary(g)}</p>
                     )}
-                    {(g.parentGoalId || (g.dependsOn?.length ?? 0) > 0) && !editMode && (
+                    {(parent || dependencies.length > 0) && !editMode && !expanded && (
                       <p className="goal-card-meta">
-                        {g.parentGoalId ? "子目标" : ""}
-                        {(g.dependsOn?.length ?? 0) > 0
-                          ? `${g.parentGoalId ? " · " : ""}等待 ${g.dependsOn.length} 个前置`
+                        {parent ? `子任务 · ${parent.title}` : "子任务"}
+                        {dependencies.length > 0
+                          ? ` · 等待 ${dependencies.map((d) => d.title).join("、")}`
                           : ""}
                       </p>
                     )}
 
-                    {!editMode && selected && onOpenDetail && (
-                      <button
-                        type="button"
-                        className="goal-detail-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenDetail(g.id);
-                        }}
-                      >
-                        查看详情
-                      </button>
-                    )}
-
-                    {!editMode && (g.status === "draft" || g.status === "failed") &&
-                      selected &&
-                      !showReworkForm &&
-                      approveId !== g.id && (
-                        <div className="goal-actions">
-                          <button
-                            type="button"
-                            className="btn primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void onStart(g.id);
-                            }}
-                          >
-                            开始推进
-                          </button>
-                        </div>
-                      )}
-
-                    {!editMode && showApprove && approveId !== g.id && !showReworkForm && (
-                      <div className="goal-actions">
-                        <button
-                          type="button"
-                          className="btn primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setApproveId(g.id);
-                            setReworkId(null);
-                          }}
-                        >
-                          确认完成
-                        </button>
-                        <button
-                          type="button"
-                          className="btn danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setReworkId(g.id);
-                            setApproveId(null);
-                            setReworkReason("");
-                          }}
-                        >
-                          还要修改
-                        </button>
-                      </div>
-                    )}
-
-                    {!editMode && showApprove && approveId === g.id && (
+                    {showCollapsedActions && (
                       <div
-                        className="goal-actions"
+                        className="goal-task-actions-slot"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="approve-confirm">
-                          你之前说“做好”的标准：{g.acceptance || "（未填写）"}
-                        </div>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          onClick={() => {
-                            void onApprove(g.id).then(() => setApproveId(null));
-                          }}
-                        >
-                          确认已经做好
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => setApproveId(null)}
-                        >
-                          取消
-                        </button>
-                      </div>
-                    )}
-
-                    {!editMode && showReworkForm && (
-                      <div
-                        className="rework-box"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span style={{ fontSize: "0.72rem", color: "var(--copper)" }}>
-                          想让它怎么改？（可选）
-                        </span>
-                        <input
-                          value={reworkReason}
-                          onChange={(e) => setReworkReason(e.target.value)}
-                          placeholder="例如：内容不够完整，帮我补充测试和说明…"
+                        <GoalTaskActions
+                          goal={g}
+                          handlers={actionHandlers}
+                          compact
                         />
-                        <div className="goal-actions">
-                          <button
-                            type="button"
-                            className="btn danger"
-                            onClick={() => {
-                              void onRework(g.id, reworkReason.trim() || undefined).then(
-                                () => {
-                                  setReworkId(null);
-                                  setReworkReason("");
-                                },
-                              );
-                            }}
-                          >
-                            让它继续改
-                          </button>
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={() => setReworkId(null)}
-                          >
-                            取消
-                          </button>
-                        </div>
+                      </div>
+                    )}
+
+                    {!editMode && expanded && (
+                      <div
+                        className="goal-card-expand-wrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <GoalTaskExpandBody goal={g} handlers={actionHandlers} />
                       </div>
                     )}
                   </div>
@@ -438,9 +384,9 @@ export function TasksPanel({
               </button>
             </div>
           </div>
-        ) : (
-          <div className="panel-footer">
-            <button type="button" className="btn primary" style={{ width: "100%" }} onClick={onNewGoal}>
+        ) : hideFooterNewGoal ? null : (
+          <div className="panel-footer tasks-panel-footer">
+            <button type="button" className="btn-text tasks-new-goal" onClick={onNewGoal}>
               ＋ 新目标
             </button>
           </div>

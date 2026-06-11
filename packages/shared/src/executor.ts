@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONNECT_ANY_EXECUTOR_ID } from "./system.js";
 
 export const EXECUTOR_PI = "pi" as const;
 export const EXECUTOR_AUTO = "auto" as const;
@@ -6,18 +7,18 @@ export const EXECUTOR_AUTO = "auto" as const;
 /** 预设 ACP CLI runtime，goal.executorId 形如 acp:gemini */
 export const ACP_RUNTIMES = {
   "acp:gemini": {
-    command: "gemini",
-    args: ["--acp"],
+    command: "npx",
+    args: ["-y", "@google/gemini-cli@latest", "--experimental-acp"],
     label: "Gemini CLI (ACP)",
   },
   "acp:codex": {
-    command: "codex",
-    args: ["acp"],
+    command: "npx",
+    args: ["-y", "@zed-industries/codex-acp@latest"],
     label: "Codex CLI (ACP)",
   },
   "acp:claude": {
-    command: "claude",
-    args: ["--acp"],
+    command: "npx",
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@latest"],
     label: "Claude Code (ACP)",
   },
 } as const;
@@ -43,9 +44,12 @@ export function isBuiltinExecutorId(id: string): boolean {
   return id === EXECUTOR_PI || isAutoExecutorId(id) || isAcpExecutorId(id);
 }
 
-/** Connect Agent 注册的自定义 executorId（非 pi / acp:*） */
+/** Connect Agent 注册的自定义 executorId（非 pi / acp:*），含 connect:any 哨兵 */
 export function isConnectExecutorId(id: string): boolean {
-  return !isBuiltinExecutorId(id) && CONNECT_EXECUTOR_ID_PATTERN.test(id);
+  return (
+    id === CONNECT_ANY_EXECUTOR_ID ||
+    (!isBuiltinExecutorId(id) && CONNECT_EXECUTOR_ID_PATTERN.test(id))
+  );
 }
 
 export const ExecutorIdSchema = z
@@ -56,6 +60,7 @@ export const ExecutorIdSchema = z
     (id) =>
       id === EXECUTOR_AUTO ||
       id === EXECUTOR_PI ||
+      id === CONNECT_ANY_EXECUTOR_ID ||
       isAcpExecutorId(id) ||
       CONNECT_EXECUTOR_ID_PATTERN.test(id),
     { message: "invalid executorId" },

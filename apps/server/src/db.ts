@@ -1,8 +1,32 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Goal, GoalPriority, GoalStatus, LogLevel, RunStreamEvent, SseEvent } from "@openx/shared";
-import { GOAL_PRIORITY_WEIGHT } from "@openx/shared";
+import type {
+  CoachExecutionMeta,
+  CoachExecutionMessage,
+  CoachMessageRecord,
+  CoachRefinedMessage,
+  CoachTextMessage,
+  CoachToolResultMessage,
+  Conversation,
+  Goal,
+  GoalPriority,
+  GoalStatus,
+  LogLevel,
+  Project,
+  RunStreamEvent,
+  SseEvent,
+  WorkOrderToolResult,
+} from "@openx/shared";
+import {
+  CoachExecutionMetaSchema,
+  DispatchContextSchema,
+  GoalDeliverableSchema,
+  GOAL_PRIORITY_WEIGHT,
+  RefinedGoalSchema,
+  WorkOrderToolResultSchema,
+  CONNECT_ANY_EXECUTOR_ID,
+} from "@openx/shared";
 import { getDbPath } from "./paths.js";
 
 export const MAX_SSE_CATCHUP = 500;
@@ -115,13 +139,62 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_run_events_goal ON run_events(goal_id, id);
   `);
 
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      workspace_dir TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id);
+  `);
+
   ensureColumn(database, "goals", "parent_goal_id", "TEXT");
   ensureColumn(database, "goals", "depends_on_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, "goals", "priority", "TEXT NOT NULL DEFAULT 'medium'");
+  ensureColumn(database, "goals", "auto_review", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "goals", "max_iterations", "INTEGER");
+  ensureColumn(database, "goals", "iteration_count", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "goals", "conversation_id", "TEXT");
+  ensureColumn(database, "goals", "deliverables_json", "TEXT");
+  ensureColumn(database, "goals", "dispatch_context_json", "TEXT");
+  ensureColumn(database, "coach_messages", "conversation_id", "TEXT");
+  ensureColumn(database, "coach_messages", "kind", "TEXT NOT NULL DEFAULT 'text'");
+  ensureColumn(database, "coach_messages", "meta_json", "TEXT");
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_goals_conversation ON goals(conversation_id)",
+  );
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coach_messages_conversation ON coach_messages(conversation_id)",
+  );
 }
+
+type ProjectRow = {
+  id: string;
+  name: string;
+  workspace_dir: string;
+  created_at: string;
+};
+
+type ConversationRow = {
+  id: string;
+  project_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
 
 type GoalRow = {
   id: string;
+  conversation_id: string | null;
   title: string;
   acceptance: string;
   user_draft: string | null;
@@ -131,18 +204,44 @@ type GoalRow = {
   status: string;
   progress: number;
   result_summary: string | null;
+  deliverables_json: string | null;
   effect_status: string | null;
   rework_reason: string | null;
   parent_goal_id: string | null;
   depends_on_json: string;
   priority: string;
+  auto_review: number;
+  max_iterations: number | null;
+  iteration_count: number;
+  dispatch_context_json: string | null;
   created_at: string;
   updated_at: string;
 };
 
+function parseDispatchContextJson(raw: string | null | undefined) {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = DispatchContextSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseDeliverablesJson(raw: string | null | undefined) {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = GoalDeliverableSchema.array().safeParse(JSON.parse(raw));
+    return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function rowToGoal(row: GoalRow): Goal {
   return {
     id: row.id,
+    conversationId: row.conversation_id ?? "",
     title: row.title,
     acceptance: row.acceptance,
     userDraft: row.user_draft ?? undefined,
@@ -152,27 +251,51 @@ function rowToGoal(row: GoalRow): Goal {
     status: row.status as GoalStatus,
     progress: row.progress,
     resultSummary: row.result_summary ?? undefined,
+    deliverables: parseDeliverablesJson(row.deliverables_json),
     effectStatus: row.effect_status as Goal["effectStatus"],
     reworkReason: row.rework_reason ?? undefined,
     parentGoalId: row.parent_goal_id ?? undefined,
     dependsOn: JSON.parse(row.depends_on_json) as string[],
     priority: (row.priority as GoalPriority) || "medium",
+    autoReview: row.auto_review === 1,
+    maxIterations: row.max_iterations ?? undefined,
+    iterationCount: row.iteration_count ?? 0,
+    dispatchContext: parseDispatchContextJson(row.dispatch_context_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export function listGoals(status?: GoalStatus): Goal[] {
+export type ListGoalsFilter = {
+  status?: GoalStatus;
+  conversationId?: string;
+  projectId?: string;
+};
+
+export function listGoals(filter?: GoalStatus | ListGoalsFilter): Goal[] {
   const database = getDb();
-  if (status) {
-    return database
-      .prepare("SELECT * FROM goals WHERE status = ? ORDER BY updated_at DESC")
-      .all(status)
-      .map((r) => rowToGoal(r as GoalRow));
+  const f: ListGoalsFilter =
+    typeof filter === "string" ? { status: filter } : (filter ?? {});
+  const conditions: string[] = ["conversation_id IS NOT NULL"];
+  const params: unknown[] = [];
+  if (f.status) {
+    conditions.push("status = ?");
+    params.push(f.status);
   }
+  if (f.conversationId) {
+    conditions.push("conversation_id = ?");
+    params.push(f.conversationId);
+  }
+  if (f.projectId) {
+    conditions.push(
+      `conversation_id IN (SELECT id FROM conversations WHERE project_id = ?)`,
+    );
+    params.push(f.projectId);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   return database
-    .prepare("SELECT * FROM goals ORDER BY updated_at DESC")
-    .all()
+    .prepare(`SELECT * FROM goals ${where} ORDER BY updated_at DESC`)
+    .all(...params)
     .map((r) => rowToGoal(r as GoalRow));
 }
 
@@ -212,17 +335,20 @@ export function insertGoal(goal: Goal): Goal {
   getDb()
     .prepare(
       `INSERT INTO goals (
-        id, title, acceptance, user_draft, execution_prompt, constraints_json,
-        executor_id, status, progress, result_summary, effect_status, rework_reason,
-        parent_goal_id, depends_on_json, priority, created_at, updated_at
+        id, conversation_id, title, acceptance, user_draft, execution_prompt, constraints_json,
+        executor_id, status, progress, result_summary, deliverables_json, effect_status, rework_reason,
+        parent_goal_id, depends_on_json, priority, auto_review, max_iterations,
+        iteration_count, dispatch_context_json, created_at, updated_at
       ) VALUES (
-        @id, @title, @acceptance, @userDraft, @executionPrompt, @constraintsJson,
-        @executorId, @status, @progress, @resultSummary, @effectStatus, @reworkReason,
-        @parentGoalId, @dependsOnJson, @priority, @createdAt, @updatedAt
+        @id, @conversationId, @title, @acceptance, @userDraft, @executionPrompt, @constraintsJson,
+        @executorId, @status, @progress, @resultSummary, @deliverablesJson, @effectStatus, @reworkReason,
+        @parentGoalId, @dependsOnJson, @priority, @autoReview, @maxIterations,
+        @iterationCount, @dispatchContextJson, @createdAt, @updatedAt
       )`,
     )
     .run({
       id: goal.id,
+      conversationId: goal.conversationId,
       title: goal.title,
       acceptance: goal.acceptance,
       userDraft: goal.userDraft ?? null,
@@ -232,11 +358,21 @@ export function insertGoal(goal: Goal): Goal {
       status: goal.status,
       progress: goal.progress,
       resultSummary: goal.resultSummary ?? null,
+      deliverablesJson:
+        goal.deliverables && goal.deliverables.length > 0
+          ? JSON.stringify(goal.deliverables)
+          : null,
       effectStatus: goal.effectStatus ?? null,
       reworkReason: goal.reworkReason ?? null,
       parentGoalId: goal.parentGoalId ?? null,
       dependsOnJson: JSON.stringify(goal.dependsOn ?? []),
       priority: goal.priority ?? "medium",
+      autoReview: goal.autoReview ? 1 : 0,
+      maxIterations: goal.maxIterations ?? null,
+      iterationCount: goal.iterationCount ?? 0,
+      dispatchContextJson: goal.dispatchContext
+        ? JSON.stringify(goal.dispatchContext)
+        : null,
       createdAt: goal.createdAt,
       updatedAt: goal.updatedAt,
     });
@@ -250,9 +386,13 @@ export function updateGoal(goal: Goal): Goal {
         title = @title, acceptance = @acceptance, user_draft = @userDraft,
         execution_prompt = @executionPrompt, constraints_json = @constraintsJson,
         executor_id = @executorId, status = @status, progress = @progress,
-        result_summary = @resultSummary, effect_status = @effectStatus,
+        result_summary = @resultSummary, deliverables_json = @deliverablesJson,
+        effect_status = @effectStatus,
         rework_reason = @reworkReason, parent_goal_id = @parentGoalId,
-        depends_on_json = @dependsOnJson, priority = @priority, updated_at = @updatedAt
+        depends_on_json = @dependsOnJson, priority = @priority,
+        auto_review = @autoReview, max_iterations = @maxIterations,
+        iteration_count = @iterationCount, dispatch_context_json = @dispatchContextJson,
+        updated_at = @updatedAt
       WHERE id = @id`,
     )
     .run({
@@ -266,14 +406,42 @@ export function updateGoal(goal: Goal): Goal {
       status: goal.status,
       progress: goal.progress,
       resultSummary: goal.resultSummary ?? null,
+      deliverablesJson:
+        goal.deliverables && goal.deliverables.length > 0
+          ? JSON.stringify(goal.deliverables)
+          : null,
       effectStatus: goal.effectStatus ?? null,
       reworkReason: goal.reworkReason ?? null,
       parentGoalId: goal.parentGoalId ?? null,
       dependsOnJson: JSON.stringify(goal.dependsOn ?? []),
       priority: goal.priority ?? "medium",
+      autoReview: goal.autoReview ? 1 : 0,
+      maxIterations: goal.maxIterations ?? null,
+      iterationCount: goal.iterationCount ?? 0,
+      dispatchContextJson: goal.dispatchContext
+        ? JSON.stringify(goal.dispatchContext)
+        : null,
       updatedAt: goal.updatedAt,
     });
   return goal;
+}
+
+/** CAS：将 connect:any 任务认领给指定 executor（单条） */
+export function claimConnectPoolGoal(goalId: string, executorId: string): Goal | null {
+  const now = new Date().toISOString();
+  const info = getDb()
+    .prepare(
+      `UPDATE goals SET executor_id = @executorId, updated_at = @updatedAt
+       WHERE id = @goalId AND executor_id = @poolId AND status = 'running'`,
+    )
+    .run({
+      goalId,
+      executorId,
+      updatedAt: now,
+      poolId: CONNECT_ANY_EXECUTOR_ID,
+    });
+  if (info.changes === 0) return null;
+  return getGoalById(goalId) ?? null;
 }
 
 /** CAS 式状态迁移：仅当当前状态在 fromStatuses 中时才更新 */
@@ -384,58 +552,366 @@ export function listLogs(goalId: string, limit = 200) {
     .reverse() as { level: LogLevel; message: string; timestamp: string }[];
 }
 
+type CoachMessageRow = {
+  id: number;
+  conversationId: string;
+  goal_id: string | null;
+  role: string;
+  text: string;
+  timestamp: string;
+  kind: string;
+  meta_json: string | null;
+};
+
+function rowToCoachMessage(row: CoachMessageRow): CoachMessageRecord {
+  if (row.kind === "execution" && row.meta_json) {
+    const execution = CoachExecutionMetaSchema.parse(JSON.parse(row.meta_json));
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      kind: "execution",
+      timestamp: row.timestamp,
+      execution,
+    };
+  }
+  if (row.kind === "refined" && row.meta_json) {
+    const refined = RefinedGoalSchema.parse(JSON.parse(row.meta_json));
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      kind: "refined",
+      timestamp: row.timestamp,
+      refined,
+      linkedGoalId: row.goal_id ?? undefined,
+    };
+  }
+  if (row.kind === "tool_result" && row.meta_json) {
+    const toolResult = WorkOrderToolResultSchema.parse(JSON.parse(row.meta_json));
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      kind: "tool_result",
+      timestamp: row.timestamp,
+      toolResult,
+    };
+  }
+  return {
+    id: row.id,
+    conversationId: row.conversationId,
+    kind: "text",
+    role: row.role as "user" | "coach",
+    text: row.text,
+    timestamp: row.timestamp,
+  };
+}
+
 export function saveCoachMessage(
-  goalId: string | null,
+  conversationId: string,
   role: "user" | "coach",
   text: string,
-): { id: number; goalId: string | null; role: string; text: string; timestamp: string } {
+): CoachTextMessage {
   const timestamp = new Date().toISOString();
   const result = getDb()
     .prepare(
-      "INSERT INTO coach_messages (goal_id, role, text, created_at) VALUES (?, ?, ?, ?)",
+      `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
+       VALUES (?, NULL, ?, ?, 'text', NULL, ?)`,
     )
-    .run(goalId, role, text, timestamp);
+    .run(conversationId, role, text, timestamp);
+  touchConversation(conversationId);
   return {
     id: Number(result.lastInsertRowid),
-    goalId,
+    conversationId,
+    kind: "text",
     role,
     text,
     timestamp,
   };
 }
 
-export function listCoachMessages(goalId?: string | null, limit = 80) {
-  const database = getDb();
-  if (goalId) {
-    return database
+export function hasCoachExecutionMessage(
+  conversationId: string,
+  goalId: string,
+  runId: string,
+): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM coach_messages
+       WHERE conversation_id = ? AND kind = 'execution'
+         AND json_extract(meta_json, '$.goalId') = ?
+         AND json_extract(meta_json, '$.runId') = ?
+       LIMIT 1`,
+    )
+    .get(conversationId, goalId, runId) as { id: number } | undefined;
+  return Boolean(row);
+}
+
+export function linkCoachRefinedMessage(messageId: number, goalId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE coach_messages SET goal_id = ? WHERE id = ? AND kind = 'refined'`,
+    )
+    .run(goalId, messageId);
+}
+
+export function getCoachMessageById(
+  messageId: number,
+): CoachMessageRecord | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id, conversation_id as conversationId, goal_id, role, text, kind, meta_json,
+              created_at as timestamp
+       FROM coach_messages WHERE id = ?`,
+    )
+    .get(messageId) as CoachMessageRow | undefined;
+  return row ? rowToCoachMessage(row) : null;
+}
+
+export function hasWorkOrderToolResult(
+  conversationId: string,
+  refinedMessageId: number,
+): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM coach_messages
+       WHERE conversation_id = ? AND kind = 'tool_result'
+         AND json_extract(meta_json, '$.refinedMessageId') = ?
+       LIMIT 1`,
+    )
+    .get(conversationId, refinedMessageId) as { id: number } | undefined;
+  return Boolean(row);
+}
+
+export function saveCoachToolResultMessage(
+  conversationId: string,
+  toolResult: WorkOrderToolResult,
+): CoachToolResultMessage {
+  const timestamp = new Date().toISOString();
+  const metaJson = JSON.stringify({
+    ...toolResult,
+    dismissed: toolResult.outcome === "dismissed",
+  });
+  const result = getDb()
+    .prepare(
+      `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
+       VALUES (?, ?, 'coach', '', 'tool_result', ?, ?)`,
+    )
+    .run(
+      conversationId,
+      toolResult.goalId ?? null,
+      metaJson,
+      timestamp,
+    );
+  touchConversation(conversationId);
+  return {
+    id: Number(result.lastInsertRowid),
+    conversationId,
+    kind: "tool_result",
+    timestamp,
+    toolResult,
+  };
+}
+
+export function saveCoachRefinedMessage(
+  conversationId: string,
+  refined: CoachRefinedMessage["refined"],
+): CoachRefinedMessage {
+  const timestamp = new Date().toISOString();
+  const metaJson = JSON.stringify(refined);
+  const result = getDb()
+    .prepare(
+      `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
+       VALUES (?, NULL, 'coach', '', 'refined', ?, ?)`,
+    )
+    .run(conversationId, metaJson, timestamp);
+  touchConversation(conversationId);
+  return {
+    id: Number(result.lastInsertRowid),
+    conversationId,
+    kind: "refined",
+    timestamp,
+    refined,
+  };
+}
+
+export function saveCoachExecutionMessage(
+  conversationId: string,
+  execution: CoachExecutionMeta,
+): CoachExecutionMessage {
+  const timestamp = new Date().toISOString();
+  const metaJson = JSON.stringify(execution);
+  const result = getDb()
+    .prepare(
+      `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
+       VALUES (?, ?, 'coach', '', 'execution', ?, ?)`,
+    )
+    .run(conversationId, execution.goalId, metaJson, timestamp);
+  touchConversation(conversationId);
+  return {
+    id: Number(result.lastInsertRowid),
+    conversationId,
+    kind: "execution",
+    timestamp,
+    execution,
+  };
+}
+
+export function listCoachMessages(
+  conversationId: string,
+  limit = 80,
+): CoachMessageRecord[] {
+  return (
+    getDb()
       .prepare(
-        `SELECT id, goal_id as goalId, role, text, created_at as timestamp
-         FROM coach_messages WHERE goal_id = ? OR goal_id IS NULL
+        `SELECT id, conversation_id as conversationId, goal_id, role, text, kind, meta_json,
+                created_at as timestamp
+         FROM coach_messages WHERE conversation_id = ?
          ORDER BY id DESC LIMIT ?`,
       )
-      .all(goalId, limit)
-      .reverse() as {
-      id: number;
-      goalId: string | null;
-      role: "user" | "coach";
-      text: string;
-      timestamp: string;
-    }[];
+      .all(conversationId, limit)
+      .reverse() as CoachMessageRow[]
+  ).map(rowToCoachMessage);
+}
+
+function rowToProject(row: ProjectRow): Project {
+  return {
+    id: row.id,
+    name: row.name,
+    workspaceDir: row.workspace_dir,
+    createdAt: row.created_at,
+  };
+}
+
+function rowToConversation(row: ConversationRow): Conversation {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function listProjects(): Project[] {
+  return getDb()
+    .prepare("SELECT * FROM projects ORDER BY created_at ASC")
+    .all()
+    .map((r) => rowToProject(r as ProjectRow));
+}
+
+export function getProjectById(id: string): Project | undefined {
+  const row = getDb().prepare("SELECT * FROM projects WHERE id = ?").get(id) as
+    | ProjectRow
+    | undefined;
+  return row ? rowToProject(row) : undefined;
+}
+
+export function insertProject(project: Project): Project {
+  getDb()
+    .prepare(
+      "INSERT INTO projects (id, name, workspace_dir, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(project.id, project.name, project.workspaceDir, project.createdAt);
+  return project;
+}
+
+export function updateProject(project: Project): Project {
+  getDb()
+    .prepare("UPDATE projects SET name = ?, workspace_dir = ? WHERE id = ?")
+    .run(project.name, project.workspaceDir, project.id);
+  return project;
+}
+
+export function deleteProject(id: string): boolean {
+  const database = getDb();
+  const convIds = database
+    .prepare("SELECT id FROM conversations WHERE project_id = ?")
+    .all(id) as { id: string }[];
+  for (const { id: convId } of convIds) {
+    deleteConversation(convId);
+  }
+  const result = database.prepare("DELETE FROM projects WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function listConversations(projectId?: string): Conversation[] {
+  const database = getDb();
+  if (projectId) {
+    return database
+      .prepare(
+        "SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC",
+      )
+      .all(projectId)
+      .map((r) => rowToConversation(r as ConversationRow));
   }
   return database
+    .prepare("SELECT * FROM conversations ORDER BY updated_at DESC")
+    .all()
+    .map((r) => rowToConversation(r as ConversationRow));
+}
+
+export function getConversationById(id: string): Conversation | undefined {
+  const row = getDb()
+    .prepare("SELECT * FROM conversations WHERE id = ?")
+    .get(id) as ConversationRow | undefined;
+  return row ? rowToConversation(row) : undefined;
+}
+
+export function insertConversation(conversation: Conversation): Conversation {
+  getDb()
     .prepare(
-      `SELECT id, goal_id as goalId, role, text, created_at as timestamp
-       FROM coach_messages WHERE goal_id IS NULL
-       ORDER BY id DESC LIMIT ?`,
+      "INSERT INTO conversations (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     )
-    .all(limit)
-    .reverse() as {
-    id: number;
-    goalId: string | null;
-    role: "user" | "coach";
-    text: string;
-    timestamp: string;
-  }[];
+    .run(
+      conversation.id,
+      conversation.projectId,
+      conversation.title,
+      conversation.createdAt,
+      conversation.updatedAt,
+    );
+  return conversation;
+}
+
+export function updateConversation(conversation: Conversation): Conversation {
+  getDb()
+    .prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
+    .run(conversation.title, conversation.updatedAt, conversation.id);
+  return conversation;
+}
+
+export function touchConversation(id: string): void {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
+    .run(now, id);
+}
+
+export function deleteConversation(id: string): boolean {
+  const database = getDb();
+  const goalIds = database
+    .prepare("SELECT id FROM goals WHERE conversation_id = ?")
+    .all(id) as { id: string }[];
+  if (goalIds.length > 0) {
+    deleteGoals(goalIds.map((g) => g.id));
+  }
+  database.prepare("DELETE FROM coach_messages WHERE conversation_id = ?").run(id);
+  const result = database
+    .prepare("DELETE FROM conversations WHERE id = ?")
+    .run(id);
+  return result.changes > 0;
+}
+
+export function getProjectForConversation(
+  conversationId: string,
+): Project | undefined {
+  const conv = getConversationById(conversationId);
+  if (!conv) return undefined;
+  return getProjectById(conv.projectId);
+}
+
+export function getWorkspaceDirForConversation(
+  conversationId: string,
+): string | undefined {
+  return getProjectForConversation(conversationId)?.workspaceDir;
 }
 
 export function saveExecutionSummary(
@@ -461,6 +937,82 @@ export function listExecutionSummaries(goalId: string, limit = 5): string[] {
     .reverse();
 }
 
+export const REVIEW_ROUND_LOG_PREFIX = "【审查记录】";
+
+export type ReviewVerifySnapshot = {
+  command: string;
+  ok: boolean;
+  exitCode: number | null;
+  timedOut: boolean;
+  stdout?: string;
+  stderr?: string;
+};
+
+export type ReviewRoundEntry = {
+  round: number;
+  roundLabel: string;
+  verdict: "pass" | "fail";
+  reason: string;
+  reworkInstruction?: string;
+  reworkTargets?: Array<{ childTitle: string; instruction: string }>;
+  verifyResults?: ReviewVerifySnapshot[];
+  timestamp: string;
+};
+
+export function listReviewRoundEntries(
+  goalId: string,
+  limit = 30,
+): ReviewRoundEntry[] {
+  const rows = listLogs(goalId, 400)
+    .filter((l) => l.message.startsWith(REVIEW_ROUND_LOG_PREFIX))
+    .map((l) => {
+      try {
+        const data = JSON.parse(
+          l.message.slice(REVIEW_ROUND_LOG_PREFIX.length),
+        ) as {
+          round?: number;
+          verdict?: "pass" | "fail";
+          reason?: string;
+          reworkInstruction?: string;
+          reworkTargets?: Array<{ childTitle: string; instruction: string }>;
+          verifyResults?: ReviewVerifySnapshot[];
+        };
+        const round = data.round ?? 0;
+        return {
+          round,
+          roundLabel: `第 ${round + 1} 轮`,
+          verdict: data.verdict ?? "fail",
+          reason: data.reason ?? "",
+          reworkInstruction: data.reworkInstruction,
+          reworkTargets: data.reworkTargets,
+          verifyResults: data.verifyResults,
+          timestamp: l.timestamp,
+        } satisfies ReviewRoundEntry;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is ReviewRoundEntry => e !== null);
+  return rows.slice(-limit);
+}
+
+export function listReviewRounds(goalId: string, limit = 10): string[] {
+  return listReviewRoundEntries(goalId, limit).map((entry) => {
+    const targets =
+      entry.reworkTargets?.length
+        ? `\n打回子任务：${entry.reworkTargets.map((t) => `「${t.childTitle}」→ ${t.instruction}`).join("；")}`
+        : "";
+    const rework = entry.reworkInstruction
+      ? `\n修改清单：${entry.reworkInstruction}`
+      : "";
+    const tests =
+      entry.verifyResults?.length
+        ? `\n验证：${entry.verifyResults.map((v) => `${v.command} → ${v.ok ? "通过" : "失败"}`).join("；")}`
+        : "";
+    return `${entry.roundLabel} ${entry.verdict}：${entry.reason}${rework}${targets}${tests}`;
+  });
+}
+
 export function buildGoalFeedback(goalId: string) {
   const goal = getGoalById(goalId);
   if (!goal) return undefined;
@@ -468,11 +1020,14 @@ export function buildGoalFeedback(goalId: string) {
     level: l.level,
     message: l.message,
   }));
+  const priorReviewRounds = listReviewRounds(goalId, 10);
   return {
     reworkReason: goal.reworkReason,
     resultSummary: goal.resultSummary,
     recentLogs,
-    priorSummaries: listExecutionSummaries(goalId),
+    priorSummaries: listExecutionSummaries(goalId, 10),
+    priorReviewRounds:
+      priorReviewRounds.length > 0 ? priorReviewRounds : undefined,
   };
 }
 

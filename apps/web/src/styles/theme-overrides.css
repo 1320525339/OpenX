@@ -1,0 +1,89 @@
+/* 将遗留硬编码色值映射到主题令牌 */
+
+.chat-context-banner {
+  background: var(--surface-elevated) !important;
+  box-shadow: var(--shadow-dropdown) !important;
+}
+
+.modal-overlay .mech-panel.modal-panel {
+  background: var(--surface-elevated) !important;
+  box-shadow: var(--shadow-modal) !important;
+}
+
+.app-minimal .modal-panel {
+  background: var(--surface-elevated) !important;
+  box-shadow: var(--shadow-modal) !important;
+}
+
+.cursor-workspace .chat-bubble.coach {
+  background: var(--bubble-coach-bg);
+  color: var(--text);
+}
+
+.cursor-workspace .chat-bubble.user {
+  background: var(--bubble-user-bg);
+  color: var(--bubble-user-fg);
+}
+
+.cursor-workspace .goal-card:hover {
+  background: var(--hover-bg);
+}
+
+.cursor-workspace .goal-card.selected {
+  background: var(--selected-bg);
+}
+
+.cursor-workspace .filter-tabs .filter-chip:hover {
+  background: var(--hover-bg);
+}
+
+.cursor-workspace .filter-tabs .filter-chip.active {
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+
+.app-minimal .sidebar-item:hover {
+  background: var(--hover-bg);
+}
+
+.app-minimal .sidebar-item.active {
+  background: var(--active-bg);
+}
+
+.app-minimal .sidebar-new {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+
+.app-minimal .sidebar-new:hover {
+  background: var(--primary-hover);
+}
+
+.cursor-workspace .chat-composer-actions .btn.primary,
+.app-minimal .btn.primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+
+.cursor-workspace .chat-composer-actions .btn.primary:hover:not(:disabled),
+.app-minimal .btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.app-minimal .dynamic-island.dynamic-island-toast {
+  background: var(--surface-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-toast);
+}
+
+.chat-markdown .chat-md-pre,
+.chat-markdown code.chat-md-code {
+  background: var(--code-bg);
+}
+
+.pane-divider:hover::after,
+.pane-divider:focus-visible::after,
+body.split-dragging .pane-divider::after {
+  background: var(--divider-hover);
+}

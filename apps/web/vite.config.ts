@@ -12,8 +12,18 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://127.0.0.1:3921", changeOrigin: true },
-      "/internal": { target: "http://127.0.0.1:3921", changeOrigin: true },
+      "/api": {
+        target: "http://127.0.0.1:3921",
+        changeOrigin: true,
+        timeout: 120_000,
+        proxyTimeout: 120_000,
+      },
+      "/internal": {
+        target: "http://127.0.0.1:3921",
+        changeOrigin: true,
+        timeout: 120_000,
+        proxyTimeout: 120_000,
+      },
     },
   },
 });

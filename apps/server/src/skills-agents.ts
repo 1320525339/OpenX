@@ -1,4 +1,10 @@
-import { ACP_RUNTIMES, type CliProfile, type SkillBindingsMap } from "@openx/shared";
+import {
+  ACP_RUNTIMES,
+  type CliProfile,
+  type Settings,
+  type SkillBindingsMap,
+} from "@openx/shared";
+import { listKnownExecutorIds } from "./skills-resolve.js";
 
 export type ManagedAgentInfo = {
   executorId: string;
@@ -92,6 +98,63 @@ export function listManagedAgents(
       available: false,
       hint: "未检测",
       assignedSkillIds: assignedFor(fullId),
+    });
+  }
+
+  return rows;
+}
+
+/** 不触发 detectExecutors：仅根据配置与注册表列出可绑定 Agent（在线状态为未知） */
+export function listManagedAgentsFromRegistry(
+  settings: Settings,
+  bindings: SkillBindingsMap = {},
+): ManagedAgentInfo[] {
+  const profiles = settings.cliProfiles ?? [];
+  const rows: ManagedAgentInfo[] = [];
+  const seen = new Set<string>();
+
+  const assignedFor = (executorId: string): string[] =>
+    Object.entries(bindings)
+      .filter(([, b]) => b.enabled && b.cliIds.includes(executorId))
+      .map(([id]) => id);
+
+  const labelFor = (executorId: string): string => {
+    if (executorId === "pi") return "Pi 内嵌底座";
+    const runtime = ACP_RUNTIMES[executorId as keyof typeof ACP_RUNTIMES];
+    if (runtime) return runtime.label;
+    const profile = profiles.find((p) => p.executorId === executorId);
+    if (profile) return profile.displayName;
+    return executorId;
+  };
+
+  const kindFor = (executorId: string): ManagedAgentInfo["kind"] => {
+    if (executorId === "pi") return "pi";
+    if (executorId.startsWith("acp:")) return "acp";
+    return "connect";
+  };
+
+  for (const executorId of listKnownExecutorIds(settings)) {
+    if (seen.has(executorId)) continue;
+    seen.add(executorId);
+    rows.push({
+      executorId,
+      label: labelFor(executorId),
+      kind: kindFor(executorId),
+      available: false,
+      hint: "在线状态请刷新执行器检测",
+      assignedSkillIds: assignedFor(executorId),
+    });
+  }
+
+  for (const id of Object.keys(ACP_RUNTIMES)) {
+    if (seen.has(id)) continue;
+    rows.push({
+      executorId: id,
+      label: ACP_RUNTIMES[id as keyof typeof ACP_RUNTIMES].label,
+      kind: "acp",
+      available: false,
+      hint: "未检测",
+      assignedSkillIds: assignedFor(id),
     });
   }
 

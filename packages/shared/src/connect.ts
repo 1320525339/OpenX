@@ -8,8 +8,15 @@ export const ConnectInputSchema = z.object({
 });
 export type ConnectInput = z.infer<typeof ConnectInputSchema>;
 
+export const ClaimPoolGoalSchema = z.object({
+  goalId: z.string().optional(),
+});
+export type ClaimPoolGoalInput = z.infer<typeof ClaimPoolGoalSchema>;
+
 export const HeartbeatInputSchema = z.object({
   connectionId: z.string().min(1).optional(),
+  /** 心跳时从任务池原子认领一条 connect:any（默认 true，每次最多 1 条） */
+  autoClaimPool: z.boolean().optional(),
   tokenUsage: z
     .object({
       model: z.string().optional(),

@@ -172,10 +172,20 @@ function cleanTextAroundPath(
   return t;
 }
 
-export function renderChatMessageText(text: string, onUserBubble = false): ReactNode {
+export type ChatRenderOptions = {
+  /** 流式输出中：纯文本，完成后走 Markdown/HTML */
+  streaming?: boolean;
+};
+
+export function renderChatMessageText(
+  text: string,
+  onUserBubble = false,
+  options?: ChatRenderOptions,
+): ReactNode {
+  const plain = options?.streaming === true;
   const blocks = splitMessageBlocks(text);
   if (blocks.length === 1 && blocks[0]!.kind === "text") {
-    return <ChatMarkdown text={blocks[0]!.text} />;
+    return <ChatMarkdown text={blocks[0]!.text} plain={plain} />;
   }
 
   return (
@@ -190,6 +200,7 @@ export function renderChatMessageText(text: string, onUserBubble = false): React
               index > 0 && blocks[index - 1]!.kind === "path" ? "after-path" : undefined
             }
             text={block.text}
+            plain={plain}
           />
         ),
       )}

@@ -1,7 +1,10 @@
 import { serve } from "@hono/node-server";
 import { app } from "./routes.js";
 import { ensureBuiltinSkillsOnStartup } from "./skills-service.js";
+import { ensureBuiltinAgentsOnStartup } from "./agents-service.js";
 import { startConnectWatchdog, stopConnectWatchdog } from "./connect-watchdog.js";
+import { startAcpWatchdog, stopAcpWatchdog } from "./acp-watchdog.js";
+import { startPiWatchdog, stopPiWatchdog } from "./pi-watchdog.js";
 import { getDb, resetDb } from "./db.js";
 
 const port = Number(process.env.PORT ?? 3921);
@@ -10,7 +13,13 @@ const host = process.env.HOST ?? "127.0.0.1";
 console.log(`OpenX server http://${host}:${port}`);
 
 ensureBuiltinSkillsOnStartup();
+ensureBuiltinAgentsOnStartup();
+if (!process.env.OPENX_PI_WORKER && process.env.OPENX_MOCK_PI !== "1") {
+  process.env.OPENX_PI_WORKER = "1";
+}
 startConnectWatchdog();
+startPiWatchdog();
+startAcpWatchdog();
 
 const server = serve({ fetch: app.fetch, port, hostname: host });
 
@@ -26,6 +35,8 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 function shutdown(signal: string) {
   console.log(`[openx] ${signal}，正在关闭…`);
   stopConnectWatchdog();
+  stopPiWatchdog();
+  stopAcpWatchdog();
   try {
     getDb().close();
   } catch {

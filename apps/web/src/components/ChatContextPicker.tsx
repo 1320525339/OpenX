@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useMcpCatalog } from "../lib/use-mcp-catalog";
 import {
   COACH_AGENTS,
-  COACH_MCPS,
   COACH_SKILLS,
   countEnabled,
   loadAgentSelection,
@@ -10,6 +10,7 @@ import {
   saveAgentSelection,
   saveMcpSelection,
   saveSkillSelection,
+  type CoachAgent,
   type CoachSkill,
 } from "../lib/coach-context";
 
@@ -17,6 +18,7 @@ export type PickerTab = "skill" | "mcp" | "agent";
 
 type Props = {
   skillCatalog?: CoachSkill[];
+  agentCatalog?: CoachAgent[];
   onContextChange?: (ctx: {
     skills: Record<string, boolean>;
     mcps: Record<string, boolean>;
@@ -24,16 +26,33 @@ type Props = {
   }) => void;
 };
 
-export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange }: Props) {
+export function ChatContextPicker({
+  skillCatalog = COACH_SKILLS,
+  agentCatalog = COACH_AGENTS,
+  onContextChange,
+}: Props) {
+  const { mcps: mcpCatalog } = useMcpCatalog();
   const [openTab, setOpenTab] = useState<PickerTab | null>(null);
   const [skills, setSkills] = useState(() => loadSkillSelection(skillCatalog));
   const [mcps, setMcps] = useState(loadMcpSelection);
-  const [agentId, setAgentId] = useState(loadAgentSelection);
-  const footerRef = useRef<HTMLDivElement>(null);
+  const [agentId, setAgentId] = useState(() => loadAgentSelection(agentCatalog));
 
   useEffect(() => {
     setSkills(loadSkillSelection(skillCatalog));
   }, [skillCatalog.map((s) => `${s.id}:${s.installed}`).join("|")]);
+
+  useEffect(() => {
+    setAgentId((prev) => {
+      if (agentCatalog.some((a) => a.id === prev)) return prev;
+      const next = loadAgentSelection(agentCatalog);
+      saveAgentSelection(next);
+      return next;
+    });
+  }, [agentCatalog.map((a) => a.id).join("|")]);
+
+  const footerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [panning, setPanning] = useState(false);
 
   const onContextChangeRef = useRef(onContextChange);
   onContextChangeRef.current = onContextChange;
@@ -44,6 +63,7 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
+      if (e.button === 1) return;
       if (!footerRef.current?.contains(e.target as Node)) {
         setOpenTab(null);
       }
@@ -51,6 +71,52 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !openTab) return;
+
+    const canScroll = () => el.scrollWidth > el.clientWidth + 1;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 1 || !canScroll()) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const startX = e.clientX;
+      const startScroll = el.scrollLeft;
+      setPanning(true);
+
+      const onMove = (ev: MouseEvent) => {
+        ev.preventDefault();
+        el.scrollLeft = startScroll - (ev.clientX - startX);
+      };
+
+      const onUp = () => {
+        setPanning(false);
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (!canScroll()) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      e.preventDefault();
+      el.scrollLeft += delta;
+    };
+
+    el.addEventListener("mousedown", onMouseDown, { capture: true });
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("mousedown", onMouseDown, { capture: true });
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [openTab]);
 
   const toggleTab = (tab: PickerTab) => {
     setOpenTab((prev) => (prev === tab ? null : tab));
@@ -76,10 +142,38 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
 
   const skillCount = countEnabled(skills);
   const mcpCount = countEnabled(mcps);
-  const activeAgent = COACH_AGENTS.find((a) => a.id === agentId) ?? COACH_AGENTS[0];
+  const activeAgent = agentCatalog.find((a) => a.id === agentId) ?? agentCatalog[0];
 
   return (
     <div className="chat-context-picker" ref={footerRef}>
+      <div className="chat-context-tabs">
+        <button
+          type="button"
+          className={`chat-context-tab${openTab === "skill" ? " open" : ""}`}
+          aria-expanded={openTab === "skill"}
+          onClick={() => toggleTab("skill")}
+        >
+          Skill{skillCount > 0 ? ` ${skillCount}` : ""}
+        </button>
+        <button
+          type="button"
+          className={`chat-context-tab${openTab === "mcp" ? " open" : ""}`}
+          aria-expanded={openTab === "mcp"}
+          onClick={() => toggleTab("mcp")}
+        >
+          MCP{mcpCount > 0 ? ` ${mcpCount}` : ""}
+        </button>
+        <button
+          type="button"
+          className={`chat-context-tab${openTab === "agent" ? " open" : ""}`}
+          aria-expanded={openTab === "agent"}
+          onClick={() => toggleTab("agent")}
+        >
+          Agent
+          <span className="chat-context-tab-label">{activeAgent?.name ?? "Agent"}</span>
+        </button>
+      </div>
+
       {openTab && (
         <div className="chat-context-banner" role="listbox" aria-label="上下文选择">
           <div className="chat-context-banner-head">
@@ -92,7 +186,10 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
               {openTab === "agent" ? "单选" : "可多选"}
             </span>
           </div>
-          <div className="chat-context-banner-list">
+          <div
+            ref={listRef}
+            className={`chat-context-banner-list${panning ? " is-panning" : ""}`}
+          >
             {openTab === "skill" &&
               skillCatalog.map((item) => {
                 const on = skills[item.id];
@@ -113,7 +210,7 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
                 );
               })}
             {openTab === "mcp" &&
-              COACH_MCPS.map((item) => {
+              mcpCatalog.map((item) => {
                 const on = mcps[item.id];
                 return (
                   <button
@@ -130,7 +227,7 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
                 );
               })}
             {openTab === "agent" &&
-              COACH_AGENTS.map((item) => {
+              agentCatalog.map((item) => {
                 const on = agentId === item.id;
                 return (
                   <button
@@ -149,36 +246,6 @@ export function ChatContextPicker({ skillCatalog = COACH_SKILLS, onContextChange
           </div>
         </div>
       )}
-
-      <div className="chat-context-tabs">
-        <button
-          type="button"
-          className={`chat-context-tab${openTab === "skill" ? " open" : ""}`}
-          aria-expanded={openTab === "skill"}
-          onClick={() => toggleTab("skill")}
-        >
-          Skill
-          {skillCount > 0 && <span className="chat-context-tab-badge">{skillCount}</span>}
-        </button>
-        <button
-          type="button"
-          className={`chat-context-tab${openTab === "mcp" ? " open" : ""}`}
-          aria-expanded={openTab === "mcp"}
-          onClick={() => toggleTab("mcp")}
-        >
-          MCP
-          {mcpCount > 0 && <span className="chat-context-tab-badge">{mcpCount}</span>}
-        </button>
-        <button
-          type="button"
-          className={`chat-context-tab${openTab === "agent" ? " open" : ""}`}
-          aria-expanded={openTab === "agent"}
-          onClick={() => toggleTab("agent")}
-        >
-          Agent
-          <span className="chat-context-tab-label">{activeAgent.name}</span>
-        </button>
-      </div>
     </div>
   );
 }

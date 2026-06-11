@@ -45,6 +45,7 @@ describe("executor helpers", () => {
 
   it("classifies connect ids", () => {
     expect(isConnectExecutorId("cursor-worker")).toBe(true);
+    expect(isConnectExecutorId("connect:any")).toBe(true);
     expect(isConnectExecutorId("pi")).toBe(false);
     expect(isConnectExecutorId("acp:gemini")).toBe(false);
   });

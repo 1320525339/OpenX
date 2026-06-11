@@ -17,7 +17,8 @@
     "test": "node --experimental-vm-modules node_modules/vitest/vitest.mjs run"
   },
   "dependencies": {
-    "@openx/executor-core": "workspace:*"
+    "@openx/executor-core": "workspace:*",
+    "@openx/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

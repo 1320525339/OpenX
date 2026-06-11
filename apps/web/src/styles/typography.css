@@ -1,89 +1,228 @@
-/* 统一字号阶梯与文本角色 — 覆盖 panels 内零散 rem */
+/**
+ * 全站字体规则（仅两档字号 + 两档字重）
+ *
+ * 字号
+ * - --type-body  13px  正文、按钮、导航、标题（默认）
+ * - --type-meta  12px  辅助说明、时间、角标、标签
+ *
+ * 字重
+ * - --weight-regular  400  正文与辅助
+ * - --weight-medium   500  标题、选中、按钮、Tab
+ */
 
-:is(
-  .settings-hint,
-  .tools-tab-lead,
-  .goal-card-meta,
-  .goal-card-acceptance,
-  .sidebar-subtitle,
-  .sidebar-workspace-hint,
-  .sidebar-status,
-  .broadcast-bar,
-  .coach-status-badge,
-  .workspace-picker-hint-inline,
-  .tools-cli-hint,
-  .form-label,
-  .empty-hint,
-  .approve-confirm,
-  .chat-context-banner-hint,
-  .tools-template-card span,
-  .tools-skill-card span,
-  .tools-skill-desc,
-  .provider-chip-desc
-) {
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-  font-weight: var(--font-normal);
+:root {
+  --type-body: 0.8125rem;
+  --type-meta: 0.75rem;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
 }
 
-:is(
-  .tools-section-title,
-  .settings-section-title,
-  .tools-add-cli-head h4,
-  .chat-context-banner-title,
-  .goal-card-title,
+.t-body {
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+}
+
+.t-meta {
+  font-size: var(--type-meta);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  color: var(--text-dim);
+}
+
+.t-label {
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+}
+
+.t-title {
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+  color: var(--text);
+}
+
+/* ── 辅助：12px 常规 ── */
+
+.app-minimal :is(
+  .topbar-meta,
+  .topbar-alert,
+  .topbar-urgent,
+  .sidebar-group-title,
+  .sidebar-badge,
+  .workspace-picker-path,
+  .workspace-picker-path-config,
+  .workspace-picker-hint-inline,
+  .settings-hint,
+  .settings-dirty,
+  .settings-saved,
+  .provider-status,
+  .provider-section-label,
+  .provider-chip-desc,
+  .form-label,
+  .field-label,
+  .settings-panel-toolbar,
+  .empty-hint,
+  .goal-card-meta,
+  .goal-card-acceptance,
+  .status-pill,
+  .executor-tag,
+  .progress-ring,
+  .log-strip-sse,
+  .log-strip-label,
+  .log-strip-chip,
+  .log-strip-toggle,
+  .log-strip-empty,
+  .log-strip-line,
+  .log-line,
+  .dynamic-island,
+  .dynamic-island-hint,
+  .chat-context-tab,
+  .chat-context-tab-badge,
+  .chat-context-banner-hint,
+  .chat-context-option-desc,
+  .tools-tab,
+  .tools-tab-badge,
+  .tools-tab-lead,
+  .tools-cli-kind,
+  .tools-cli-status,
+  .tools-cli-hint,
+  .tools-skill-card span,
+  .tools-skill-desc,
+  .tools-skill-badge,
+  .btn-ghost,
+  .btn-text,
+  .tasks-edit-toggle,
+  .tasks-new-goal,
+  .tasks-batch-count,
+  .goal-detail-back,
+  .goal-detail-link,
+  .sse-badge,
+  .coach-status-badge,
+  .loading-view,
+  .approve-confirm,
+  .rework-box span
+) {
+  font-size: var(--type-meta);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+}
+
+/* ── 标签：13px 中等 ── */
+
+.app-minimal :is(
+  .btn,
+  .sidebar-item,
+  .sidebar-new,
+  .filter-chip,
+  .settings-tab,
+  .mech-switch,
+  .mech-input,
+  .mech-textarea,
+  .mech-select,
+  input:not([type="checkbox"]),
+  textarea,
+  select,
+  .chat-composer-actions .btn,
+  .goal-actions .btn,
+  .tasks-batch-actions .btn,
+  .modal-actions .btn,
+  .workspace-picker-open,
+  .provider-chip,
   .tools-cli-name,
   .tools-skill-card strong,
   .tools-skill-name,
-  .provider-chip-name
+  .chat-context-option-name,
+  .chat-context-banner-title,
+  .refined-preview,
+  .executor-picker label
 ) {
-  font-size: var(--text-base);
-  font-weight: var(--font-semibold);
-  letter-spacing: var(--tracking-tight);
-  line-height: var(--leading-tight);
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
 }
 
-:is(
-  .status-pill,
-  .executor-tag,
-  .sidebar-badge,
-  .tools-cli-kind,
-  .tools-cli-status,
-  .chat-context-tab-badge,
-  .tools-skill-badge
+/* ── 标题：13px 中等 ── */
+
+.app-minimal :is(
+  .topbar-title,
+  .goal-card-title,
+  .goal-card-title strong,
+  .settings-section-title,
+  .tools-section-title,
+  .mech-panel-head h3,
+  .modal-title,
+  .task-detail-panel .mech-panel-head h3,
+  .goal-detail-page-subtitle,
+  .tools-add-cli-head h4,
+  .provider-chip-name,
+  .chat-bubble,
+  .chat-markdown,
+  .chat-markdown h1,
+  .chat-markdown h2,
+  .chat-markdown h3,
+  .chat-markdown h4,
+  .chat-markdown h5,
+  .chat-markdown h6,
+  .sidebar-title
 ) {
-  font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
-  letter-spacing: 0.01em;
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+  letter-spacing: normal;
 }
 
-:is(.chat-context-tab, .tools-tab, .tools-cli-chip) {
-  font-size: var(--text-sm);
-  font-weight: var(--font-medium);
-}
+/* ── 正文：13px 常规 ── */
 
-.chat-bubble {
-  font-size: var(--text-base);
+.app-minimal :is(
+  .chat-bubble.coach,
+  .chat-markdown p,
+  .chat-markdown li,
+  .selection-action-hints,
+  .selection-title-list,
+  .provider-current,
+  .tools-cli-card,
+  .tools-card,
+  .mech-panel-body,
+  .panel-scroll
+) {
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
   line-height: var(--leading-relaxed);
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
-.log-line {
-  font-size: var(--text-xs);
-  line-height: var(--leading-normal);
+.app-minimal :is(
+  .log-strip-line,
+  .log-line,
+  .logs-body,
+  .workspace-picker-path-text
+) {
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
+  font-weight: var(--weight-regular);
 }
 
-.mech-input,
-input:not([type="checkbox"]),
-textarea,
-select {
-  font-size: var(--text-base) !important;
-  line-height: var(--leading-normal);
+.app-minimal :is(
+  .sidebar-item.active,
+  .filter-chip.active,
+  .settings-tab.active,
+  .tools-tab.active,
+  .chat-context-tab.open
+) {
+  font-weight: var(--weight-medium);
 }
 
-.tools-tab-lead {
-  max-width: 42rem;
-  margin-bottom: 0.15rem;
+.app-minimal .sidebar-brand .brand-mark {
+  font-size: var(--type-meta);
+  font-weight: var(--weight-medium);
 }
 
+/* 兜底：工作区内禁止更小字号 */
+.app-minimal .app-main-column,
+.app-minimal .app-sidebar,
+.app-minimal .modal-overlay {
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
+}

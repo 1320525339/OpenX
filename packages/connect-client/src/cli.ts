@@ -100,9 +100,24 @@ async function postJson(url: string, body: unknown, internalToken?: string) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`${url} → ${res.status}: ${text}`);
+    const err = new Error(`${url} → ${res.status}: ${text}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
   }
   return res.json();
+}
+
+async function registerConnect(args: {
+  base: string;
+  toolName: string;
+  agentName: string;
+  executorId: string;
+}): Promise<ConnectResponse> {
+  return (await postJson(`${args.base}/api/connect`, {
+    toolName: args.toolName,
+    agentName: args.agentName,
+    executorId: args.executorId,
+  })) as ConnectResponse;
 }
 
 async function loadSkillsRuntime(base: string, executorId: string): Promise<SkillsRuntime | null> {
@@ -192,11 +207,7 @@ async function main() {
     console.warn("[connect-client] 无法加载 settings，将使用演示模式:", err);
   }
 
-  const conn = (await postJson(`${args.base}/api/connect`, {
-    toolName: args.toolName,
-    agentName: args.agentName,
-    executorId: args.executorId,
-  })) as ConnectResponse;
+  let conn = await registerConnect(args);
 
   console.log(`[connect-client] 已注册 connectionId=${conn.connectionId}`);
 
@@ -210,9 +221,21 @@ async function main() {
   const inFlight = new Set<string>();
 
   const tick = async () => {
-    const res = (await postJson(conn.heartbeatUrl, {
-      connectionId: conn.connectionId,
-    })) as HeartbeatResponse;
+    let res: HeartbeatResponse;
+    try {
+      res = (await postJson(conn.heartbeatUrl, {
+        connectionId: conn.connectionId,
+      })) as HeartbeatResponse;
+    } catch (err) {
+      const status = (err as Error & { status?: number }).status;
+      if (status !== 404) throw err;
+      console.warn("[connect-client] 连接已失效（服务端可能重启），正在重新注册…");
+      conn = await registerConnect(args);
+      console.log(`[connect-client] 已重新注册 connectionId=${conn.connectionId}`);
+      res = (await postJson(conn.heartbeatUrl, {
+        connectionId: conn.connectionId,
+      })) as HeartbeatResponse;
+    }
 
     if (res.enabledSkills) {
       skillsRuntime = {

@@ -5,7 +5,11 @@ import {
   type SkillBinding,
   type WorkspaceSkillsLink,
 } from "../api";
-import { COACH_SKILLS, catalogToCoachSkills, type CoachSkill } from "./coach-context";
+import {
+  COACH_SKILLS,
+  catalogToCoachSkills,
+  type CoachSkill,
+} from "./coach-context";
 
 export function useSkillCatalog() {
   const [skills, setSkills] = useState<CoachSkill[]>(COACH_SKILLS);
@@ -17,12 +21,24 @@ export function useSkillCatalog() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
-  const applyResponse = useCallback((res: Awaited<ReturnType<typeof api.getSkills>>) => {
-    setSkills(catalogToCoachSkills(res.skills));
-    setBindings(res.bindings);
-    setSkillsDir(res.skillsDir);
-    setWorkspaceLink(res.workspaceLink);
-    setAgents(res.agents);
+  const applySkillsResponse = useCallback(
+    (res: Awaited<ReturnType<typeof api.getSkills>>) => {
+      setSkills(catalogToCoachSkills(res.skills));
+      setBindings(res.bindings);
+      setSkillsDir(res.skillsDir);
+      setWorkspaceLink(res.workspaceLink);
+      setAgents(res.agents);
+    },
+    [],
+  );
+
+  const refreshManagedAgents = useCallback(async () => {
+    try {
+      const { agents: online } = await api.getManagedAgents();
+      setAgents(online);
+    } catch {
+      /* 保留注册表快照，在线状态可稍后重试 */
+    }
   }, []);
 
   const refresh = useCallback(async () => {
@@ -30,13 +46,14 @@ export function useSkillCatalog() {
     setError(undefined);
     try {
       const res = await api.getSkills();
-      applyResponse(res);
+      applySkillsResponse(res);
+      void refreshManagedAgents();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [applyResponse]);
+  }, [applySkillsResponse, refreshManagedAgents]);
 
   const syncSkills = useCallback(async () => {
     setSyncing(true);
@@ -44,14 +61,15 @@ export function useSkillCatalog() {
     try {
       await api.syncSkills();
       const current = await api.getSkills();
-      applyResponse(current);
+      applySkillsResponse(current);
+      void refreshManagedAgents();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
       setSyncing(false);
     }
-  }, [applyResponse]);
+  }, [applySkillsResponse, refreshManagedAgents]);
 
   const saveBindings = useCallback(async (next: Record<string, SkillBinding>) => {
     const res = await api.putSkillBindings(next);
@@ -73,6 +91,7 @@ export function useSkillCatalog() {
     syncing,
     error,
     refresh,
+    refreshManagedAgents,
     syncSkills,
     saveBindings,
     setBindings,

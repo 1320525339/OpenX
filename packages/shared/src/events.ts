@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { RefinedGoalSchema } from "./coach.js";
+import { CoachIntentSchema, RefinedGoalSchema } from "./coach.js";
+import { CoachMessageRecordSchema } from "./coach-messages.js";
 import { GoalSchema } from "./goal.js";
 import { RunDeltaEventSchema, RunEndStatusSchema } from "./run.js";
 
@@ -9,6 +10,9 @@ export const SseEventTypeSchema = z.enum([
   "log.append",
   "narration.append",
   "coach.reply",
+  "coach.delta",
+  "coach.stream.end",
+  "coach.message",
   "run.started",
   "run.event",
   "run.ended",
@@ -44,15 +48,37 @@ export const SseEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("coach.reply"),
+    conversationId: z.string(),
     message: z.string(),
     timestamp: z.string(),
+    intent: CoachIntentSchema.optional(),
     refined: RefinedGoalSchema.optional(),
+    /** Coach 建议把这条消息整理成任务单（待用户轻确认） */
+    suggestRefine: z.boolean().optional(),
     meta: z
       .object({
         llmError: z.string().optional(),
         quotaExceeded: z.boolean().optional(),
       })
       .optional(),
+  }),
+  z.object({
+    type: z.literal("coach.delta"),
+    conversationId: z.string(),
+    streamId: z.string(),
+    delta: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("coach.stream.end"),
+    conversationId: z.string(),
+    streamId: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("coach.message"),
+    conversationId: z.string(),
+    message: CoachMessageRecordSchema,
   }),
   z.object({
     type: z.literal("run.started"),

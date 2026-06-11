@@ -2,6 +2,8 @@ type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: () => Promise<{ name: string }>;
 };
 
+import { getApiBase } from "./api-base";
+
 export function workspaceDisplayLabel(root?: string): string {
   if (!root || root.trim() === "" || root === ".") {
     return "选择工作目录";
@@ -17,7 +19,7 @@ export async function pickWorkspaceDirectory(): Promise<
   { ok: true; path: string } | { ok: false; reason: "unsupported" | "aborted" | "error" }
 > {
   try {
-    const res = await fetch("/api/workspace/pick", { method: "POST" });
+    const res = await fetch(`${getApiBase()}/api/workspace/pick`, { method: "POST" });
     if (res.ok) {
       const data = (await res.json()) as
         | { ok: true; path: string }

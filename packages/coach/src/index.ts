@@ -12,6 +12,7 @@ export {
 export {
   refineGoal,
   coachChatReply,
+  coachContinueAfterWorkOrderTool,
   getCoachRuntime,
   getPiRuntime,
   testCoachConnection,
@@ -20,6 +21,23 @@ export {
   type LlmRole,
 } from "./service.js";
 export { buildNextStepsUserMessage, type NextStepsTrigger } from "./next-steps.js";
+export {
+  reviewGoalCompletion,
+  reviewParentGoalCompletion,
+  ReviewVerdictSchema,
+  ReviewReworkTargetSchema,
+  type ReviewVerdict,
+  type ReviewReworkTarget,
+  type ReviewGoalInput,
+  type ReviewGoalOptions,
+  type ParentReviewInput,
+  type ParentReviewChild,
+} from "./review.js";
+export {
+  synthesizeParentRollupSummary,
+  type ParentRollupInput,
+  type ParentRollupChild,
+} from "./rollup.js";
 export { formatFeedbackNotes } from "./prompts.js";
 export {
   formatCoachLlmError,

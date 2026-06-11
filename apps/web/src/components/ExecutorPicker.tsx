@@ -35,10 +35,11 @@ export function ExecutorPicker({
         onChange={(e) => onChange(e.target.value)}
       >
         {options.map((opt) => (
-          <option key={opt.id} value={opt.id} disabled={!opt.available}>
+          <option key={opt.id} value={opt.id} disabled={!opt.selectable}>
             {opt.label}
             {opt.id === recommendedId && opt.id !== value ? "（推荐）" : ""}
-            {!opt.available ? "（不可用）" : ""}
+            {!opt.available && opt.bootstrappable ? "（未在线·自动自举）" : ""}
+            {!opt.selectable ? "（不可用）" : ""}
           </option>
         ))}
       </select>

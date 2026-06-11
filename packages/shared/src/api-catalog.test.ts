@@ -1,0 +1,29 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildApiCatalogResponse,
+  listApiCatalog,
+  OPENX_API_CATALOG,
+} from "./api-catalog.js";
+
+describe("api-catalog", () => {
+  it("includes core goal and connect endpoints", () => {
+    const ids = new Set(OPENX_API_CATALOG.map((e) => e.id));
+    expect(ids.has("goals_create")).toBe(true);
+    expect(ids.has("connect_register")).toBe(true);
+    expect(ids.has("internal_complete")).toBe(true);
+    expect(ids.has("catalog_get")).toBe(true);
+  });
+
+  it("filters by category", () => {
+    const goals = listApiCatalog({ category: "goals" });
+    expect(goals.length).toBeGreaterThan(5);
+    expect(goals.every((g) => g.category === "goals")).toBe(true);
+  });
+
+  it("builds catalog response with meta", () => {
+    const res = buildApiCatalogResponse();
+    expect(res.meta.endpointCount).toBe(OPENX_API_CATALOG.length);
+    expect(res.endpoints.length).toBe(OPENX_API_CATALOG.length);
+    expect(res.meta.mcpServerId).toBe("openx");
+  });
+});

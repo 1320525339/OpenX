@@ -98,12 +98,12 @@ export function LogsPanel({
         </div>
 
         {scope === "selected" && selectedGoalTitle && (
-          <p style={{ fontSize: "0.65rem", color: "var(--text-dim)", marginBottom: "0.35rem" }}>
+          <p className="t-meta" style={{ marginBottom: "0.35rem" }}>
             聚焦：{selectedGoalTitle}
           </p>
         )}
         {scope === "selected" && !selectedGoalId && (
-          <p style={{ fontSize: "0.65rem", color: "var(--text-dim)", marginBottom: "0.35rem" }}>
+          <p className="t-meta" style={{ marginBottom: "0.35rem" }}>
             选择任务可聚焦执行轨迹
           </p>
         )}

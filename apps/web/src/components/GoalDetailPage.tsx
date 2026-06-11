@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { Goal } from "@openx/shared";
+import type { Goal, GoalRunState } from "@openx/shared";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 
 type LogEntry = {
@@ -12,6 +12,8 @@ type LogEntry = {
 type Props = {
   goal: Goal | undefined;
   logs: LogEntry[];
+  run?: GoalRunState;
+  allGoals?: Goal[];
   onBack: () => void;
   onApprove: (id: string) => Promise<void>;
   onRework: (id: string, reason?: string) => Promise<void>;
@@ -21,6 +23,8 @@ type Props = {
 export function GoalDetailPage({
   goal,
   logs,
+  run,
+  allGoals = [],
   onBack,
   onApprove,
   onRework,
@@ -46,12 +50,14 @@ export function GoalDetailPage({
           <span className="goal-detail-page-subtitle muted">目标不存在或已删除</span>
         )}
       </header>
-      <div className="goal-detail-page-body hyper-window-slot focus-tasks">
+      <div className="goal-detail-page-body workspace-pane">
         <TaskDetailPanel
           goal={goal}
+          allGoals={allGoals}
           editMode={false}
           selectedGoals={[]}
           logs={logs}
+          run={run}
           onApprove={onApprove}
           onRework={onRework}
           onStart={onStart}

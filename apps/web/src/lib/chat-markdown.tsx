@@ -6,14 +6,44 @@ import type { Components } from "react-markdown";
 
 const sanitizeSchema = {
   ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    "details",
+    "summary",
+    "mark",
+    "del",
+    "ins",
+    "sub",
+    "sup",
+    "kbd",
+    "hr",
+    "figure",
+    "figcaption",
+  ],
   attributes: {
     ...defaultSchema.attributes,
+    a: [...(defaultSchema.attributes?.a ?? []), "target", "rel", "title"],
     code: [...(defaultSchema.attributes?.code ?? []), ["className", /^language-./]],
     span: [...(defaultSchema.attributes?.span ?? []), "className"],
     div: [...(defaultSchema.attributes?.div ?? []), "className"],
     p: [...(defaultSchema.attributes?.p ?? []), "className"],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      "src",
+      "alt",
+      "title",
+      "width",
+      "height",
+      "loading",
+    ],
     td: [...(defaultSchema.attributes?.td ?? []), "align"],
     th: [...(defaultSchema.attributes?.th ?? []), "align"],
+    details: [...(defaultSchema.attributes?.details ?? []), "open"],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: ["http", "https", "mailto", "tel"],
+    src: ["http", "https"],
   },
 };
 
@@ -51,9 +81,21 @@ const markdownComponents: Components = {
 type Props = {
   text: string;
   className?: string;
+  /** 流式阶段用纯文本，避免半截 Markdown/HTML 闪烁 */
+  plain?: boolean;
 };
 
-export function ChatMarkdown({ text, className }: Props) {
+export function ChatPlainText({ text, className }: Props) {
+  return (
+    <div className={`chat-plain-text${className ? ` ${className}` : ""}`}>{text}</div>
+  );
+}
+
+export function ChatMarkdown({ text, className, plain }: Props) {
+  if (plain) {
+    return <ChatPlainText text={text} className={className} />;
+  }
+
   return (
     <div className={`chat-markdown${className ? ` ${className}` : ""}`}>
       <ReactMarkdown

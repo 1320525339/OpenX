@@ -31,6 +31,11 @@ function formatFeedbackBlock(feedback?: GoalFeedback): string {
       `历史执行摘要：\n${feedback.priorSummaries.map((s) => `- ${s}`).join("\n")}`,
     );
   }
+  if (feedback.priorReviewRounds?.length) {
+    lines.push(
+      `历史审查记录：\n${feedback.priorReviewRounds.map((s) => `- ${s}`).join("\n")}`,
+    );
+  }
   if (feedback.recentLogs?.length) {
     const tail = feedback.recentLogs.slice(-8);
     lines.push(
@@ -82,7 +87,7 @@ export function buildWorkspaceInspectRefined(
   const root =
     workspaceRoot && workspaceRoot.trim() && workspaceRoot !== "."
       ? workspaceRoot.trim()
-      : "当前 OpenX 工作目录（见设置 workspaceRoot）";
+      : "当前 OpenX 系统工作目录（见设置 systemWorkspaceRoot）";
 
   return {
     title: "查看工作目录文件列表",
@@ -137,6 +142,7 @@ function sectionProtocol(): string {
 - 用户描述要做的新事、或要调整目标/子任务
 - 需要现场信息（列目录、读文件、跑命令）——派 Pi 子任务，不要空口拒绝
 - 用户确认返工后，输出更新后的 executionPrompt
+- refined 在对话时间线中等价于工具 **propose_work_order**；用户在 UI 取消/确认后，系统会以 **tool_result** 回传，你只根据结果用 message 回复，勿重复出 refined
 
 ## 派单要求（refined.executionPrompt）
 - 写清楚：背景、具体步骤、验收标准、约束
@@ -162,10 +168,12 @@ function sectionPrecedence(): string {
 function sectionOutputContract(): string {
   return `# 输出约定
 
+- intent：用户意图分类（task=新任务派单 / progress=问进展 / consult=咨询 / chitchat=闲聊 / rework=返工）
 - message：给用户的中文回复，简洁自然；汇总进展时引用任务状态与结果摘要
-- refined：仅当需要新建/更新 Goal 派单时填写
-  - 单任务：title、acceptance、executionPrompt、constraints
-- 多子任务：同上，并填 subGoals 数组（每项含 title、acceptance、executionPrompt，可选 constraints、executorId）
+- refined：仅当 intent=task 或 rework 且需要新建/更新 Goal 派单时填写
+  - 单任务：title、acceptance、executionPrompt、constraints，可选 executorId、priority、agentId、mcpIds、skillIds
+- 多子任务：同上，并填 subGoals 数组（每项含 title、acceptance、executionPrompt，可选 constraints、executorId、dependsOnIndex）
+- agentId / mcpIds / skillIds 未填时，系统会用对话栏当前选择回填；派单创建 Goal 时冻结为 dispatchContext
 - executorId 可选值：auto（启动时 Pi 自动选择）、pi、acp:gemini / acp:codex / acp:claude，或 Connect 注册的 executorId
 - 需要派 Pi 执行时，message 中提示用户点击「创建并执行」或「创建 N 个子任务」`;
 }
@@ -259,8 +267,45 @@ function sectionRuntimeContext(context: CoachChatContext): string {
       "派单时若任务涉及网页抓取/浏览器自动化，在 executionPrompt 中注明使用对应 Obscura Skill，并指定 executorId。",
     );
   }
+  if (context.enabledMcps?.length) {
+    blocks.push("");
+    blocks.push("## 对话启用的 MCP");
+    blocks.push(context.enabledMcps.map((m) => `- ${m.name} (${m.id})`).join("\n"));
+    blocks.push("派单时在 executionPrompt 中注明需要使用的 MCP 能力。");
+  }
+  if (context.agentId) {
+    blocks.push("");
+    blocks.push(`## 对话 Agent 角色：${context.agentName ?? context.agentId}`);
+    if (context.agentRolePrompt?.trim()) {
+      blocks.push(context.agentRolePrompt.trim());
+    }
+    blocks.push("派单 executionPrompt 应与此角色定位一致。");
+  }
+  if (context.contextPack) {
+    blocks.push("");
+    blocks.push("## 项目上下文（只读快照，供拆解参考，勿当作已执行结果）");
+    blocks.push(`根目录：${context.contextPack.root}`);
+    blocks.push("### 目录结构");
+    blocks.push(context.contextPack.fileTree);
+    if (context.contextPack.keyFiles.length > 0) {
+      blocks.push("### 关键文件摘要");
+      for (const kf of context.contextPack.keyFiles) {
+        blocks.push(`#### ${kf.path}\n${kf.summary}`);
+      }
+    }
+  }
 
   return blocks.join("\n");
+}
+
+function sectionStreamOutput(): string {
+  return `# 输出约定
+
+- 用简体中文直接回复用户，简洁自然，可使用 Markdown
+- 汇总进展时引用任务状态与结果摘要
+- 若用户需要派单或现场侦察，说明你会整理 Goal，并提示点击「创建并执行」
+- 收到 propose_work_order 的 tool_result 时，仅确认用户选择，勿重复派单
+- 不要输出 JSON 或代码块包裹的伪 JSON`;
 }
 
 export function buildAgentSystemPrompt(context: CoachChatContext): string {
@@ -274,6 +319,18 @@ export function buildAgentSystemPrompt(context: CoachChatContext): string {
   ].join("\n\n");
 }
 
+/** 流式闲聊/咨询/进展查询：无 JSON 约束 */
+export function buildChatStreamSystemPrompt(context: CoachChatContext): string {
+  return [
+    sectionIdentity(),
+    sectionProtocol(),
+    sectionPrecedence(),
+    sectionStreamOutput(),
+    sectionExamples(),
+    sectionRuntimeContext(context),
+  ].join("\n\n");
+}
+
 const DEFAULT_HISTORY_CHAR_BUDGET = 12_000;
 
 /** 将历史轮次与当前用户消息拼成单次 LLM user prompt */
@@ -281,6 +338,7 @@ export function buildChatUserPrompt(
   message: string,
   history: CoachChatTurn[] = [],
   maxHistoryChars = DEFAULT_HISTORY_CHAR_BUDGET,
+  options?: { jsonMode?: boolean | "tool_continuation" },
 ): string {
   const lines: string[] = [];
 
@@ -288,7 +346,12 @@ export function buildChatUserPrompt(
     lines.push("## 对话历史（同一助手会话，请连贯理解上文）");
     let used = 0;
     for (const turn of history) {
-      const label = turn.role === "user" ? "用户" : "工头";
+      const label =
+        turn.role === "user"
+          ? "用户"
+          : turn.role === "tool_result"
+            ? `工具结果${turn.toolName ? ` · ${turn.toolName}` : ""}`
+            : "工头";
       const line = `${label}：${turn.text.trim()}`;
       if (used + line.length > maxHistoryChars) {
         lines.push("…（更早的历史已省略）");
@@ -300,10 +363,23 @@ export function buildChatUserPrompt(
     lines.push("");
   }
 
-  lines.push("## 当前用户消息");
-  lines.push(message.trim());
-  lines.push("");
-  lines.push("字段 message 必填；需要派单时填 refined。");
+  if (options?.jsonMode === "tool_continuation") {
+    lines.push("## 待处理工具结果");
+    lines.push(message.trim());
+    lines.push("");
+    lines.push(
+      "用户已通过 UI 对 propose_work_order 作出选择。请仅输出 message 确认收到，禁止再次输出 refined。",
+    );
+  } else {
+    lines.push("## 当前用户消息");
+    lines.push(message.trim());
+    lines.push("");
+    if (options?.jsonMode !== false) {
+      lines.push("字段 message 必填；需要派单时填 refined。");
+    } else {
+      lines.push("请直接回复用户。");
+    }
+  }
   return lines.join("\n");
 }
 

@@ -23,6 +23,7 @@ import {
   type SkillManifest,
 } from "@openx/shared";
 import { getOpenxSkillsDir } from "@openx/shared/skills-path";
+import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
 import { OPENX_DIR } from "./paths.js";
 import { loadSettings } from "./settings-store.js";
 import { ensureWorkspaceSkillsLink } from "./workspace-skills-link.js";
@@ -222,7 +223,7 @@ export async function syncBuiltinSkills(force = false): Promise<SkillManifest> {
     saveSkillManifest(manifest);
     try {
       const settings = loadSettings();
-      ensureWorkspaceSkillsLink(settings.workspaceRoot);
+      ensureWorkspaceSkillsLink(resolveSystemWorkspaceRoot(settings));
     } catch {
       /* ignore link errors on sync */
     }
@@ -244,7 +245,7 @@ export function ensureBuiltinSkillsOnStartup(): void {
     .then(() => {
       try {
         const settings = loadSettings();
-        ensureWorkspaceSkillsLink(settings.workspaceRoot);
+        ensureWorkspaceSkillsLink(resolveSystemWorkspaceRoot(settings));
       } catch {
         /* ignore */
       }

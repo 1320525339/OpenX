@@ -1,6 +1,11 @@
-import type { Goal } from "@openx/shared";
-import { GOAL_STATUS_LABELS } from "@openx/shared";
+import { useState } from "react";
+import type { Goal, GoalRunState } from "@openx/shared";
 import { executorDisplayLabel } from "../lib/executors";
+import { buildGoalContext, formatDispatchSummary, goalStatusText } from "../lib/goal-detail";
+import { resolveGoalDeliverables } from "../lib/goal-deliverables";
+import { DeliveryChips } from "./DeliveryChips";
+import { ReviewTimeline } from "./ReviewTimeline";
+import { RunConsole } from "./RunConsole";
 import { TaskSelectionSummary } from "./TaskSelectionSummary";
 
 type LogEntry = {
@@ -12,9 +17,11 @@ type LogEntry = {
 
 type Props = {
   goal: Goal | undefined;
+  allGoals?: Goal[];
   editMode: boolean;
   selectedGoals: Goal[];
   logs: LogEntry[];
+  run?: GoalRunState;
   onApprove: (id: string) => Promise<void>;
   onRework: (id: string, reason?: string) => Promise<void>;
   onStart: (id: string) => Promise<void>;
@@ -22,20 +29,25 @@ type Props = {
 };
 
 function statusLabel(goal: Goal): string {
-  if (goal.effectStatus === "rework") return "需要返工";
-  return GOAL_STATUS_LABELS[goal.status] ?? goal.status;
+  return goalStatusText(goal);
 }
 
 export function TaskDetailPanel({
   goal,
+  allGoals = [],
   editMode,
   selectedGoals,
   logs,
+  run,
   onApprove,
   onRework,
   onStart,
   onOpenDetail,
 }: Props) {
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [reworkOpen, setReworkOpen] = useState(false);
+  const [reworkReason, setReworkReason] = useState("");
+
   if (editMode) {
     if (selectedGoals.length === 0) {
       return (
@@ -64,6 +76,7 @@ export function TaskDetailPanel({
   }
 
   const goalLogs = logs.filter((l) => l.goalId === goal.id).slice(-40);
+  const { parent, children, dependencies } = buildGoalContext(allGoals, goal);
 
   return (
     <section className="mech-panel task-detail-panel">
@@ -84,6 +97,19 @@ export function TaskDetailPanel({
       </div>
       <div className="mech-panel-body panel-stack">
         <div className="panel-scroll">
+          {run && (run.active || run.events.length > 0 || run.liveText) && (
+            <div className="detail-block detail-run-block">
+              <RunConsole run={run} />
+            </div>
+          )}
+
+          {formatDispatchSummary(goal) && (
+            <div className="detail-block">
+              <h4>派单上下文</h4>
+              <p>{formatDispatchSummary(goal)}</p>
+            </div>
+          )}
+
           <div className="detail-grid">
             <div className="detail-field">
               <span className="detail-label">进度</span>
@@ -109,6 +135,25 @@ export function TaskDetailPanel({
               </span>
             </div>
           </div>
+
+          {(parent || dependencies.length > 0 || children.length > 0) && (
+            <div className="detail-block">
+              <h4>任务关系</h4>
+              {parent ? <p>所属：{parent.title}</p> : null}
+              {dependencies.length > 0 ? (
+                <p>等待：{dependencies.map((d) => d.title).join("、")}</p>
+              ) : null}
+              {children.length > 0 ? (
+                <ul className="detail-list">
+                  {children.map((c) => (
+                    <li key={c.id}>{c.title}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
+
+          <ReviewTimeline goal={goal} />
 
           {goal.acceptance && (
             <div className="detail-block">
@@ -140,12 +185,18 @@ export function TaskDetailPanel({
             </div>
           )}
 
-          {goal.resultSummary && (
-            <div className="detail-block highlight">
-              <h4>执行结果</h4>
-              <pre className="detail-pre">{goal.resultSummary}</pre>
-            </div>
-          )}
+          {(goal.resultSummary || goal.deliverables?.length) && (() => {
+            const deliverables = resolveGoalDeliverables(goal);
+            return (
+              <div className="detail-block highlight">
+                <h4>{deliverables.length > 0 ? "交付物" : "执行结果"}</h4>
+                {deliverables.length > 0 && <DeliveryChips items={deliverables} />}
+                {goal.resultSummary && (
+                  <pre className="detail-pre">{goal.resultSummary}</pre>
+                )}
+              </div>
+            );
+          })()}
 
           {goal.reworkReason && (
             <div className="detail-block warn">
@@ -175,25 +226,79 @@ export function TaskDetailPanel({
         <div className="panel-footer detail-actions">
           {(goal.status === "draft" || goal.status === "failed") && (
             <button type="button" className="btn primary" onClick={() => void onStart(goal.id)}>
-              开始推进
+              {goal.status === "failed" ? "重试" : "开始推进"}
             </button>
           )}
-          {goal.status === "awaiting_review" && (
+          {goal.status === "awaiting_review" && !approveOpen && !reworkOpen && (
             <>
-              <button type="button" className="btn primary" onClick={() => void onApprove(goal.id)}>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => {
+                  setApproveOpen(true);
+                  setReworkOpen(false);
+                }}
+              >
                 确认完成
               </button>
               <button
                 type="button"
                 className="btn danger"
                 onClick={() => {
-                  const reason = window.prompt("想让它怎么改？（可选）") ?? undefined;
-                  void onRework(goal.id, reason || undefined);
+                  setReworkOpen(true);
+                  setApproveOpen(false);
+                  setReworkReason("");
                 }}
               >
                 还要修改
               </button>
             </>
+          )}
+          {approveOpen && (
+            <div className="approve-confirm">
+              <p>你之前说「做好」的标准：{goal.acceptance || "（未填写）"}</p>
+              <div className="goal-actions">
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    void onApprove(goal.id);
+                    setApproveOpen(false);
+                  }}
+                >
+                  确认已经做好
+                </button>
+                <button type="button" className="btn" onClick={() => setApproveOpen(false)}>
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
+          {reworkOpen && (
+            <div className="rework-box">
+              <textarea
+                className="mech-textarea"
+                rows={2}
+                placeholder="想让它怎么改？（可选）"
+                value={reworkReason}
+                onChange={(e) => setReworkReason(e.target.value)}
+              />
+              <div className="goal-actions">
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={() => {
+                    void onRework(goal.id, reworkReason.trim() || undefined);
+                    setReworkOpen(false);
+                  }}
+                >
+                  提交返工
+                </button>
+                <button type="button" className="btn" onClick={() => setReworkOpen(false)}>
+                  取消
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

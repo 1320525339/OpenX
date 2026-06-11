@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { ConnectInputSchema, HeartbeatInputSchema } from "@openx/shared";
+import {
+  ClaimPoolGoalSchema,
+  ConnectInputSchema,
+  HeartbeatInputSchema,
+} from "@openx/shared";
 import { getOpenxSkillsDir } from "@openx/shared/skills-path";
 import {
   registerConnection,
@@ -10,9 +14,12 @@ import {
 } from "../connect-store.js";
 import { getOrCreateInternalToken } from "../internal-auth.js";
 import { listGoals } from "../db.js";
+import { claimOneConnectPoolGoal } from "../connect-pool.js";
 import { loadSettings } from "../settings-store.js";
+import { resolveSystemWorkspaceRoot } from "../system-workspace-path.js";
 import { enrichGoalWithSkills, resolveExecutorSkills } from "../skills-resolve.js";
-
+import { getWorkspaceDirForConversation } from "../db.js";
+import { resolveWorkspaceRoot } from "../workspace-path.js";
 export const connectRoutes = new Hono();
 
 connectRoutes.delete("/by-executor/:executorId", (c) => {
@@ -53,10 +60,22 @@ connectRoutes.post("/:connectionId/heartbeat", async (c) => {
   if (!conn) return c.json({ error: "Not connected" }, 404);
 
   const settings = loadSettings();
+
+  const autoClaimPool = body.autoClaimPool !== false;
+  if (autoClaimPool) {
+    claimOneConnectPoolGoal(conn.executorId, conn.agentName);
+  }
+
   const pendingGoals = listGoals("running")
     .filter((g) => g.executorId === conn.executorId)
     .filter((g) => !isGoalCancelledForConnect(g.id))
-    .map((g) => enrichGoalWithSkills(g, settings));
+    .map((g) => {
+    const projectDir = getWorkspaceDirForConversation(g.conversationId);
+    const workspaceRoot = resolveWorkspaceRoot(
+      projectDir ?? resolveSystemWorkspaceRoot(settings),
+    );
+    return enrichGoalWithSkills(g, settings, workspaceRoot);
+  });
 
   const { hints: enabledSkills } = resolveExecutorSkills(conn.executorId, settings);
 
@@ -68,6 +87,23 @@ connectRoutes.post("/:connectionId/heartbeat", async (c) => {
     enabledSkills,
     tokenUsage: body.tokenUsage,
   });
+});
+
+connectRoutes.post("/:connectionId/claim", async (c) => {
+  const body = ClaimPoolGoalSchema.parse(await c.req.json().catch(() => ({})));
+  const connectionId = c.req.param("connectionId");
+  const conn = touchConnection(connectionId);
+  if (!conn) return c.json({ error: "Not connected" }, 404);
+
+  const claimed = claimOneConnectPoolGoal(
+    conn.executorId,
+    conn.agentName,
+    body.goalId,
+  );
+  if (!claimed) {
+    return c.json({ error: "No pool goal available to claim" }, 404);
+  }
+  return c.json({ goal: claimed });
 });
 
 connectRoutes.delete("/:connectionId", (c) => {

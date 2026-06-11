@@ -1,200 +1,255 @@
-import type { ReactNode } from "react";
-import { WorkspacePicker } from "./WorkspacePicker";
-
-export type AppView = "home" | "running" | "review" | "assistant" | "settings";
-
-type SseStatus = "connected" | "reconnecting" | "disconnected";
-
-type NavItem = {
-  id: AppView;
-  label: string;
-  icon: ReactNode;
-  badge?: number;
-};
-
-type NavGroup = {
-  title?: string;
-  items: NavItem[];
-};
-
-type Props = {
-  active: AppView;
-  onChange: (view: AppView) => void;
-  onNewGoal: () => void;
-  runningCount?: number;
-  reviewCount?: number;
-  workspaceRoot?: string;
-  workspaceResolved?: string;
-  onWorkspaceSave?: (path: string) => Promise<void>;
-  sseStatus?: SseStatus;
-};
-
-function NavIcon({ children }: { children: ReactNode }) {
-  return (
-    <span className="sidebar-icon" aria-hidden>
-      {children}
-    </span>
-  );
-}
-
-function IconHome() {
-  return (
-    <NavIcon>
-      <svg viewBox="0 0 20 20" fill="none">
-        <path
-          d="M4 9.5 10 4l6 5.5V16a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1V9.5Z"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </NavIcon>
-  );
-}
-
-function IconRunning() {
-  return (
-    <NavIcon>
-      <svg viewBox="0 0 20 20" fill="none">
-        <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M10 6.5v4l2.5 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
-    </NavIcon>
-  );
-}
-
-function IconReview() {
-  return (
-    <NavIcon>
-      <svg viewBox="0 0 20 20" fill="none">
-        <path
-          d="M6 10.5 8.5 13 14 7"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <rect x="4" y="4" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
-    </NavIcon>
-  );
-}
-
-function IconAssistant() {
-  return (
-    <NavIcon>
-      <svg viewBox="0 0 20 20" fill="none">
-        <path
-          d="M4 4.5h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H8l-3.5 2.5V5.5a1 1 0 0 1 1-1Z"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </NavIcon>
-  );
-}
-
-function IconSettings() {
-  return (
-    <NavIcon>
-      <svg viewBox="0 0 20 20" fill="none">
-        <circle cx="10" cy="10" r="2.25" stroke="currentColor" strokeWidth="1.5" />
-        <path
-          d="M10 2.5v2M10 15.5v2M3.5 10h2M14.5 10h2"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    </NavIcon>
-  );
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    title: "总览",
-    items: [{ id: "home", label: "首页", icon: <IconHome /> }],
-  },
-  {
-    title: "业务功能",
-    items: [
-      { id: "running", label: "正在推进", icon: <IconRunning /> },
-      { id: "review", label: "等我确认", icon: <IconReview /> },
-    ],
-  },
-  {
-    title: "助手与配置",
-    items: [
-      { id: "assistant", label: "我的助手", icon: <IconAssistant /> },
-      { id: "settings", label: "设置", icon: <IconSettings /> },
-    ],
-  },
-];
-
-export function SideNav({
-  active,
-  onChange,
-  onNewGoal,
-  runningCount = 0,
-  reviewCount = 0,
-  workspaceRoot,
-  workspaceResolved,
-  onWorkspaceSave,
-}: Props) {
-  const badgeFor = (id: AppView) => {
-    if (id === "running") return runningCount || undefined;
-    if (id === "review") return reviewCount || undefined;
-    return undefined;
-  };
-
-  return (
-    <nav className="app-sidebar" aria-label="主导航">
-      <div className="sidebar-brand">
-        <span className="brand-mark">O</span>
-        <div className="sidebar-brand-text">
-          <span className="sidebar-title">OpenX</span>
-          <span className="sidebar-subtitle">本机工头</span>
-        </div>
-      </div>
-
-      <div className="sidebar-nav">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.title ?? "main"} className="sidebar-group">
-            {group.title ? <div className="sidebar-group-title">{group.title}</div> : null}
-            {group.items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`sidebar-item${active === item.id ? " active" : ""}`}
-                aria-current={active === item.id ? "page" : undefined}
-                onClick={() => onChange(item.id)}
-              >
-                {item.icon}
-                <span className="sidebar-item-label">{item.label}</span>
-                {badgeFor(item.id) ? (
-                  <span className="sidebar-badge">{badgeFor(item.id)}</span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
-
-      {onWorkspaceSave && (
-        <WorkspacePicker
-          compact
-          value={workspaceRoot ?? "."}
-          resolvedPath={workspaceResolved}
-          onSave={onWorkspaceSave}
-        />
-      )}
-
-      <div className="sidebar-footer">
-        <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
-          ＋ 新目标
-        </button>
-      </div>
-    </nav>
-  );
-}
+import { useMemo } from "react";
+import type { Conversation, Goal, Project } from "@openx/shared";
+import { SYSTEM_PROJECT_ID } from "@openx/shared";
+import { pickWorkspaceDirectory } from "../lib/workspace";
+import { WorkspacePicker } from "./WorkspacePicker";
+
+export type AppView = "home" | "console" | "project" | "conversation" | "settings";
+
+type Props = {
+  active: AppView;
+  projects: Project[];
+  conversations: Conversation[];
+  goals: Goal[];
+  selectedProjectId: string | null;
+  selectedConversationId: string | null;
+  expandedProjectIds: Set<string>;
+  onHome: () => void;
+  onOpenConsole: () => void;
+  onOpenProject: (projectId: string) => void;
+  onOpenConversation: (projectId: string, conversationId: string) => void;
+  onToggleProject: (projectId: string) => void;
+  onAddProject: (workspaceDir: string) => Promise<void>;
+  onNewConversation: (projectId: string) => void;
+  onSettings: () => void;
+  onNewGoal: () => void;
+  inboxBadgeCount?: number;
+  consoleBadgeCount?: number;
+  systemWorkspaceRoot?: string;
+  systemWorkspaceResolved?: string;
+  onSystemWorkspaceSave?: (path: string) => void | Promise<void>;
+};
+
+function convBadge(goals: Goal[], conversationId: string): number {
+  return goals.filter(
+    (g) =>
+      g.conversationId === conversationId &&
+      (g.status === "running" || g.status === "awaiting_review"),
+  ).length;
+}
+
+function projectBadge(goals: Goal[], projectId: string, conversations: Conversation[]): number {
+  const convIds = new Set(
+    conversations.filter((c) => c.projectId === projectId).map((c) => c.id),
+  );
+  return goals.filter(
+    (g) =>
+      convIds.has(g.conversationId) &&
+      (g.status === "running" || g.status === "awaiting_review"),
+  ).length;
+}
+
+export function SideNav({
+  active,
+  projects,
+  conversations,
+  goals,
+  selectedProjectId,
+  selectedConversationId,
+  expandedProjectIds,
+  onHome,
+  onOpenConsole,
+  onOpenProject,
+  onOpenConversation,
+  onToggleProject,
+  onAddProject,
+  onNewConversation,
+  onSettings,
+  onNewGoal,
+  inboxBadgeCount = 0,
+  consoleBadgeCount = 0,
+  systemWorkspaceRoot = "",
+  systemWorkspaceResolved,
+  onSystemWorkspaceSave,
+}: Props) {
+  const userProjects = useMemo(
+    () => projects.filter((p) => p.id !== SYSTEM_PROJECT_ID),
+    [projects],
+  );
+
+  const convByProject = useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    for (const c of conversations) {
+      const list = map.get(c.projectId) ?? [];
+      list.push(c);
+      map.set(c.projectId, list);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    }
+    return map;
+  }, [conversations]);
+
+  const handleAddProject = async () => {
+    const picked = await pickWorkspaceDirectory();
+    if (picked.ok) {
+      await onAddProject(picked.path);
+    }
+  };
+
+  return (
+    <nav className="app-sidebar" aria-label="主导航">
+      <div className="sidebar-brand">
+        <span className="brand-mark">O</span>
+        <div className="sidebar-brand-text">
+          <span className="sidebar-title">OpenX</span>
+          <span className="sidebar-subtitle">本机工头</span>
+        </div>
+      </div>
+
+      <div className="sidebar-nav">
+        <button
+          type="button"
+          className={`sidebar-item${active === "home" ? " active" : ""}`}
+          aria-current={active === "home" ? "page" : undefined}
+          onClick={onHome}
+        >
+          <span className="sidebar-item-label">首页</span>
+          {inboxBadgeCount > 0 ? (
+            <span className="sidebar-badge">{inboxBadgeCount}</span>
+          ) : null}
+        </button>
+
+        <button
+          type="button"
+          className={`sidebar-item${active === "console" ? " active" : ""}`}
+          aria-current={active === "console" ? "page" : undefined}
+          onClick={onOpenConsole}
+        >
+          <span className="sidebar-item-label">调度台</span>
+          {consoleBadgeCount > 0 ? (
+            <span className="sidebar-badge">{consoleBadgeCount}</span>
+          ) : null}
+        </button>
+
+        <div className="sidebar-group">
+          <div className="sidebar-group-title">项目</div>
+          {userProjects.map((project) => {
+            const expanded = expandedProjectIds.has(project.id);
+            const projectConvs = convByProject.get(project.id) ?? [];
+            const pBadge = projectBadge(goals, project.id, conversations);
+            const projectActive =
+              active === "project" && selectedProjectId === project.id;
+
+            return (
+              <div key={project.id} className="sidebar-tree-project">
+                <div className="sidebar-tree-row">
+                  <button
+                    type="button"
+                    className="sidebar-tree-toggle"
+                    aria-expanded={expanded}
+                    onClick={() => onToggleProject(project.id)}
+                  >
+                    {expanded ? "▾" : "▸"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`sidebar-tree-item${projectActive ? " active" : ""}`}
+                    onClick={() => onOpenProject(project.id)}
+                    title={project.workspaceDir}
+                  >
+                    <span className="sidebar-tree-label">{project.name}</span>
+                    {pBadge > 0 ? (
+                      <span className="sidebar-badge">{pBadge}</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-tree-add-conv"
+                    aria-label={`在 ${project.name} 下新建对话`}
+                    title="新对话"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNewConversation(project.id);
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+
+                {expanded ? (
+                  <div className="sidebar-tree-children">
+                    {projectConvs.map((conv) => {
+                      const cBadge = convBadge(goals, conv.id);
+                      const convActive =
+                        active === "conversation" &&
+                        selectedConversationId === conv.id;
+                      return (
+                        <button
+                          key={conv.id}
+                          type="button"
+                          className={`sidebar-tree-conv${convActive ? " active" : ""}`}
+                          onClick={() => onOpenConversation(project.id, conv.id)}
+                        >
+                          <span className="sidebar-tree-label">{conv.title}</span>
+                          {cBadge > 0 ? (
+                            <span className="sidebar-badge">{cBadge}</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            className="sidebar-tree-add-project"
+            onClick={() => void handleAddProject()}
+          >
+            ＋ 添加项目
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className={`sidebar-item${active === "settings" ? " active" : ""}`}
+          aria-current={active === "settings" ? "page" : undefined}
+          onClick={onSettings}
+        >
+          <span className="sidebar-item-label">设置</span>
+        </button>
+      </div>
+
+      <div className="sidebar-footer">
+        {active === "console" ? (
+          <>
+            <span className="sidebar-footer-label">系统工作目录</span>
+            {onSystemWorkspaceSave ? (
+              <WorkspacePicker
+                variant="sidebar"
+                compact
+                value={systemWorkspaceRoot}
+                resolvedPath={systemWorkspaceResolved}
+                onSave={onSystemWorkspaceSave}
+              />
+            ) : null}
+            <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
+              ＋ 发布任务
+            </button>
+          </>
+        ) : active === "conversation" ? (
+          <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
+            ＋ 新目标
+          </button>
+        ) : (
+          <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
+            ＋ 新目标
+          </button>
+        )}
+      </div>
+    </nav>
+  );
+}

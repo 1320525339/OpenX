@@ -1,5 +1,26 @@
 import type { Goal } from "@openx/shared";
 import { app } from "./routes.js";
+import { insertConversation, insertProject } from "./db.js";
+
+export const TEST_PROJECT_ID = "test-project";
+export const TEST_CONVERSATION_ID = "test-conversation";
+
+export function seedTestProjectAndConversation(): void {
+  const now = new Date().toISOString();
+  insertProject({
+    id: TEST_PROJECT_ID,
+    name: "Test Project",
+    workspaceDir: process.cwd(),
+    createdAt: now,
+  });
+  insertConversation({
+    id: TEST_CONVERSATION_ID,
+    projectId: TEST_PROJECT_ID,
+    title: "Test Conversation",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 export const REAL_ENV_TIMEOUT_MS = 180_000;
 /** Mock Pi 执行器等待目标状态的超时 */

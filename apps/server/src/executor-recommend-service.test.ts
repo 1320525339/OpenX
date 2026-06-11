@@ -44,7 +44,7 @@ describe("resolveGoalExecutorId", () => {
     { id: "my-agent", available: true },
   ];
 
-  it("recommends connect agent for web goal when using default executor", async () => {
+  it("keeps global default executor when explicitly requested", async () => {
     await withTempSkillsDir(async () => {
       const settings = {
         ...DEFAULT_SETTINGS,
@@ -66,6 +66,37 @@ describe("resolveGoalExecutorId", () => {
         {
           title: "抓取 https://example.com 页面",
           executorId: "pi",
+        },
+        settings,
+        executors,
+      );
+
+      expect(result.executorId).toBe("pi");
+      expect(result.recommendReason).toBeUndefined();
+    });
+  });
+
+  it("recommends connect agent when default executor is auto", async () => {
+    await withTempSkillsDir(async () => {
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        defaultExecutorId: "auto",
+        cliProfiles: [
+          {
+            executorId: "my-agent",
+            displayName: "My Agent",
+            kind: "connect" as const,
+            addedAt: new Date().toISOString(),
+          },
+        ],
+        skillBindings: {
+          "obscura-fetch": { enabled: true, cliIds: ["my-agent"] },
+        },
+      };
+
+      const result = await resolveGoalExecutorId(
+        {
+          title: "抓取 https://example.com 页面",
         },
         settings,
         executors,

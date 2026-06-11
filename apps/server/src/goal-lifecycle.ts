@@ -1,4 +1,10 @@
-import { canTransition, type Goal, type GoalStatus, type LogLevel } from "@openx/shared";
+import {
+  canTransition,
+  type Goal,
+  type GoalDeliverable,
+  type GoalStatus,
+  type LogLevel,
+} from "@openx/shared";
 import {
   appendLog,
   getGoalById,
@@ -74,6 +80,7 @@ export function updateGoalProgress(
 export function markGoalComplete(
   goalId: string,
   resultSummary: string,
+  deliverables?: GoalDeliverable[],
 ): LifecycleResult {
   const goalOrErr = requireGoal(goalId);
   if (isLifecycleError(goalOrErr)) return goalOrErr;
@@ -86,11 +93,46 @@ export function markGoalComplete(
   goal.status = "awaiting_review";
   goal.progress = 100;
   goal.resultSummary = resultSummary;
+  goal.deliverables =
+    deliverables && deliverables.length > 0 ? deliverables : undefined;
   goal.updatedAt = new Date().toISOString();
   updateGoal(goal);
   saveExecutionSummary(goalId, resultSummary, goal.executorId);
   broadcast({ type: "goal.updated", goal });
   narrateGoalChange(goal, "review");
+  return { ok: true, goal };
+}
+
+/**
+ * 父目标合成验收打回：将已 done 的子任务重新打开（特权转换 done → running）。
+ * 保留历史 resultSummary / execution_summaries，并附带累积审查上下文。
+ */
+export function reopenChildGoalForParentRework(
+  childId: string,
+  feedback: string,
+): LifecycleResult {
+  const goalOrErr = requireGoal(childId);
+  if (isLifecycleError(goalOrErr)) return goalOrErr;
+  const goal = goalOrErr;
+
+  if (goal.status !== "done") {
+    return fail(409, `Child goal is not done (${goal.status})`);
+  }
+
+  if (goal.resultSummary?.trim()) {
+    saveExecutionSummary(childId, goal.resultSummary, goal.executorId);
+  }
+
+  goal.status = "running";
+  goal.effectStatus = "rework";
+  goal.reworkReason = feedback;
+  goal.progress = 0;
+  goal.iterationCount = (goal.iterationCount ?? 0) + 1;
+  goal.updatedAt = new Date().toISOString();
+  updateGoal(goal);
+  broadcast({ type: "goal.updated", goal });
+  narrateGoalChange(goal, "rework");
+  appendLog(childId, "warn", `父目标合成验收打回：${feedback.slice(0, 240)}`);
   return { ok: true, goal };
 }
 

@@ -33,7 +33,7 @@ describe("handleAcpSessionUpdate run events", () => {
     expect(runEvents.some((e) => e.type === "text.delta")).toBe(true);
   });
 
-  it("maps agent_thought_chunk to status with 思考 prefix", async () => {
+  it("maps agent_thought_chunk to thinking.delta", async () => {
     const { run, runEvents, state, callbacks } = mockCtx();
     await handleAcpSessionUpdate(
       "acp:codex",
@@ -43,8 +43,25 @@ describe("handleAcpSessionUpdate run events", () => {
       },
       { callbacks, state, run },
     );
+    await run.finish();
+    expect(runEvents.some((e) => e.type === "thinking.delta")).toBe(true);
+    expect(runEvents.some((e) => e.type === "status" && String(e.message).startsWith("思考 ›"))).toBe(
+      false,
+    );
+  });
+
+  it("maps plan to status", async () => {
+    const { run, runEvents, state, callbacks } = mockCtx();
+    await handleAcpSessionUpdate(
+      "acp:codex",
+      {
+        sessionUpdate: "plan",
+        entries: [{ content: "read README", priority: "medium", status: "pending" }],
+      },
+      { callbacks, state, run },
+    );
     const status = runEvents.find((e) => e.type === "status");
-    expect(status?.message).toMatch(/^思考 ›/);
+    expect(status?.message).toMatch(/^计划 ›/);
   });
 
   it("maps tool_call lifecycle to tool.start / tool.end", async () => {

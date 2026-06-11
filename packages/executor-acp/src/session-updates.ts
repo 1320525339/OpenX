@@ -8,6 +8,25 @@ export type AcpSessionState = {
   toolNames: Map<string, string>;
 };
 
+function extractToolUpdateText(update: SessionUpdate & { sessionUpdate: "tool_call_update" }): string | undefined {
+  const raw = update as {
+    content?: { type?: string; text?: string }[];
+    rawOutput?: unknown;
+  };
+  if (Array.isArray(raw.content)) {
+    const text = raw.content
+      .map((c) => (c.type === "text" ? c.text ?? "" : ""))
+      .join("")
+      .trim();
+    if (text) return text;
+  }
+  if (raw.rawOutput != null) {
+    const serialized = JSON.stringify(raw.rawOutput);
+    if (serialized && serialized !== "{}") return serialized.slice(0, 200);
+  }
+  return undefined;
+}
+
 export async function handleAcpSessionUpdate(
   runtimeId: AcpRuntimeId,
   update: SessionUpdate,
@@ -33,11 +52,18 @@ export async function handleAcpSessionUpdate(
       break;
     case "agent_thought_chunk":
       if (update.content.type === "text" && update.content.text.trim()) {
-        const snippet = update.content.text.trim().slice(0, 160);
-        await run?.status(`思考 › ${snippet}`);
-        await callbacks.onLog("debug", `[${runtimeId}] 思考 › ${snippet.slice(0, 120)}`);
+        await run?.thinkingDelta(update.content.text);
+        const snippet = update.content.text.trim().slice(0, 120);
+        await callbacks.onLog("debug", `[${runtimeId}] 思考 › ${snippet}`);
       }
       break;
+    case "plan": {
+      const entries = update.entries ?? [];
+      const first = entries[0]?.content?.trim().slice(0, 80) ?? "";
+      const suffix = first ? `: ${first}` : "";
+      await run?.status(`计划 › ${entries.length} 步${suffix}`);
+      break;
+    }
     case "tool_call": {
       state.toolCount += 1;
       const tool = update.title ?? update.kind ?? "tool";
@@ -45,7 +71,7 @@ export async function handleAcpSessionUpdate(
       const argsPreview = update.rawInput
         ? JSON.stringify(update.rawInput).slice(0, 120)
         : undefined;
-      await run?.toolStart(tool, argsPreview);
+      await run?.toolStart(tool, argsPreview, update.toolCallId);
       await callbacks.onLog(
         "info",
         `[${runtimeId}] 工具 #${state.toolCount}：${tool}`,
@@ -59,9 +85,14 @@ export async function handleAcpSessionUpdate(
     case "tool_call_update": {
       const tool = state.toolNames.get(update.toolCallId) ?? update.title ?? "tool";
       if (update.status === "completed") {
-        await run?.toolEnd(tool, false);
+        await run?.toolEnd(tool, false, update.toolCallId);
       } else if (update.status === "failed") {
-        await run?.toolEnd(tool, true);
+        await run?.toolEnd(tool, true, update.toolCallId);
+      } else {
+        const text = extractToolUpdateText(update);
+        if (text) {
+          await run?.toolUpdate(tool, update.toolCallId, text.slice(-200));
+        }
       }
       break;
     }

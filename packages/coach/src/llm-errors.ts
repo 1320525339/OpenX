@@ -47,7 +47,7 @@ export function isCoachParseError(err: unknown): boolean {
   if (isNoObjectGenerated(err)) return true;
   const text = collectErrorText(err);
   return (
-    /JSON parsing failed|Unexpected end of JSON input|could not parse the response|No object generated/i.test(
+    /JSON parsing failed|Unexpected end of JSON input|could not parse the response|No object generated|结构化 JSON 输出失败/i.test(
       text,
     )
   );
@@ -78,4 +78,18 @@ export function formatCoachLlmError(err: unknown): string | null {
 export function isCoachQuotaError(err: unknown): boolean {
   const kind = classifyCoachLlmError(err);
   return kind === "free_usage_limit" || kind === "go_usage_limit";
+}
+
+const TIMEOUT_MSG = "助手 LLM 响应超时，请稍后重试或更换模型。";
+
+export function isCoachTimeoutError(err: unknown): boolean {
+  if (err instanceof Error) {
+    if (err.name === "AbortError") return true;
+    if (/timed out|timeout|aborted/i.test(err.message)) return true;
+  }
+  return false;
+}
+
+export function formatCoachTimeoutError(): string {
+  return TIMEOUT_MSG;
 }

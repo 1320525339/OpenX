@@ -16,9 +16,21 @@ import {
 
 } from "@earendil-works/pi-coding-agent";
 
-import type { PiExecutorSettings } from "@openx/shared";
+import { DEFAULT_PI_MAX_TOOL_CALLS, type PiExecutorSettings } from "@openx/shared";
 
-import { buildExecutionPrompt, createRunEmitter, type ExecutorAdapter, type ExecutorContext, type RunEventEmitter } from "@openx/executor-core";
+import {
+  buildExecutionPrompt,
+  createRunEmitter,
+  extractDeliverableFromTool,
+  extractPathFromToolArgs,
+  inferFileAction,
+  mergeDeliverable,
+  readWorkspaceFileBaseline,
+  type ExecutorAdapter,
+  type ExecutorContext,
+  type RunEventEmitter,
+} from "@openx/executor-core";
+import { languageFromPath, parseDeliverablesFromSummary, type GoalDeliverable } from "@openx/shared";
 
 import { createPiModelRegistry, resolvePiModel } from "./model.js";
 
@@ -113,126 +125,156 @@ function buildSessionManager(pi: PiExecutorSettings, workspaceRoot: string): Ses
 
 type ContentBlock = { type?: string; text?: string };
 
+function extractContentText(payload: unknown): string | undefined {
+  const partial = payload as { content?: ContentBlock[] } | undefined;
+  const text = partial?.content
+    ?.map((c) => (c.type === "text" ? c.text ?? "" : ""))
+    .join("")
+    .trim();
+  return text || undefined;
+}
+
 
 
 type TurnState = {
-
   assistantText: string;
-
   toolCount: number;
-
   lastAgentEnd?: Record<string, unknown>;
-
+  lastProgressAt: number;
+  lastProgressPct: number;
+  toolBudgetExceeded: boolean;
+  deliverables: GoalDeliverable[];
+  pendingTools: Map<
+    string,
+    { tool: string; path?: string; previousContent?: string; args?: unknown }
+  >;
 };
 
+const PROGRESS_THROTTLE_MS = 2_500;
 
+function resolveMaxToolCalls(pi: PiExecutorSettings): number {
+  const env = process.env.OPENX_PI_MAX_TOOLS;
+  if (env?.trim()) {
+    const n = Number.parseInt(env, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return pi.maxToolCalls ?? DEFAULT_PI_MAX_TOOL_CALLS;
+}
 
 async function handlePiEvent(
-
   evt: AgentSessionEvent,
-
   ctx: {
-
     callbacks: ExecutorContext["callbacks"];
-
     state: TurnState;
-
     run: RunEventEmitter | null;
-
+    session: AgentSession;
+    maxToolCalls: number;
+    workspaceRoot: string;
   },
-
 ): Promise<void> {
-
-  const { callbacks, state, run } = ctx;
-
-
+  const { callbacks, state, run, session, maxToolCalls, workspaceRoot } = ctx;
 
   if (evt.type === "agent_start") {
-
     await run?.status("Pi Agent 启动");
-
     await callbacks.onProgress(12, "Pi Agent 启动");
-
   }
-
-
 
   if (evt.type === "message_update") {
-
     const inner = evt.assistantMessageEvent;
-
     if (inner.type === "text_delta" && typeof inner.delta === "string") {
-
       state.assistantText += inner.delta;
-
       await run?.textDelta(inner.delta);
-
       const pct = Math.min(70, 20 + Math.floor(state.assistantText.length / 120));
-
-      await callbacks.onProgress(pct, "Pi 生成中…");
-
+      const now = Date.now();
+      if (
+        pct !== state.lastProgressPct ||
+        now - state.lastProgressAt >= PROGRESS_THROTTLE_MS
+      ) {
+        state.lastProgressAt = now;
+        state.lastProgressPct = pct;
+        await callbacks.onProgress(pct, "Pi 生成中…");
+      }
     }
-
+    if (inner.type === "thinking_delta" && typeof inner.delta === "string") {
+      await run?.thinkingDelta(inner.delta);
+    }
     if (inner.type === "error") {
-
       await callbacks.onLog("error", `[pi] 流式错误：${String(inner.reason ?? "unknown")}`);
-
     }
-
   }
 
-
-
   if (evt.type === "tool_execution_start") {
-
     state.toolCount += 1;
-
     const tool = String(evt.toolName ?? "tool");
-
+    const path = extractPathFromToolArgs(evt.args);
+    const previousContent =
+      path && workspaceRoot
+        ? readWorkspaceFileBaseline(workspaceRoot, path)
+        : undefined;
+    if (evt.toolCallId) {
+      state.pendingTools.set(evt.toolCallId, {
+        tool,
+        path,
+        previousContent,
+        args: evt.args,
+      });
+    }
+    if (path) {
+      mergeDeliverable(state.deliverables, {
+        kind: "file",
+        path,
+        label: path.replace(/\\/g, "/").split("/").pop() ?? path,
+        action: previousContent !== undefined ? "modified" : inferFileAction(tool),
+        previousContent,
+        language: languageFromPath(path),
+      });
+    }
     const argsPreview = evt.args ? JSON.stringify(evt.args).slice(0, 120) : "";
-
-    await run?.toolStart(tool, argsPreview);
-
+    await run?.toolStart(tool, argsPreview, evt.toolCallId);
     await callbacks.onLog("info", `[pi] 工具 #${state.toolCount}：${tool} ${argsPreview}`);
-
     await callbacks.onProgress(Math.min(88, 72 + state.toolCount * 3), `执行 ${tool}…`);
 
+    if (state.toolCount >= maxToolCalls && !state.toolBudgetExceeded) {
+      state.toolBudgetExceeded = true;
+      await callbacks.onLog(
+        "warn",
+        `[pi] 工具调用已达上限（${maxToolCalls} 次），正在中止本轮…`,
+      );
+      void session.abort();
+    }
   }
 
 
 
   if (evt.type === "tool_execution_update") {
-
-    const partial = evt.partialResult as { content?: ContentBlock[] } | undefined;
-
-    const text = partial?.content
-
-      ?.map((c) => (c.type === "text" ? c.text ?? "" : ""))
-
-      .join("")
-
-      .trim();
-
+    const text = extractContentText(evt.partialResult);
     if (text) {
-
-      await callbacks.onLog("debug", `[pi] ${String(evt.toolName)} › ${text.slice(-200)}`);
-
+      const tool = String(evt.toolName ?? "tool");
+      await run?.toolUpdate(tool, evt.toolCallId, text.slice(-200));
+      await callbacks.onLog("debug", `[pi] ${tool} › ${text.slice(-200)}`);
     }
-
   }
 
 
 
   if (evt.type === "tool_execution_end") {
-
     const tool = String(evt.toolName ?? "tool");
-
     const isError = evt.isError === true;
-
-    await run?.toolEnd(tool, isError);
-
+    const resultPreview = extractContentText(evt.result)?.slice(0, 160);
+    const pending = evt.toolCallId
+      ? state.pendingTools.get(evt.toolCallId)
+      : undefined;
+    if (evt.toolCallId) state.pendingTools.delete(evt.toolCallId);
+    const item = extractDeliverableFromTool(
+      tool,
+      pending?.args ?? (pending?.path ? { path: pending.path } : undefined),
+      evt.result,
+      isError,
+      { previousContent: pending?.previousContent },
+    );
+    if (item) mergeDeliverable(state.deliverables, item);
+    await run?.toolEnd(tool, isError, evt.toolCallId, resultPreview);
     await callbacks.onLog(isError ? "warn" : "info", `[pi] 工具完成：${tool}`);
-
   }
 
 
@@ -245,7 +287,57 @@ async function handlePiEvent(
 
   }
 
+  if (evt.type === "compaction_start") {
+    const reason =
+      evt.reason === "overflow"
+        ? "溢出"
+        : evt.reason === "threshold"
+          ? "阈值"
+          : "手动";
+    await run?.status(`上下文压缩中（${reason}）…`);
+    await callbacks.onLog("info", `[pi] 上下文压缩开始（${reason}）`);
+  }
 
+  if (evt.type === "compaction_end") {
+    if (evt.aborted) {
+      await run?.status("上下文压缩已中止");
+    } else if (evt.errorMessage) {
+      await run?.status(`上下文压缩失败：${String(evt.errorMessage).slice(0, 80)}`);
+    } else {
+      await run?.status("上下文压缩完成");
+    }
+    if (evt.willRetry) {
+      await run?.status("压缩后将重试…");
+    }
+    await callbacks.onLog(
+      evt.errorMessage ? "warn" : "info",
+      `[pi] 上下文压缩结束${evt.aborted ? "（已中止）" : ""}`,
+    );
+  }
+
+  if (evt.type === "auto_retry_start") {
+    await run?.status(
+      `自动重试 ${evt.attempt}/${evt.maxAttempts}（${Math.round(evt.delayMs / 1000)}s 后）…`,
+    );
+    await callbacks.onLog(
+      "warn",
+      `[pi] 自动重试 ${evt.attempt}/${evt.maxAttempts}：${String(evt.errorMessage).slice(0, 120)}`,
+    );
+  }
+
+  if (evt.type === "auto_retry_end") {
+    if (evt.success) {
+      await run?.status(`自动重试成功（第 ${evt.attempt} 次）`);
+    } else {
+      await run?.status(
+        `自动重试失败：${String(evt.finalError ?? "未知错误").slice(0, 80)}`,
+      );
+    }
+    await callbacks.onLog(
+      evt.success ? "info" : "warn",
+      `[pi] 自动重试结束：${evt.success ? "成功" : "失败"}`,
+    );
+  }
 
   if (evt.type === "agent_end") {
 
@@ -258,6 +350,10 @@ async function handlePiEvent(
       willRetry: evt.willRetry,
 
     };
+
+    if (evt.willRetry) {
+      await run?.status("Agent 将自动重试…");
+    }
 
     await callbacks.onProgress(95, "Pi 收尾…");
 
@@ -277,20 +373,24 @@ async function runSessionTurn(
 
   opts?: { steer?: boolean },
 
-): Promise<{ summary: string; park: boolean }> {
-
-  const { goal, callbacks } = ctx;
-
+): Promise<{
+  summary: string;
+  park: boolean;
+  toolBudgetExceeded: boolean;
+  deliverables: GoalDeliverable[];
+}> {
+  const { goal, callbacks, workspaceRoot } = ctx;
   const pi = resolvePiSettings(ctx);
-
   const timeoutMs = pi.runTimeoutMs ?? 600_000;
-
+  const maxToolCalls = resolveMaxToolCalls(pi);
   const state: TurnState = {
-
     assistantText: "",
-
     toolCount: 0,
-
+    lastProgressAt: 0,
+    lastProgressPct: -1,
+    toolBudgetExceeded: false,
+    deliverables: [],
+    pendingTools: new Map(),
   };
 
   let timedOut = false;
@@ -304,9 +404,14 @@ async function runSessionTurn(
 
 
   const unsubscribe = session.subscribe((evt) => {
-
-    void handlePiEvent(evt, { callbacks, state, run });
-
+    void handlePiEvent(evt, {
+      callbacks,
+      state,
+      run,
+      session,
+      maxToolCalls,
+      workspaceRoot,
+    });
   });
 
 
@@ -352,27 +457,29 @@ async function runSessionTurn(
 
 
   const summary =
-
     summarizePiRun(
-
       state.lastAgentEnd ?? { type: "agent_end", messages: session.state.messages },
-
       state.assistantText,
-
       goal.title,
-
     ) +
-
+    (state.toolBudgetExceeded
+      ? `\n\n（工具调用已达上限 ${maxToolCalls} 次，已中止。请缩小任务范围、换执行器，或提高设置中的 maxToolCalls。）`
+      : "") +
     (timedOut
-
       ? `\n\n（已超时 ${Math.round(timeoutMs / 1000)}s，请人工核对结果。）`
-
       : "");
 
+  const fromSummary = parseDeliverablesFromSummary(summary);
+  for (const item of fromSummary) {
+    mergeDeliverable(state.deliverables, item);
+  }
 
-
-  return { summary, park: !timedOut };
-
+  return {
+    summary,
+    park: !timedOut && !state.toolBudgetExceeded,
+    toolBudgetExceeded: state.toolBudgetExceeded,
+    deliverables: state.deliverables,
+  };
 }
 
 
@@ -412,6 +519,10 @@ export const piExecutor: ExecutorAdapter = {
   id: "pi",
 
   displayName: "Pi（内嵌底座）",
+
+  executionModel: "push",
+
+  matchExecutorId: (goalExecutorId) => goalExecutorId === "pi",
 
 
 
@@ -517,6 +628,9 @@ export const piExecutor: ExecutorAdapter = {
     const promptText = buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
       isRework: ctx.isRework,
       priorSummaries: ctx.priorSummaries,
+      priorReviewRounds: ctx.priorReviewRounds,
+      agentRole: ctx.agentRole,
+      workspaceRoot: ctx.workspaceRoot,
     });
 
 
@@ -609,11 +723,22 @@ export const piExecutor: ExecutorAdapter = {
 
       await callbacks.onProgress(18, "Pi 已接受任务");
 
-      const { summary, park } = await runSessionTurn(session, promptText, ctx);
+      const { summary, park, toolBudgetExceeded, deliverables } = await runSessionTurn(
+        session,
+        promptText,
+        ctx,
+      );
+
+      if (toolBudgetExceeded) {
+        await callbacks.onProgress(100, "Pi 已中止（工具上限）");
+        await callbacks.onFail(
+          `Pi 工具调用达到上限（${resolveMaxToolCalls(pi)} 次），任务未完成。摘要：${summary.slice(0, 500)}`,
+        );
+        return;
+      }
 
       await callbacks.onProgress(100, "Pi 完成");
-
-      await callbacks.onComplete(summary);
+      await callbacks.onComplete(summary, deliverables);
 
       if (park) {
 
@@ -653,7 +778,13 @@ export const piExecutor: ExecutorAdapter = {
       ctx.goal,
       ctx.priorLogs ?? [],
       ctx.enabledSkills,
-      { isRework: true, priorSummaries: ctx.priorSummaries },
+      {
+        isRework: true,
+        priorSummaries: ctx.priorSummaries,
+      priorReviewRounds: ctx.priorReviewRounds,
+        agentRole: ctx.agentRole,
+        workspaceRoot: ctx.workspaceRoot,
+      },
     );
 
     parkedRuns.delete(ctx.goal.id);
@@ -668,15 +799,25 @@ export const piExecutor: ExecutorAdapter = {
 
     try {
 
-      const { summary, park } = await runSessionTurn(parked.session, promptText, ctx, {
+      const { summary, park, toolBudgetExceeded, deliverables } = await runSessionTurn(
+        parked.session,
+        promptText,
+        ctx,
+        { steer: true },
+      );
 
-        steer: true,
-
-      });
+      if (toolBudgetExceeded) {
+        await callbacks.onProgress(100, "Pi 返工已中止（工具上限）");
+        await callbacks.onFail(
+          `Pi 返工时工具调用达到上限，任务未完成。摘要：${summary.slice(0, 500)}`,
+        );
+        parked.session.dispose();
+        return true;
+      }
 
       await callbacks.onProgress(100, "Pi 返工完成");
 
-      await callbacks.onComplete(summary);
+      await callbacks.onComplete(summary, deliverables);
 
       if (park) {
 

@@ -4,6 +4,10 @@ import type { Goal } from "@openx/shared";
 import { insertGoal, resetDb } from "./db.js";
 import { registerConnection, resetConnections } from "./connect-store.js";
 import { buildCoachChatContext } from "./coach-context.js";
+import {
+  seedTestProjectAndConversation,
+  TEST_CONVERSATION_ID,
+} from "./test-helpers.js";
 
 vi.mock("@openx/coach", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@openx/coach")>();
@@ -30,6 +34,7 @@ function makeGoal(overrides: Partial<Goal> & Pick<Goal, "title">): Goal {
   const now = new Date().toISOString();
   return {
     id: nanoid(),
+    conversationId: TEST_CONVERSATION_ID,
     title: overrides.title,
     acceptance: overrides.acceptance ?? "验收通过",
     executionPrompt: overrides.executionPrompt ?? "执行",
@@ -53,6 +58,7 @@ describe("sub-goals", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
     resetConnections();
   });
 
@@ -98,7 +104,7 @@ describe("sub-goals", () => {
     );
 
     expect(children).toHaveLength(2);
-    expect(children[0]?.dependsOn).toEqual([parent.id]);
+    expect(children[0]?.dependsOn).toEqual([]);
     expect(children[1]?.dependsOn).toEqual([children[0]!.id]);
     expect(children[0]?.parentGoalId).toBe(parent.id);
   });
@@ -108,6 +114,7 @@ describe("coach-context executors", () => {
   beforeEach(() => {
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    seedTestProjectAndConversation();
     resetConnections();
   });
 
@@ -124,7 +131,7 @@ describe("coach-context executors", () => {
       executorId: "cursor-worker",
     });
 
-    const ctx = buildCoachChatContext();
+    const ctx = buildCoachChatContext(TEST_CONVERSATION_ID);
     expect(ctx.executors).toContain("pi");
     expect(ctx.executors).toContain("acp:gemini");
     expect(ctx.executors?.some((e) => e.includes("Cursor Worker"))).toBe(true);

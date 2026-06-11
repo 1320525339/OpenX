@@ -9,34 +9,40 @@ import {
   BatchGoalsSchema,
   RecommendExecutorInputSchema,
   canTransition,
+  DEFAULT_AUTO_REVIEW,
   type Goal,
 } from "@openx/shared";
 import {
   listGoals,
+  type ListGoalsFilter,
   getGoalById,
+  getConversationById,
   insertGoal,
+  linkCoachRefinedMessage,
   updateGoal,
   appendLog,
   listLogs,
   buildGoalFeedback,
   listChildGoals,
+  listReviewRoundEntries,
   areDependenciesMet,
   deleteGoals,
 } from "../db.js";
+import { triggerGoalReview } from "../auto-review.js";
 import { loadSettings } from "../settings-store.js";
 import { broadcast } from "../sse.js";
 import { buildRunStateFromDb } from "../run-service.js";
-import { autoDraftNextSubGoals, createSubGoalsUnderParent } from "../sub-goals.js";
+import { createSubGoalsUnderParent } from "../sub-goals.js";
 import {
   dispatchGoal,
   detectExecutors,
   cancelRunning,
-  steerReworkGoal,
-  tryDispatchDependents,
 } from "../orchestrator.js";
 import { narrateGoalChange } from "../narration.js";
 import { recommendExecutorForGoal, resolveGoalExecutorId } from "../executor-recommend-service.js";
-import { cancelGoalStatus } from "../goal-lifecycle.js";
+import { cancelGoalStatus, claimGoalForDispatch } from "../goal-lifecycle.js";
+import { approveGoal, reworkGoal } from "../goal-actions.js";
+import { buildGoalDispatchContext } from "../goal-dispatch.js";
 
 export const goalsRoutes = new Hono();
 
@@ -52,11 +58,21 @@ goalsRoutes.post("/recommend-executor", async (c) => {
 
 goalsRoutes.get("/", (c) => {
   const status = c.req.query("status") as Goal["status"] | undefined;
-  return c.json({ goals: listGoals(status) });
+  const conversationId = c.req.query("conversationId");
+  const projectId = c.req.query("projectId");
+  const filter: ListGoalsFilter = {};
+  if (status) filter.status = status;
+  if (conversationId) filter.conversationId = conversationId;
+  if (projectId) filter.projectId = projectId;
+  const goals = Object.keys(filter).length > 0 ? listGoals(filter) : listGoals();
+  return c.json({ goals });
 });
 
 goalsRoutes.post("/", async (c) => {
   const input = CreateGoalSchema.parse(await c.req.json());
+  if (!getConversationById(input.conversationId)) {
+    return c.json({ error: "Conversation not found" }, 404);
+  }
   const settings = loadSettings();
   const executors = await detectExecutors();
   const { refined, llmError } = await refineGoal(
@@ -84,9 +100,12 @@ goalsRoutes.post("/", async (c) => {
     executors,
   );
 
+  const dispatchContext = buildGoalDispatchContext(input);
+
   const now = new Date().toISOString();
   const goal: Goal = {
     id: nanoid(),
+    conversationId: input.conversationId,
     title,
     acceptance,
     userDraft: input.userDraft,
@@ -96,12 +115,19 @@ goalsRoutes.post("/", async (c) => {
     parentGoalId: input.parentGoalId,
     dependsOn: input.dependsOn ?? [],
     priority: input.priority ?? "medium",
+    autoReview: input.autoReview ?? DEFAULT_AUTO_REVIEW,
+    maxIterations: input.maxIterations,
+    iterationCount: 0,
+    dispatchContext,
     status: "draft",
     progress: 0,
     createdAt: now,
     updatedAt: now,
   };
   insertGoal(goal);
+  if (input.refinedMessageId != null) {
+    linkCoachRefinedMessage(input.refinedMessageId, goal.id);
+  }
   broadcast({ type: "goal.updated", goal });
   if (mainExec.recommendReason) {
     appendLog(goal.id, "info", `推荐执行器：${goal.executorId}（${mainExec.recommendReason}）`);
@@ -132,6 +158,7 @@ goalsRoutes.post("/", async (c) => {
     const childNow = new Date().toISOString();
     const child: Goal = {
       id: nanoid(),
+      conversationId: input.conversationId,
       title: subTitle,
       acceptance: subAcceptance,
       userDraft: sub.userDraft,
@@ -139,8 +166,12 @@ goalsRoutes.post("/", async (c) => {
       constraints: sub.constraints ?? subRefined.constraints,
       executorId: subExec.executorId,
       parentGoalId: goal.id,
-      dependsOn: sub.dependsOn ?? [chainPrevId],
+      dependsOn: sub.dependsOn ?? (children.length === 0 ? [] : [chainPrevId]),
       priority: sub.priority ?? "medium",
+      autoReview: goal.autoReview ?? false,
+      maxIterations: goal.maxIterations,
+      iterationCount: 0,
+      dispatchContext: buildGoalDispatchContext(sub, undefined, goal),
       status: "draft",
       progress: 0,
       createdAt: childNow,
@@ -156,15 +187,32 @@ goalsRoutes.post("/", async (c) => {
   }
 
   const shouldStart = input.autoStart ?? settings.autoExecute;
-  if (shouldStart && canTransition(goal.status, "running") && areDependenciesMet(goal)) {
-    goal.status = "running";
-    goal.progress = 0;
-    goal.updatedAt = new Date().toISOString();
-    updateGoal(goal);
-    broadcast({ type: "goal.updated", goal });
-    narrateGoalChange(goal, "start");
-    appendLog(goal.id, "info", `任务启动，执行器：${goal.executorId}`);
-    void dispatchGoal(goal.id);
+  if (shouldStart && areDependenciesMet(goal)) {
+    const claimed = claimGoalForDispatch(goal.id, ["draft"]);
+    if (claimed) {
+      claimed.progress = 0;
+      claimed.updatedAt = new Date().toISOString();
+      updateGoal(claimed);
+      broadcast({ type: "goal.updated", goal: claimed });
+      narrateGoalChange(claimed, "start");
+      appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
+      void dispatchGoal(claimed.id);
+    }
+  }
+
+  if (shouldStart) {
+    for (const child of children) {
+      if (!areDependenciesMet(child)) continue;
+      const claimedChild = claimGoalForDispatch(child.id, ["draft"]);
+      if (!claimedChild) continue;
+      claimedChild.progress = 0;
+      claimedChild.updatedAt = new Date().toISOString();
+      updateGoal(claimedChild);
+      broadcast({ type: "goal.updated", goal: claimedChild });
+      narrateGoalChange(claimedChild, "start");
+      appendLog(claimedChild.id, "info", `任务启动，执行器：${claimedChild.executorId}`);
+      void dispatchGoal(claimedChild.id);
+    }
   }
 
   return c.json({ goal, children }, 201);
@@ -200,6 +248,27 @@ goalsRoutes.get("/:id/run", (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   return c.json({ run: buildRunStateFromDb(goal.id) });
+});
+
+goalsRoutes.get("/:id/review-rounds", (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  return c.json({ rounds: listReviewRoundEntries(goal.id) });
+});
+
+goalsRoutes.post("/:id/trigger-review", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { force?: boolean };
+  const goalId = c.req.param("id");
+  const result = await triggerGoalReview(goalId, { force: body.force ?? true });
+  if (!result.ok) {
+    return c.json({ error: result.error ?? "审查失败" }, 400);
+  }
+  const goal = getGoalById(goalId);
+  return c.json({
+    ok: true,
+    goal,
+    rounds: goal ? listReviewRoundEntries(goal.id) : [],
+  });
 });
 
 goalsRoutes.patch("/:id", async (c) => {
@@ -251,86 +320,62 @@ goalsRoutes.post("/:id/start", async (c) => {
   if (goal.status === "running") {
     return c.json({ goal });
   }
-  if (!canTransition(goal.status, "running")) {
+  if (!areDependenciesMet(goal)) {
+    return c.json({ error: "Dependencies not completed", dependsOn: goal.dependsOn }, 409);
+  }
+  const claimed = claimGoalForDispatch(goal.id, ["draft", "failed"]);
+  if (!claimed) {
     return c.json({ error: `Cannot start from ${goal.status}` }, 400);
+  }
+  claimed.progress = 0;
+  claimed.updatedAt = new Date().toISOString();
+  updateGoal(claimed);
+  broadcast({ type: "goal.updated", goal: claimed });
+  narrateGoalChange(claimed, "start");
+  appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
+  void dispatchGoal(claimed.id);
+  return c.json({ goal: claimed });
+});
+
+/** failed 任务重试（等价于 start，语义更明确） */
+goalsRoutes.post("/:id/retry", async (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  if (goal.status !== "failed") {
+    return c.json({ error: "Only failed goals can be retried" }, 400);
   }
   if (!areDependenciesMet(goal)) {
     return c.json({ error: "Dependencies not completed", dependsOn: goal.dependsOn }, 409);
   }
-  goal.status = "running";
-  goal.progress = 0;
-  goal.updatedAt = new Date().toISOString();
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  narrateGoalChange(goal, "start");
-  appendLog(goal.id, "info", `任务启动，执行器：${goal.executorId}`);
-  void dispatchGoal(goal.id);
-  return c.json({ goal });
+  const claimed = claimGoalForDispatch(goal.id, ["failed"]);
+  if (!claimed) {
+    return c.json({ error: "Cannot retry goal" }, 400);
+  }
+  claimed.progress = 0;
+  claimed.effectStatus = undefined;
+  claimed.reworkReason = undefined;
+  claimed.updatedAt = new Date().toISOString();
+  updateGoal(claimed);
+  broadcast({ type: "goal.updated", goal: claimed });
+  narrateGoalChange(claimed, "start");
+  appendLog(claimed.id, "info", `失败任务重试，执行器：${claimed.executorId}`);
+  void dispatchGoal(claimed.id);
+  return c.json({ goal: claimed });
 });
 
 goalsRoutes.post("/:id/approve", (c) => {
-  const goal = getGoalById(c.req.param("id"));
-  if (!goal) return c.json({ error: "Not found" }, 404);
-  if (!canTransition(goal.status, "done")) {
-    return c.json({ error: "Not awaiting review" }, 400);
-  }
-  goal.status = "done";
-  goal.effectStatus = "approved";
-  goal.updatedAt = new Date().toISOString();
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  narrateGoalChange(goal, "done");
-  tryDispatchDependents(goal.id);
-  void autoDraftNextSubGoals(goal.id, "approve");
-  return c.json({ goal });
+  const result = approveGoal(c.req.param("id"));
+  if (!result.ok) return c.json({ error: result.error }, result.status);
+  return c.json({ goal: result.goal });
 });
 
 goalsRoutes.post("/:id/rework", async (c) => {
-  const goal = getGoalById(c.req.param("id"));
-  if (!goal) return c.json({ error: "Not found" }, 404);
-  if (goal.status !== "awaiting_review") {
-    return c.json({ error: "Only awaiting_review goals can be reworked" }, 400);
-  }
   const body = ReworkSchema.parse(await c.req.json().catch(() => ({})));
-  goal.effectStatus = "rework";
-  goal.reworkReason = body.reason;
-  goal.updatedAt = new Date().toISOString();
-
-  const settings = loadSettings();
-  const feedback = buildGoalFeedback(goal.id);
-  const { refined, llmError } = await refineGoal(
-    {
-      userDraft: goal.userDraft ?? `${goal.title}\n验收：${goal.acceptance}`,
-      constraints: goal.constraints,
-      feedback,
-    },
-    settings,
-    settings.defaultConstraints,
-  );
-  goal.executionPrompt = refined.executionPrompt;
-  appendLog(goal.id, "info", "Coach 已根据返工反馈优化执行提示词");
-  if (llmError) {
-    appendLog(goal.id, "warn", `Coach refine 降级：${llmError}`);
-  }
-
-  goal.status = "running";
-  goal.progress = 0;
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  const reasonText = body.reason?.trim() || "（未填写原因）";
-  appendLog(goal.id, "warn", `工头返工：${reasonText}`);
-  narrateGoalChange(goal, "rework");
-
-  const steered = await steerReworkGoal(goal.id);
-  if (steered) {
-    void autoDraftNextSubGoals(goal.id, "rework");
-    return c.json({ goal, mode: "steer" as const });
-  }
-
-  cancelRunning(goal.id);
-  void dispatchGoal(goal.id);
-  void autoDraftNextSubGoals(goal.id, "rework");
-  return c.json({ goal, mode: "restart" as const });
+  const result = await reworkGoal(c.req.param("id"), body.reason, {
+    source: "user",
+  });
+  if (!result.ok) return c.json({ error: result.error }, result.status);
+  return c.json({ goal: result.goal, mode: result.mode });
 });
 
 goalsRoutes.post("/:id/cancel", (c) => {
@@ -390,22 +435,22 @@ goalsRoutes.post("/batch", async (c) => {
           ok.push(id);
           continue;
         }
-        if (!canTransition(goal.status, "running")) {
-          failed.push({ id, error: `无法从 ${goal.status} 启动` });
-          continue;
-        }
         if (!areDependenciesMet(goal)) {
           failed.push({ id, error: "前置目标未完成" });
           continue;
         }
-        goal.status = "running";
-        goal.progress = 0;
-        goal.updatedAt = new Date().toISOString();
-        updateGoal(goal);
-        broadcast({ type: "goal.updated", goal });
-        narrateGoalChange(goal, "start");
-        appendLog(goal.id, "info", `任务启动，执行器：${goal.executorId}`);
-        void dispatchGoal(goal.id);
+        const claimed = claimGoalForDispatch(goal.id, ["draft", "failed"]);
+        if (!claimed) {
+          failed.push({ id, error: `无法从 ${goal.status} 启动` });
+          continue;
+        }
+        claimed.progress = 0;
+        claimed.updatedAt = new Date().toISOString();
+        updateGoal(claimed);
+        broadcast({ type: "goal.updated", goal: claimed });
+        narrateGoalChange(claimed, "start");
+        appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
+        void dispatchGoal(claimed.id);
         ok.push(id);
       } else if (action === "cancel") {
         if (!canTransition(goal.status, "cancelled")) {
@@ -420,18 +465,11 @@ goalsRoutes.post("/batch", async (c) => {
         }
         ok.push(id);
       } else if (action === "approve") {
-        if (!canTransition(goal.status, "done")) {
-          failed.push({ id, error: "非待确认状态" });
+        const approved = approveGoal(goal.id);
+        if (!approved.ok) {
+          failed.push({ id, error: approved.error });
           continue;
         }
-        goal.status = "done";
-        goal.effectStatus = "approved";
-        goal.updatedAt = new Date().toISOString();
-        updateGoal(goal);
-        broadcast({ type: "goal.updated", goal });
-        narrateGoalChange(goal, "done");
-        tryDispatchDependents(goal.id);
-        void autoDraftNextSubGoals(goal.id, "approve");
         ok.push(id);
       }
     } catch (err) {

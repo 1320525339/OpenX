@@ -1,5 +1,8 @@
 import { listGoals } from "./db.js";
-import { isConnectExecutorId } from "@openx/shared";
+import {
+  isConnectAnyExecutorId,
+  isConnectExecutorId,
+} from "@openx/shared";
 import {
   getConnectionByExecutorId,
   isGoalCancelledForConnect,
@@ -8,6 +11,8 @@ import {
 import { markGoalFailed } from "./goal-lifecycle.js";
 import { appendLog } from "./db.js";
 
+const CONNECT_DISPATCH_TIMEOUT_MS = 5 * 60 * 1000;
+const CONNECT_POOL_FAIL_TIMEOUT_MS = 30 * 60 * 1000;
 const CONNECT_GOAL_TIMEOUT_MS = 30 * 60 * 1000;
 const CONNECT_HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 const WATCHDOG_INTERVAL_MS = 60 * 1000;
@@ -22,10 +27,45 @@ function checkConnectGoals(): void {
     if (!isConnectExecutorId(goal.executorId)) continue;
     if (isGoalCancelledForConnect(goal.id)) continue;
 
+    const updatedAt = Date.parse(goal.updatedAt);
+    const ageMs = Number.isFinite(updatedAt) ? now - updatedAt : 0;
+
+    if (
+      isConnectAnyExecutorId(goal.executorId) &&
+      goal.progress <= 10 &&
+      ageMs > CONNECT_POOL_FAIL_TIMEOUT_MS
+    ) {
+      markGoalFailed(
+        goal.id,
+        `任务池任务超过 ${Math.round(CONNECT_POOL_FAIL_TIMEOUT_MS / 60_000)} 分钟未被认领`,
+      );
+      continue;
+    }
+
+    if (
+      isConnectAnyExecutorId(goal.executorId) &&
+      goal.progress <= 10 &&
+      ageMs > CONNECT_DISPATCH_TIMEOUT_MS
+    ) {
+      appendLog(
+        goal.id,
+        "warn",
+        `任务池任务仍在等待 Connect CLI 认领（已 ${Math.round(ageMs / 60_000)} 分钟）`,
+      );
+      continue;
+    }
+
+    if (goal.progress <= 10 && ageMs > CONNECT_DISPATCH_TIMEOUT_MS) {
+      markGoalFailed(
+        goal.id,
+        `Connect Agent 未在 ${Math.round(CONNECT_DISPATCH_TIMEOUT_MS / 60_000)} 分钟内拉取任务`,
+      );
+      continue;
+    }
+
     const conn = getConnectionByExecutorId(goal.executorId);
     if (!conn) {
-      const updatedAt = Date.parse(goal.updatedAt);
-      if (Number.isFinite(updatedAt) && now - updatedAt > CONNECT_GOAL_TIMEOUT_MS) {
+      if (ageMs > CONNECT_GOAL_TIMEOUT_MS) {
         markGoalFailed(
           goal.id,
           `Connect Agent 离线超过 ${Math.round(CONNECT_GOAL_TIMEOUT_MS / 60_000)} 分钟，任务已标记失败`,
@@ -62,4 +102,9 @@ export function stopConnectWatchdog(): void {
     clearInterval(timer);
     timer = undefined;
   }
+}
+
+/** 测试用 */
+export function runConnectWatchdogOnce(): void {
+  checkConnectGoals();
 }

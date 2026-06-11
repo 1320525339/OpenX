@@ -47,10 +47,19 @@ function isPiExecutor(executorId: string): boolean {
   return executorId === "pi";
 }
 
-function isConnectExecutor(executorId: string): boolean {
-  return !executorId.startsWith("acp:") && executorId !== "pi" && executorId !== "auto";
+function isAcpExecutor(executorId: string): boolean {
+  return executorId.startsWith("acp:");
 }
 
+function isConnectExecutor(executorId: string): boolean {
+  return !isAcpExecutor(executorId) && executorId !== "pi" && executorId !== "auto";
+}
+
+/**
+ * 执行器打分（已去 Pi 偏置）：
+ * - ACP CLI（Codex/Claude/Gemini）是成熟 Coding Agent，本地/代码/Git 任务与 Pi 同档竞争
+ * - Pi 仅保留轻微的工头本地优势（同分时由排序的 pi 优先规则兜底）
+ */
 export function scoreExecutorForGoal(params: {
   executorId: string;
   available: boolean;
@@ -67,21 +76,25 @@ export function scoreExecutorForGoal(params: {
     if (isPiExecutor(executorId) && enabledSkillIds.some((id) => id === "filesystem" || id === "shell")) {
       score += 3;
     }
+    if (isAcpExecutor(executorId)) score += 2;
     if (isConnectExecutor(executorId) && hasObscuraSkill(enabledSkillIds)) score += 2;
   } else if (intent === "local") {
-    if (isPiExecutor(executorId)) score += 8;
+    if (isPiExecutor(executorId)) score += 5;
+    if (isAcpExecutor(executorId)) score += 5;
     if (enabledSkillIds.includes("filesystem") || enabledSkillIds.includes("shell")) score += 2;
     if (isConnectExecutor(executorId)) score -= 2;
   } else if (intent === "git") {
-    if (isPiExecutor(executorId)) score += 6;
+    if (isPiExecutor(executorId)) score += 4;
+    if (isAcpExecutor(executorId)) score += 5;
     if (enabledSkillIds.includes("git")) score += 4;
   } else {
-    if (isPiExecutor(executorId)) score += 5;
+    if (isPiExecutor(executorId)) score += 4;
+    if (isAcpExecutor(executorId)) score += 3;
     if (enabledSkillIds.length > 0) score += 1;
   }
 
   if (isConnectExecutor(executorId) && available) score += 1;
-  if (executorId.startsWith("acp:") && available) score += 1;
+  if (isAcpExecutor(executorId) && available) score += 1;
 
   return score;
 }

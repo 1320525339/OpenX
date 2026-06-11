@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildCliIntegrationGoal, listAvailableCliTemplates } from "./cli-profiles.js";
+import {
+  buildCliIntegrationGoal,
+  buildConnectBootstrapCommand,
+  buildConnectClientArgv,
+  listAvailableCliTemplates,
+} from "./cli-profiles.js";
 
 describe("listAvailableCliTemplates", () => {
   const allIds = ["pi", "acp:codex", "acp:claude", "acp:gemini", "my-agent"];
@@ -39,7 +44,7 @@ describe("buildCliIntegrationGoal", () => {
     expect(goal.executionPrompt).toContain("https://docs.anthropic.com");
   });
 
-  it("builds Connect integration goal without manual executorId", () => {
+  it("builds Connect integration goal without pre-registered executorId", () => {
     const goal = buildCliIntegrationGoal({
       cliName: "Connect Agent",
       tutorialUrl: "https://example.com/docs",
@@ -48,7 +53,58 @@ describe("buildCliIntegrationGoal", () => {
     });
     expect(goal.title).toContain("Connect Agent");
     expect(goal.userDraft).toContain("内网代理");
-    expect(goal.executionPrompt).toContain("自行生成 executorId");
-    expect(goal.executionPrompt).toContain("/api/cli/profiles");
+    expect(goal.executionPrompt).toContain("POST /api/cli/profiles");
+    expect(goal.executionPrompt).toContain("/bootstrap");
+  });
+
+  it("builds Connect integration goal with pre-registered executorId", () => {
+    const goal = buildCliIntegrationGoal({
+      cliName: "My Worker",
+      tutorialUrl: "https://example.com/docs",
+      kind: "connect",
+      connectExecutorId: "my-worker",
+      serverBaseUrl: "http://127.0.0.1:3921",
+    });
+    expect(goal.executionPrompt).toContain("executorId=my-worker");
+    expect(goal.executionPrompt).toContain(
+      "POST http://127.0.0.1:3921/api/cli/profiles/my-worker/bootstrap",
+    );
+    expect(goal.executionPrompt).not.toContain("自行生成 executorId");
+  });
+});
+
+describe("connect bootstrap helpers", () => {
+  it("buildConnectClientArgv matches spawn contract", () => {
+    const argv = buildConnectClientArgv("/repo/packages/connect-client/dist/cli.js", {
+      baseUrl: "http://127.0.0.1:3921",
+      executorId: "worker-a",
+      displayName: "Worker A",
+      toolName: "worker-tool",
+    });
+    expect(argv).toEqual([
+      "/repo/packages/connect-client/dist/cli.js",
+      "--base",
+      "http://127.0.0.1:3921",
+      "--executor-id",
+      "worker-a",
+      "--agent-name",
+      "Worker A",
+      "--tool-name",
+      "worker-tool",
+    ]);
+  });
+
+  it("buildConnectBootstrapCommand includes node spawn line when paths provided", () => {
+    const cmd = buildConnectBootstrapCommand({
+      baseUrl: "http://127.0.0.1:3921",
+      executorId: "worker-a",
+      displayName: "Worker A",
+      nodePath: "/usr/bin/node",
+      scriptPath: "/repo/packages/connect-client/dist/cli.js",
+    });
+    expect(cmd).toContain("/usr/bin/node");
+    expect(cmd).toContain("--executor-id worker-a");
+    expect(cmd).toContain("pnpm --dir");
+    expect(cmd).toContain("connect:demo");
   });
 });

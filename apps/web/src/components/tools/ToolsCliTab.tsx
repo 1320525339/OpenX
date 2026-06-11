@@ -1,8 +1,15 @@
-import { useState } from "react";
-import type { Goal, Settings } from "@openx/shared";
-import type { ExecutorInfo } from "../../api";
+import { useEffect, useState } from "react";
+import {
+  DEFAULT_PI_MAX_TOOL_CALLS,
+  type ConnectBootstrapStatus,
+  type Goal,
+  type Settings,
+} from "@openx/shared";
+import { hasAcpCliConfigTool } from "@openx/shared";
+import { api, type ExecutorInfo } from "../../api";
 import { ExecutorPicker } from "../ExecutorPicker";
 import { AddCliDialog } from "./AddCliDialog";
+import { AcpCliConfigDialog } from "./AcpCliConfigDialog";
 import { cliKindLabel, listManagedClis, type CliEntry } from "../../lib/tools-clis";
 
 type Props = {
@@ -13,9 +20,22 @@ type Props = {
   onRefresh: () => void;
   onIntegrationGoalCreated: (goal: Goal) => void;
   onDeleteProfile: (executorId: string) => Promise<void>;
-  onBootstrap: (executorId: string) => Promise<{ command?: string }>;
+  onBootstrap: (executorId: string) => Promise<{ command?: string; online?: boolean }>;
   onDisconnect: (executorId: string) => Promise<void>;
+  onConnectReady?: (executorId: string) => void;
 };
+
+function bootstrapStatusHint(status?: ConnectBootstrapStatus): string | undefined {
+  if (!status) return undefined;
+  if (status.online) return "自举：已上线";
+  if (status.phase === "running" && status.pid) return `自举中 · pid ${status.pid}`;
+  if (status.phase === "spawning") return "自举：正在启动…";
+  if (status.phase === "exited") {
+    const code = status.exitCode != null ? ` (code ${status.exitCode})` : "";
+    return `自举：进程已退出${code}`;
+  }
+  return undefined;
+}
 
 function CliCard({
   cli,
@@ -23,15 +43,44 @@ function CliCard({
   onBootstrap,
   onDisconnect,
   onCopyCommand,
+  onOpenConfig,
+  bootstrapStatus,
 }: {
   cli: CliEntry;
   onDelete?: () => void;
   onBootstrap?: () => void;
   onDisconnect?: () => void;
   onCopyCommand?: () => void;
+  onOpenConfig?: () => void;
+  bootstrapStatus?: ConnectBootstrapStatus;
 }) {
+  const bootstrapHint = bootstrapStatusHint(bootstrapStatus);
+  const configurable = hasAcpCliConfigTool(cli.id);
+
   return (
-    <div className={`tools-cli-card${cli.available ? "" : " unavailable"}`}>
+    <div
+      className={`tools-cli-card${cli.available ? "" : " unavailable"}${configurable ? " clickable" : ""}`}
+      role={configurable ? "button" : undefined}
+      tabIndex={configurable ? 0 : undefined}
+      onClick={
+        configurable
+          ? (e) => {
+              if ((e.target as HTMLElement).closest("button, a")) return;
+              onOpenConfig?.();
+            }
+          : undefined
+      }
+      onKeyDown={
+        configurable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpenConfig?.();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="tools-cli-card-head">
         <span className="tools-cli-kind">{cliKindLabel(cli.kind)}</span>
         <span className={`tools-cli-status${cli.available ? " ok" : ""}`}>
@@ -42,6 +91,17 @@ function CliCard({
       <code className="tools-cli-id">{cli.id}</code>
       {cli.hint && cli.hint !== cli.label && (
         <p className="settings-hint tools-cli-hint">{cli.hint}</p>
+      )}
+      {bootstrapHint && (
+        <p className={`settings-hint tools-cli-hint${bootstrapStatus?.online ? " ok-text" : ""}`}>
+          {bootstrapHint}
+          {bootstrapStatus?.lastError && !bootstrapStatus.online
+            ? ` — ${bootstrapStatus.lastError}`
+            : ""}
+        </p>
+      )}
+      {configurable && (
+        <p className="settings-hint tools-cli-config-hint">点击选择渠道与模型</p>
       )}
       {cli.tutorialUrl && (
         <a
@@ -89,11 +149,37 @@ export function ToolsCliTab({
   onDeleteProfile,
   onBootstrap,
   onDisconnect,
+  onConnectReady,
 }: Props) {
   const [showAdd, setShowAdd] = useState(false);
+  const [configExecutorId, setConfigExecutorId] = useState<string | null>(null);
+  const [bootstrapStatuses, setBootstrapStatuses] = useState<
+    Map<string, ConnectBootstrapStatus>
+  >(new Map());
   const clis = listManagedClis(executors, settings.cliProfiles ?? []);
   const acpClis = clis.filter((c) => c.kind === "acp");
   const connectClis = clis.filter((c) => c.kind === "connect");
+  const offlineConnectIds = connectClis.filter((c) => !c.available).map((c) => c.id);
+
+  useEffect(() => {
+    if (offlineConnectIds.length === 0) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { statuses } = await api.getCliBootstrapStatuses();
+        if (cancelled) return;
+        setBootstrapStatuses(new Map(statuses.map((s: ConnectBootstrapStatus) => [s.executorId, s])));
+      } catch {
+        /* 轮询失败可忽略 */
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [offlineConnectIds.join("|")]);
   const piCli = clis.find((c) => c.kind === "pi");
   const existingIds = clis.map((c) => c.id);
 
@@ -107,7 +193,7 @@ export function ToolsCliTab({
     <>
       <div className="tools-tab-toolbar">
         <p className="settings-hint tools-tab-lead">
-          通过「添加 CLI」创建 Pi 接入任务；安装与配置由 Pi 按教程完成，派单 ID 由系统自动处理。
+          添加 Connect Agent 时会预写派单 ID 并可选自动自举；若未上线，Pi 接入任务会调用 bootstrap API 完成启动。
         </p>
         <div className="tools-tab-toolbar-actions">
           <button type="button" className="btn primary compact" onClick={() => setShowAdd(true)}>
@@ -120,7 +206,7 @@ export function ToolsCliTab({
       </div>
 
       <div className="tools-section">
-        <h4 className="tools-section-title">全局</h4>
+        <h4 className="tools-section-title">派单默认</h4>
         <div className="tools-card">
           <ExecutorPicker
             label="默认执行器"
@@ -142,8 +228,51 @@ export function ToolsCliTab({
 
       <div className="tools-section">
         <h4 className="tools-section-title">内嵌 Pi</h4>
-        <p className="settings-hint">系统内置，不可删除。</p>
+        <p className="settings-hint">系统内置，不可删除。执行参数在此配置。</p>
         {piCli ? <CliCard cli={piCli} /> : <p className="settings-hint">Pi 执行器未注册。</p>}
+        <div className="tools-card tools-pi-settings">
+          <label className="field-label">单次运行超时（分钟）</label>
+          <input
+            type="number"
+            className="field-input settings-field-narrow"
+            min={1}
+            max={60}
+            value={Math.round((settings.executors.pi.runTimeoutMs ?? 600_000) / 60_000)}
+            onChange={(e) => {
+              const minutes = Math.max(1, Math.min(60, Number(e.target.value) || 10));
+              onChange({
+                ...settings,
+                executors: {
+                  pi: { ...settings.executors.pi, runTimeoutMs: minutes * 60_000 },
+                },
+              });
+            }}
+          />
+          <label className="field-label">单轮工具调用上限（次）</label>
+          <input
+            type="number"
+            className="field-input settings-field-narrow"
+            min={1}
+            max={100}
+            value={settings.executors.pi.maxToolCalls ?? DEFAULT_PI_MAX_TOOL_CALLS}
+            onChange={(e) => {
+              const n = Math.max(
+                1,
+                Math.min(100, Number(e.target.value) || DEFAULT_PI_MAX_TOOL_CALLS),
+              );
+              onChange({
+                ...settings,
+                executors: {
+                  pi: { ...settings.executors.pi, maxToolCalls: n },
+                },
+              });
+            }}
+          />
+          <p className="settings-hint settings-hint-tight">
+            单目标内 Pi 最多调用工具的次数，超出后自动中止（默认 {DEFAULT_PI_MAX_TOOL_CALLS}
+            ）。接入 Connect Agent 等复杂任务可适当调高。
+          </p>
+        </div>
       </div>
 
       <div className="tools-section">
@@ -151,7 +280,15 @@ export function ToolsCliTab({
         <p className="settings-hint">系统预置 ACP 运行时；未安装时可创建接入任务。</p>
         <div className="tools-cli-grid">
           {acpClis.map((cli) => (
-            <CliCard key={cli.id} cli={cli} />
+            <CliCard
+              key={cli.id}
+              cli={cli}
+              onOpenConfig={
+                hasAcpCliConfigTool(cli.id)
+                  ? () => setConfigExecutorId(cli.id)
+                  : undefined
+              }
+            />
           ))}
         </div>
       </div>
@@ -190,6 +327,7 @@ export function ToolsCliTab({
                     ? () => void copyBootstrap(cli.id)
                     : undefined
                 }
+                bootstrapStatus={bootstrapStatuses.get(cli.id)}
               />
             ))
           )}
@@ -202,6 +340,19 @@ export function ToolsCliTab({
         onClose={() => setShowAdd(false)}
         existingIds={existingIds}
         onCreated={onIntegrationGoalCreated}
+        onSettingsChange={onChange}
+        onConnectReady={onConnectReady}
+        autoBootstrapConnect={settings.autoBootstrapConnect ?? true}
+      />
+
+      <AcpCliConfigDialog
+        executorId={configExecutorId}
+        settings={settings}
+        onClose={() => setConfigExecutorId(null)}
+        onSaved={(next) => {
+          onChange(next);
+          void onRefresh();
+        }}
       />
     </>
   );

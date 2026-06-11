@@ -16,6 +16,33 @@ export const CliProfileSchema = z.object({
 });
 export type CliProfile = z.infer<typeof CliProfileSchema>;
 
+/** Connect 一键自举进程阶段（服务端内存态，重启后清空） */
+export const ConnectBootstrapPhaseSchema = z.enum([
+  "idle",
+  "spawning",
+  "running",
+  "exited",
+  "online",
+]);
+export type ConnectBootstrapPhase = z.infer<typeof ConnectBootstrapPhaseSchema>;
+
+export const ConnectBootstrapStatusSchema = z.object({
+  executorId: z.string(),
+  phase: ConnectBootstrapPhaseSchema,
+  pid: z.number().int().positive().optional(),
+  startedAt: z.string().optional(),
+  exitCode: z.number().int().nullable().optional(),
+  online: z.boolean(),
+  lastError: z.string().optional(),
+});
+export type ConnectBootstrapStatus = z.infer<typeof ConnectBootstrapStatusSchema>;
+
+export const BootstrapConnectBodySchema = z.object({
+  /** 自举后轮询等待 Agent 注册上线 */
+  wait: z.boolean().optional(),
+});
+export type BootstrapConnectBody = z.infer<typeof BootstrapConnectBodySchema>;
+
 export type CliTemplate = {
   id: string;
   kind: "connect" | "acp";
@@ -69,8 +96,49 @@ export type CliIntegrationInput = {
   kind: "acp" | "connect";
   /** ACP 内置 executorId，如 acp:claude */
   targetExecutorId?: string;
+  /** Connect 已预注册的 executorId（AddCliDialog 写入 settings 后传入） */
+  connectExecutorId?: string;
+  /** OpenX API 根地址，供 Pi 调用 bootstrap / executors */
+  serverBaseUrl?: string;
   notes?: string;
 };
+
+export type ConnectBootstrapOpts = {
+  executorId: string;
+  displayName: string;
+  toolName?: string;
+  baseUrl: string;
+};
+
+/** connect-client CLI 参数（与 server spawn 一致） */
+export function buildConnectClientArgv(
+  scriptPath: string,
+  opts: ConnectBootstrapOpts,
+): string[] {
+  const tool = opts.toolName ?? opts.executorId;
+  return [
+    scriptPath,
+    "--base",
+    opts.baseUrl,
+    "--executor-id",
+    opts.executorId,
+    "--agent-name",
+    opts.displayName,
+    "--tool-name",
+    tool,
+  ];
+}
+
+function quoteShellArg(value: string): string {
+  if (/[\s"\\]/.test(value)) {
+    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  return value;
+}
+
+export function formatShellCommand(executable: string, args: string[]): string {
+  return [quoteShellArg(executable), ...args.map(quoteShellArg)].join(" ");
+}
 
 export type CliIntegrationGoalPayload = {
   userDraft: string;
@@ -109,22 +177,49 @@ export function buildCliIntegrationGoal(input: CliIntegrationInput): CliIntegrat
     };
   }
 
+  const execId = input.connectExecutorId?.trim();
+  const base = (input.serverBaseUrl ?? "http://127.0.0.1:3921").replace(/\/$/, "");
+
+  if (execId) {
+    return {
+      userDraft: `请完成 Connect Agent「${input.cliName}」（executorId=${execId}）的启动与上线。教程：${tutorial}${notesBlock}`,
+      title: `接入 Connect Agent：${input.cliName}`,
+      acceptance: [
+        `executorId=${execId} 在 OpenX 工具页显示为在线（● 可用）`,
+        "POST /api/cli/profiles/{id}/bootstrap 已成功或等效启动 connect-client",
+        `可为 ${execId} 创建测试目标并成功派单`,
+      ].join("；"),
+      executionPrompt: [
+        `你是 OpenX 的 Pi 执行器。Connect Agent「${input.cliName}」的 CliProfile 已写入 settings（executorId=${execId}）。`,
+        `1. 阅读接入教程：${tutorial}`,
+        `2. 调用 OpenX API 一键自举：POST ${base}/api/cli/profiles/${execId}/bootstrap（无需向用户索要 executorId）`,
+        `3. 轮询 GET ${base}/api/executors，直到 ${execId} 显示 available=true`,
+        "4. 若 bootstrap 失败，用 GET 同路径 /bootstrap 复制启动命令在本机终端执行，并排查 connect-client 是否已 build",
+        "5. 在任务日志中记录 bootstrap 结果、pid（若有）与 executors 检测截图式摘要",
+        "优先使用 openx MCP（openx_call_api）调用上述 API；不要修改 OpenX 源码。",
+        notesBlock,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+
   return {
     userDraft: `请根据接入教程安装并配置 Connect Agent「${input.cliName}」，完成后在 OpenX 中可派单执行。教程：${tutorial}${notesBlock}`,
     title: `接入 Connect Agent：${input.cliName}`,
     acceptance: [
       "Agent 已通过 POST /api/connect 注册并在 OpenX 中显示在线",
-      "settings.cliProfiles 已写入该 Agent（含自动生成的 executorId）",
+      "settings.cliProfiles 已写入该 Agent（含 executorId）",
       "可为该 executorId 创建测试目标并成功派单",
     ].join("；"),
     executionPrompt: [
       `你是 OpenX 的 Pi 执行器。请完成 Connect Agent「${input.cliName}」的接入。`,
       `1. 阅读并遵循接入教程：${tutorial}`,
-      "2. 若教程指向 OpenX 自带 connect-client，可使用 pnpm connect:demo 或仓库内 packages/connect-client",
-      "3. 自行生成 executorId（小写字母开头，仅字母数字/_/-），不要向用户索要",
-      "4. 安装/启动 Agent 后，向 OpenX POST /api/cli/profiles 写入 CliProfile（kind=connect，含 tutorialUrl）",
-      "5. 启动 Agent 并完成 POST /api/connect 注册；确认工具页显示该 Agent 在线",
-      "6. 在任务日志中记录 executorId、启动命令与验证步骤",
+      "2. 生成 executorId（小写字母开头，仅字母数字/_/-），POST /api/cli/profiles 写入 CliProfile（kind=connect）",
+      "3. 调用 POST /api/cli/profiles/{executorId}/bootstrap 启动 connect-client",
+      "4. 轮询 GET /api/executors 直到该 executorId 在线",
+      "5. 在任务日志中记录 executorId、bootstrap 结果与验证步骤",
+      "优先使用 openx MCP（openx_call_api）。",
       notesBlock,
     ]
       .filter(Boolean)
@@ -153,19 +248,33 @@ export function slugifyExecutorId(name: string): string {
     .slice(0, 64) || "my-agent";
 }
 
-export function buildConnectBootstrapCommand(opts: {
-  executorId: string;
-  displayName: string;
-  toolName?: string;
-  baseUrl: string;
+export function buildConnectBootstrapCommand(opts: ConnectBootstrapOpts & {
+  nodePath?: string;
+  scriptPath?: string;
   projectRoot?: string;
   skillsDir?: string;
 }): string {
   const tool = opts.toolName ?? opts.executorId;
   const root = opts.projectRoot ?? ".";
   const skillsDir = opts.skillsDir ?? "~/.openx/skills";
-  return [
-    `# Skills 目录：${skillsDir}（自举 spawn 会自动设置 OPENX_SKILLS_DIR）`,
+  const lines = [
+    `# Skills：OPENX_SKILLS_DIR=${skillsDir}（服务端 POST bootstrap 会自动注入）`,
+  ];
+
+  if (opts.nodePath && opts.scriptPath) {
+    const argv = buildConnectClientArgv(opts.scriptPath, {
+      executorId: opts.executorId,
+      displayName: opts.displayName,
+      toolName: opts.toolName,
+      baseUrl: opts.baseUrl,
+    });
+    lines.push(formatShellCommand(opts.nodePath, argv));
+    lines.push("");
+    lines.push("# 或在仓库根目录（会先 build connect-client）：");
+  }
+
+  lines.push(
     `pnpm --dir "${root}" connect:demo -- --base ${opts.baseUrl} --executor-id ${opts.executorId} --agent-name "${opts.displayName}" --tool-name ${tool}`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }

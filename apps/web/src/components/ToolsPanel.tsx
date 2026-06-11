@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Goal, Settings } from "@openx/shared";
+import { DEFAULT_PI_MAX_TOOL_CALLS, type Goal, type Settings } from "@openx/shared";
 import type { ExecutorInfo, SkillBinding } from "../api";
 import { loadSkillBindings, saveSkillBindings } from "../lib/coach-context";
 import { useSkillCatalog } from "../lib/use-skill-catalog";
@@ -7,9 +7,10 @@ import { listManagedClis } from "../lib/tools-clis";
 import { api } from "../api";
 import { ToolsCliTab } from "./tools/ToolsCliTab";
 import { ToolsSkillsTab } from "./tools/ToolsSkillsTab";
-import { ToolsAgentTab } from "./tools/ToolsAgentTab";
+import { ToolsAgentTab, formatAgentMd } from "./tools/ToolsAgentTab";
+import { ToolsMcpTab } from "./tools/ToolsMcpTab";
 
-type ToolsTab = "cli" | "skills" | "agent";
+type ToolsTab = "cli" | "skills" | "agent" | "mcp";
 
 type Props = {
   settings: Settings;
@@ -18,6 +19,7 @@ type Props = {
   onSave: (settings: Settings) => Promise<void>;
   onRefreshExecutors: () => Promise<void>;
   onIntegrationGoalCreated: (goal: Goal) => void;
+  onConnectReady?: (executorId: string) => void;
 };
 
 const TAB_KEY = "openx.tools.activeTab";
@@ -27,19 +29,31 @@ type ToolsSnapshot = {
   defaultExecutorId: string;
   autoExecute: boolean;
   skillBindings: Record<string, SkillBinding>;
-  agentRole: string;
+  globalConstraints: string;
+  personaId: string;
+  personaBody: string;
+  piRunTimeoutMs: number;
+  piMaxToolCalls: number;
+  autoBootstrapConnect: boolean;
 };
 
 function snapshotToolsState(
   settings: Settings,
   bindings: Record<string, SkillBinding>,
-  agentRole: string,
+  globalConstraints: string,
+  personaId: string,
+  personaBody: string,
 ): ToolsSnapshot {
   return {
     defaultExecutorId: settings.defaultExecutorId,
     autoExecute: settings.autoExecute,
     skillBindings: bindings,
-    agentRole,
+    globalConstraints,
+    personaId,
+    personaBody,
+    piRunTimeoutMs: settings.executors.pi.runTimeoutMs ?? 600_000,
+    piMaxToolCalls: settings.executors.pi.maxToolCalls ?? DEFAULT_PI_MAX_TOOL_CALLS,
+    autoBootstrapConnect: settings.autoBootstrapConnect ?? true,
   };
 }
 
@@ -49,7 +63,7 @@ function toolsSnapshotEqual(a: ToolsSnapshot, b: ToolsSnapshot): boolean {
 
 function loadTab(): ToolsTab {
   const v = localStorage.getItem(TAB_KEY);
-  if (v === "cli" || v === "skills" || v === "agent") return v;
+  if (v === "cli" || v === "skills" || v === "agent" || v === "mcp") return v;
   return "cli";
 }
 
@@ -60,15 +74,21 @@ export function ToolsPanel({
   onSave,
   onRefreshExecutors,
   onIntegrationGoalCreated,
+  onConnectReady,
 }: Props) {
   const [tab, setTab] = useState<ToolsTab>(loadTab);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [agentRole, setAgentRole] = useState(
-    () =>
-      localStorage.getItem(AGENT_ROLE_KEY) ??
-      "你是 OpenX 工头助手，负责拆解目标、跟踪进展、协调 Pi 在本机执行。",
+  const [globalConstraints, setGlobalConstraints] = useState(() =>
+    (localStorage.getItem(AGENT_ROLE_KEY) ?? "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .join("\n"),
   );
+  const [personaId, setPersonaId] = useState("coach");
+  const [personaBody, setPersonaBody] = useState("");
+  const [personaMeta, setPersonaMeta] = useState({ name: "", desc: "" });
   const [savedSnapshot, setSavedSnapshot] = useState<ToolsSnapshot | null>(null);
   const snapshotReadyRef = useRef(false);
   const migratedRef = useRef(false);
@@ -95,12 +115,27 @@ export function ToolsPanel({
   useEffect(() => {
     if (skillsLoading || snapshotReadyRef.current) return;
     snapshotReadyRef.current = true;
-    setSavedSnapshot(snapshotToolsState(settings, serverBindings, agentRole));
-  }, [agentRole, serverBindings, settings, skillsLoading]);
+    setSavedSnapshot(
+      snapshotToolsState(
+        settings,
+        serverBindings,
+        globalConstraints,
+        personaId,
+        personaBody,
+      ),
+    );
+  }, [globalConstraints, personaBody, personaId, serverBindings, settings, skillsLoading]);
 
   const currentSnapshot = useMemo(
-    () => snapshotToolsState(settings, serverBindings, agentRole),
-    [agentRole, serverBindings, settings],
+    () =>
+      snapshotToolsState(
+        settings,
+        serverBindings,
+        globalConstraints,
+        personaId,
+        personaBody,
+      ),
+    [globalConstraints, personaBody, personaId, serverBindings, settings],
   );
   const dirty =
     savedSnapshot !== null && !toolsSnapshotEqual(currentSnapshot, savedSnapshot);
@@ -123,10 +158,20 @@ export function ToolsPanel({
     migratedRef.current = true;
     void saveBindings(legacy).then((res) => {
       onChange(res.settings);
-      setSavedSnapshot(snapshotToolsState(res.settings, res.bindings, agentRole));
+      setSavedSnapshot(
+        snapshotToolsState(
+          res.settings,
+          res.bindings,
+          globalConstraints,
+          personaId,
+          personaBody,
+        ),
+      );
     });
   }, [
-    agentRole,
+    globalConstraints,
+    personaBody,
+    personaId,
     catalogSkills,
     cliIds,
     onChange,
@@ -152,22 +197,37 @@ export function ToolsPanel({
   const save = async () => {
     setSaving(true);
     try {
-      localStorage.setItem(AGENT_ROLE_KEY, agentRole);
+      localStorage.setItem(AGENT_ROLE_KEY, globalConstraints);
       saveSkillBindings(serverBindings, catalogSkills);
       const bindRes = await saveBindings(serverBindings);
       onChange(bindRes.settings);
-      const constraints = agentRole
+      const constraints = globalConstraints
         .split("\n")
         .map((l) => l.trim())
         .filter(Boolean)
         .slice(0, 8);
       const nextSettings = {
         ...bindRes.settings,
+        defaultExecutorId: settings.defaultExecutorId,
+        autoExecute: settings.autoExecute,
+        executors: settings.executors,
         defaultConstraints:
           constraints.length > 0 ? constraints : bindRes.settings.defaultConstraints,
       };
+      await api.putAgent(
+        personaId,
+        formatAgentMd(personaMeta.name || personaId, personaMeta.desc, personaBody),
+      );
       await onSave(nextSettings);
-      setSavedSnapshot(snapshotToolsState(nextSettings, bindRes.bindings, agentRole));
+      setSavedSnapshot(
+        snapshotToolsState(
+          nextSettings,
+          bindRes.bindings,
+          globalConstraints,
+          personaId,
+          personaBody,
+        ),
+      );
     } finally {
       setSaving(false);
     }
@@ -177,13 +237,13 @@ export function ToolsPanel({
 
   return (
     <section className="mech-panel page-panel">
-      <div className="mech-panel-head">
-        <h3>工具</h3>
+      <div className="mech-panel-head page-panel-head">
         <div className="tools-tabs" role="tablist">
           {(
             [
               ["cli", "CLI"],
               ["skills", "Skills", enabledSkillCount],
+              ["mcp", "MCP"],
               ["agent", "Agent"],
             ] as const
           ).map(([id, label, badge]) => (
@@ -220,10 +280,11 @@ export function ToolsPanel({
                 await onRefreshExecutors();
               }}
               onBootstrap={async (executorId) => {
-                const res = await api.bootstrapCli(executorId);
-                setTimeout(() => void onRefreshExecutors(), 2500);
+                const res = await api.bootstrapCli(executorId, { wait: true });
+                await onRefreshExecutors();
                 return res;
               }}
+              onConnectReady={onConnectReady}
               onDisconnect={async (executorId) => {
                 await api.disconnectCli(executorId);
                 await onRefreshExecutors();
@@ -247,15 +308,33 @@ export function ToolsPanel({
             />
           )}
           {tab === "agent" && (
-            <ToolsAgentTab agentRole={agentRole} onChange={setAgentRole} />
+            <ToolsAgentTab
+              personaId={personaId}
+              onPersonaIdChange={setPersonaId}
+              personaBody={personaBody}
+              onPersonaBodyChange={setPersonaBody}
+              personaName={personaMeta.name}
+              personaDesc={personaMeta.desc}
+              onPersonaMetaChange={setPersonaMeta}
+              globalConstraints={globalConstraints}
+              onGlobalConstraintsChange={setGlobalConstraints}
+            />
+          )}
+          {tab === "mcp" && (
+            <ToolsMcpTab
+              servers={settings.mcpServers ?? []}
+              onSaved={(servers) => onChange({ ...settings, mcpServers: servers })}
+            />
           )}
         </div>
 
-        <div className="panel-footer">
+        <div className="panel-footer settings-panel-footer">
+          <span className="settings-footer-status" aria-live="polite">
+            {dirty && <span className="settings-dirty">有未保存的更改</span>}
+          </span>
           <button
             type="button"
             className="btn primary"
-            style={{ width: "100%" }}
             disabled={saving || !dirty}
             onClick={() => void save()}
           >

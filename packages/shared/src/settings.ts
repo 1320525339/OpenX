@@ -8,7 +8,9 @@ import {
   ProvidersMapSchema,
 } from "./model-config.js";
 import { CliProfileSchema } from "./cli-profiles.js";
+import { AcpCliBindingsSchema } from "./acp-cli-config.js";
 import { SkillBindingsMapSchema } from "./skills.js";
+import { McpServersSchema } from "./mcp.js";
 
 export const PiExecutorSettingsSchema = z.object({
   /** 可选：内嵌 Pi 底座 provider */
@@ -21,12 +23,20 @@ export const PiExecutorSettingsSchema = z.object({
   runTimeoutMs: z.number().int().min(30_000).max(3_600_000).default(600_000),
   /** 目标执行使用独立会话，不污染 Pi 全局 session */
   noSession: z.boolean().default(true),
+  /** 单轮最多工具调用次数，超出后中止并汇报（防 Pi 死循环，默认 50） */
+  maxToolCalls: z.number().int().min(1).max(100).optional(),
 });
 export type PiExecutorSettings = z.infer<typeof PiExecutorSettingsSchema>;
 
+/** Pi 单轮默认工具调用上限（与 executor-pi 一致） */
+export const DEFAULT_PI_MAX_TOOL_CALLS = 50;
+
 export const SettingsSchema = z.object({
   defaultExecutorId: ExecutorIdSchema.default("pi"),
+  /** @deprecated 请使用 systemWorkspaceRoot；读时作迁移回退 */
   workspaceRoot: z.string().default("."),
+  /** 调度台 / 系统任务 / Skills·MCP 链接使用的工程工作目录 */
+  systemWorkspaceRoot: z.string().default(""),
   defaultConstraints: z.array(z.string()).default([]),
   /** 各角色当前模型引用 slug/modelId */
   model: ModelSectionSchema.default(createDefaultModelSection),
@@ -41,10 +51,16 @@ export const SettingsSchema = z.object({
     .default({}),
   notifyOnComplete: z.boolean().default(true),
   autoExecute: z.boolean().default(true),
+  /** 添加 Connect CLI 后自动调用 bootstrap API */
+  autoBootstrapConnect: z.boolean().default(true),
   /** 用户添加的 CLI / Connect Agent 配置 */
   cliProfiles: z.array(CliProfileSchema).default([]),
+  /** ACP CLI（Codex / Claude）绑定的项目渠道与模型 */
+  acpCli: AcpCliBindingsSchema,
   /** Skill 启用与 executor 分配（服务端持久化，多 Agent 共用） */
   skillBindings: SkillBindingsMapSchema.default({}),
+  /** MCP Server 注册表（派单时传给 ACP 施工队） */
+  mcpServers: McpServersSchema,
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

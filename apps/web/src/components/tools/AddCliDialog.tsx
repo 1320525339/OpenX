@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Goal } from "@openx/shared";
+import type { Goal, Settings } from "@openx/shared";
 import {
   buildCliIntegrationGoal,
   listAvailableCliTemplates,
+  slugifyExecutorId,
   type CliTemplate,
 } from "@openx/shared";
 import { api } from "../../api";
+import { getApiBase } from "../../lib/api-base";
 
 type Props = {
   open: boolean;
@@ -13,6 +15,9 @@ type Props = {
   onClose: () => void;
   existingIds: string[];
   onCreated: (goal: Goal) => void;
+  onSettingsChange?: (settings: Settings) => void;
+  onConnectReady?: (executorId: string) => void;
+  autoBootstrapConnect?: boolean;
 };
 
 function isValidUrl(value: string): boolean {
@@ -24,7 +29,16 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-export function AddCliDialog({ open, autoExecute, onClose, existingIds, onCreated }: Props) {
+export function AddCliDialog({
+  open,
+  autoExecute,
+  onClose,
+  existingIds,
+  onCreated,
+  onSettingsChange,
+  onConnectReady,
+  autoBootstrapConnect = true,
+}: Props) {
   const availableTemplates = useMemo(
     () => listAvailableCliTemplates(existingIds),
     [existingIds],
@@ -32,6 +46,8 @@ export function AddCliDialog({ open, autoExecute, onClose, existingIds, onCreate
   const [templateId, setTemplateId] = useState(availableTemplates[0]?.id ?? "");
   const [tutorialUrl, setTutorialUrl] = useState("");
   const [notes, setNotes] = useState("");
+  const [connectDisplayName, setConnectDisplayName] = useState("");
+  const [connectExecutorId, setConnectExecutorId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +63,8 @@ export function AddCliDialog({ open, autoExecute, onClose, existingIds, onCreate
     setTemplateId(first.id);
     setTutorialUrl(first.tutorialUrl);
     setNotes("");
+    setConnectDisplayName(first.name);
+    setConnectExecutorId(slugifyExecutorId(first.suggestedExecutorId));
     setError(null);
   }, [open, availableTemplates]);
 
@@ -71,28 +89,71 @@ export function AddCliDialog({ open, autoExecute, onClose, existingIds, onCreate
   const applyTemplate = (t: CliTemplate) => {
     setTemplateId(t.id);
     setTutorialUrl(t.tutorialUrl);
+    setConnectDisplayName(t.name);
+    setConnectExecutorId(slugifyExecutorId(t.suggestedExecutorId));
     setError(null);
   };
 
   const urlValid = isValidUrl(tutorialUrl);
+  const isConnect = template.kind === "connect";
+  const executorIdValid = /^[a-z][a-z0-9_-]*$/i.test(connectExecutorId.trim());
+  const executorIdTaken = existingIds.includes(connectExecutorId.trim());
 
   const submit = async () => {
     if (!urlValid) {
       setError("请填写有效的 http(s) 教程链接");
       return;
     }
+    if (isConnect) {
+      if (!executorIdValid) {
+        setError("派单 ID 须以小写字母开头，仅含字母、数字、下划线或连字符");
+        return;
+      }
+      if (executorIdTaken) {
+        setError(`派单 ID「${connectExecutorId.trim()}」已存在，请换一个`);
+        return;
+      }
+    }
     setBusy(true);
     setError(null);
     try {
+      const trimmedExecutorId = connectExecutorId.trim();
+      const serverBaseUrl = getApiBase() || window.location.origin;
+
+      if (isConnect) {
+        const { settings: nextSettings, bootstrap } = await api.addCliProfile({
+          executorId: trimmedExecutorId,
+          displayName: connectDisplayName.trim() || template.name,
+          kind: "connect",
+          tutorialUrl: tutorialUrl.trim(),
+          templateId: template.id,
+          addedAt: new Date().toISOString(),
+        });
+        onSettingsChange?.(nextSettings);
+
+        if (autoBootstrapConnect && bootstrap?.online) {
+          onConnectReady?.(trimmedExecutorId);
+          onClose();
+          return;
+        }
+        if (autoBootstrapConnect && bootstrap?.error) {
+          setError(`自动自举未完成：${bootstrap.error}。将创建 Pi 接入任务继续排查。`);
+        }
+      }
+
       const payload = buildCliIntegrationGoal({
-        cliName: template.name,
+        cliName: connectDisplayName.trim() || template.name,
         tutorialUrl: tutorialUrl.trim(),
         kind: template.kind,
         targetExecutorId: template.kind === "acp" ? template.suggestedExecutorId : undefined,
+        connectExecutorId: isConnect ? trimmedExecutorId : undefined,
+        serverBaseUrl,
         notes: notes.trim() || undefined,
       });
+      const { conversation } = await api.getCliSystemConversation();
       const { goal } = await api.createGoal({
         ...payload,
+        conversationId: conversation.id,
         executorId: "pi",
         autoStart: autoExecute,
       });
@@ -154,6 +215,40 @@ export function AddCliDialog({ open, autoExecute, onClose, existingIds, onCreate
           </a>
         )}
 
+        {isConnect && (
+          <>
+            <label className="form-field">
+              <span className="form-label">Agent 显示名称</span>
+              <input
+                className="mech-input"
+                value={connectDisplayName}
+                onChange={(e) => {
+                  setConnectDisplayName(e.target.value);
+                  if (!connectExecutorId || connectExecutorId === slugifyExecutorId(template.suggestedExecutorId)) {
+                    setConnectExecutorId(slugifyExecutorId(e.target.value || template.name));
+                  }
+                }}
+                placeholder="例如：我的 Codex Worker"
+              />
+            </label>
+            <label className="form-field">
+              <span className="form-label">派单 ID（executorId）</span>
+              <input
+                className="mech-input"
+                value={connectExecutorId}
+                onChange={(e) => setConnectExecutorId(e.target.value)}
+                placeholder="custom-agent"
+              />
+              {executorIdTaken && (
+                <span className="settings-hint warn-text">该 ID 已存在</span>
+              )}
+            </label>
+            <p className="settings-hint">
+              创建任务前会先将 CliProfile 写入设置；Pi 只需调用 bootstrap API 启动 connect-client。
+            </p>
+          </>
+        )}
+
         <label className="form-field">
           <span className="form-label">补充说明（可选）</span>
           <textarea
@@ -174,7 +269,7 @@ export function AddCliDialog({ open, autoExecute, onClose, existingIds, onCreate
           <button
             type="button"
             className="btn primary"
-            disabled={busy || !urlValid}
+            disabled={busy || !urlValid || (isConnect && (!executorIdValid || executorIdTaken))}
             onClick={() => void submit()}
           >
             {busy ? "创建中…" : "创建接入任务"}

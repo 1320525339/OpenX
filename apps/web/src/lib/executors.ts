@@ -2,10 +2,13 @@ import type { ExecutorInfo } from "../api";
 import { CONNECT_ANY_EXECUTOR_ID, EXECUTOR_AUTO } from "@openx/shared";
 
 export function executorDisplayLabel(id: string): string {
-  if (id === EXECUTOR_AUTO) return "自动（Pi 选择）";
-  if (id === CONNECT_ANY_EXECUTOR_ID) return "任意在线 CLI";
-  if (id === "pi") return "Pi 内嵌";
-  if (id.startsWith("acp:")) return id.slice(4);
+  if (id === EXECUTOR_AUTO) return "自动（工头推荐）";
+  if (id === CONNECT_ANY_EXECUTOR_ID) return "远程施工队（任意在线）";
+  if (id === "pi") return "Pi 施工队（工头班底）";
+  if (id === "acp:codex") return "Codex 施工队";
+  if (id === "acp:claude") return "Claude 施工队";
+  if (id === "acp:gemini") return "Gemini 施工队";
+  if (id.startsWith("acp:")) return `${id.slice(4)} 施工队`;
   if (id.startsWith("Connect:")) return id.replace(/^Connect:\s*/, "");
   return id;
 }
@@ -30,10 +33,10 @@ export function buildExecutorOptions(
     const piAvailable = executors.some((e) => e.id === "pi" && e.available);
     options.push({
       id: EXECUTOR_AUTO,
-      label: "自动（Pi 选择）",
+      label: "自动（工头推荐）",
       available: piAvailable,
       selectable: piAvailable,
-      hint: "启动时由 Pi 根据任务与在线执行器自动派单",
+      hint: "由工头根据任务自动选择施工队",
     });
   }
 

@@ -11,6 +11,8 @@ import { CliProfileSchema } from "./cli-profiles.js";
 import { AcpCliBindingsSchema } from "./acp-cli-config.js";
 import { SkillBindingsMapSchema } from "./skills.js";
 import { McpServersSchema } from "./mcp.js";
+import { OperatorTierSchema } from "./operator-tier.js";
+import { LlmContextSettingsSchema } from "./llm-context-config.js";
 
 export const PiExecutorSettingsSchema = z.object({
   /** 可选：内嵌 Pi 底座 provider */
@@ -61,6 +63,12 @@ export const SettingsSchema = z.object({
   skillBindings: SkillBindingsMapSchema.default({}),
   /** MCP Server 注册表（派单时传给 ACP 施工队） */
   mcpServers: McpServersSchema,
+  /** 工头 Coach 调用 OpenX API 的权限分级 */
+  operatorTier: OperatorTierSchema.default("off"),
+  /** LLM 上下文与 system prompt 段落配置（时区、locale、段落覆盖） */
+  llmContext: LlmContextSettingsSchema.optional(),
+  /** 乐观锁：每次持久化递增，PUT/PATCH 可带 baseRevision 防陈旧覆盖 */
+  revision: z.number().int().nonnegative().default(0),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

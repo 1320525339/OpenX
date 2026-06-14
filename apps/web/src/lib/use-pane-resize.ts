@@ -37,6 +37,7 @@ function loadWidth(storageKey: string, defaultPx: number, minPx: number, maxPx: 
 
 type RatioOptions = {
   mode?: "ratio";
+  orientation?: "horizontal" | "vertical";
   storageKey: string;
   defaultRatio: number;
   minRatio?: number;
@@ -55,6 +56,7 @@ export type PaneResizeOptions = RatioOptions | WidthOptions;
 
 export function usePaneResize(options: PaneResizeOptions) {
   const isWidth = options.mode === "width";
+  const isVertical = !isWidth && options.orientation === "vertical";
   const min = isWidth ? (options.minWidth ?? 132) : (options.minRatio ?? 0.15);
   const max = isWidth ? (options.maxWidth ?? 320) : (options.maxRatio ?? 0.85);
 
@@ -65,10 +67,28 @@ export function usePaneResize(options: PaneResizeOptions) {
   );
   const valueRef = useRef(value);
   const draggingRef = useRef(false);
+  const dragContainerRef = useRef<HTMLElement | null>(null);
+  const windowCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
+
+  const cleanupWindowDrag = useCallback(() => {
+    windowCleanupRef.current?.();
+    windowCleanupRef.current = null;
+  }, []);
+
+  const clearDragState = useCallback(() => {
+    draggingRef.current = false;
+    dragContainerRef.current = null;
+    document.body.classList.remove(
+      "split-dragging",
+      "split-dragging-rows",
+      "split-dragging-cols",
+    );
+    cleanupWindowDrag();
+  }, [cleanupWindowDrag]);
 
   const persist = useCallback(() => {
     try {
@@ -78,49 +98,83 @@ export function usePaneResize(options: PaneResizeOptions) {
     }
   }, [options.storageKey]);
 
-  const beginDrag = useCallback((e: ReactPointerEvent<HTMLElement>) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    document.body.classList.add("split-dragging");
-  }, []);
-
   const updateFromPointer = useCallback(
-    (clientX: number, container: HTMLElement | null) => {
+    (clientPos: number, container: HTMLElement | null) => {
       if (!draggingRef.current || !container) return;
       const rect = container.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      if (isWidth) {
-        const next = Math.min(max, Math.max(min, clientX - rect.left));
+      if (isVertical) {
+        if (rect.height <= 0) return;
+        const next = Math.min(max, Math.max(min, (clientPos - rect.top) / rect.height));
         valueRef.current = next;
         setValue(next);
         return;
       }
-      const next = Math.min(max, Math.max(min, (clientX - rect.left) / rect.width));
+      if (rect.width <= 0) return;
+      if (isWidth) {
+        const next = Math.min(max, Math.max(min, clientPos - rect.left));
+        valueRef.current = next;
+        setValue(next);
+        return;
+      }
+      const next = Math.min(max, Math.max(min, (clientPos - rect.left) / rect.width));
       valueRef.current = next;
       setValue(next);
     },
-    [isWidth, min, max],
+    [isWidth, isVertical, min, max],
+  );
+
+  const beginDrag = useCallback(
+    (e: ReactPointerEvent<HTMLElement>, container: HTMLElement | null = null) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      dragContainerRef.current = container;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      document.body.classList.add(
+        "split-dragging",
+        isVertical ? "split-dragging-rows" : "split-dragging-cols",
+      );
+
+      const onWindowPointerMove = (ev: PointerEvent) => {
+        if (!draggingRef.current) return;
+        updateFromPointer(
+          isVertical ? ev.clientY : ev.clientX,
+          dragContainerRef.current,
+        );
+      };
+
+      const onWindowPointerUp = () => {
+        if (!draggingRef.current) return;
+        clearDragState();
+        persist();
+      };
+
+      window.addEventListener("pointermove", onWindowPointerMove);
+      window.addEventListener("pointerup", onWindowPointerUp);
+      windowCleanupRef.current = () => {
+        window.removeEventListener("pointermove", onWindowPointerMove);
+        window.removeEventListener("pointerup", onWindowPointerUp);
+      };
+    },
+    [isVertical, updateFromPointer, persist, clearDragState],
   );
 
   const onDividerPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLElement>, container: HTMLElement | null) => {
-      updateFromPointer(e.clientX, container);
+      updateFromPointer(isVertical ? e.clientY : e.clientX, container);
     },
-    [updateFromPointer],
+    [updateFromPointer, isVertical],
   );
 
   const endDrag = useCallback(
     (e: ReactPointerEvent<HTMLElement>) => {
       if (!draggingRef.current) return;
-      draggingRef.current = false;
-      document.body.classList.remove("split-dragging");
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
+      clearDragState();
       persist();
     },
-    [persist],
+    [persist, clearDragState],
   );
 
   const nudgeRatio = useCallback(
@@ -138,6 +192,7 @@ export function usePaneResize(options: PaneResizeOptions) {
     value,
     valueRef,
     isWidth,
+    isVertical,
     setValue,
     beginDrag,
     onDividerPointerMove,

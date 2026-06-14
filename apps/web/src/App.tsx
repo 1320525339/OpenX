@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { TasksPanel } from "./components/TasksPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -14,10 +14,14 @@ import { HomeDashboard } from "./components/HomeDashboard";
 import { ProjectPage } from "./components/ProjectPage";
 import { ConsolePage } from "./components/ConsolePage";
 import { PaneDivider } from "./components/PaneDivider";
-import { SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
+import type { IslandAction } from "@openx/shared";
+import { canMutateGoal, SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
+import { islandFromSimpleMessage } from "./lib/island-payload";
+import { completeIslandDisplay, requestIsland } from "./lib/island-queue";
 import { AppProvider, useAppState } from "./lib/app-state";
 import { usePaneResize } from "./lib/use-pane-resize";
 import { resolveBootSettings } from "./lib/boot-settings";
+import { setGoalAccessContext } from "./lib/goal-access-context";
 import { getRunState } from "./lib/run-state";
 import { api } from "./api";
 import { pickWorkspaceDirectory } from "./lib/workspace";
@@ -44,11 +48,15 @@ function AppContent() {
     refreshProjects,
     createProject,
     createConversation,
+    deleteProject,
+    deleteConversation,
     saveSystemWorkspace,
     goalActions,
     handleTasksBatchAction,
     filteredGoals,
     conversationGoals,
+    projectGoals,
+    projectFilteredGoals,
     selected,
     selectedProject,
     selectedConversation,
@@ -100,11 +108,61 @@ function AppContent() {
     ? state.conversations.filter((c) => c.projectId === state.selectedProjectId)
     : [];
 
-  const projectGoals = state.selectedProjectId
-    ? state.goals.filter((g) =>
-        projectConversations.some((c) => c.id === g.conversationId),
-      )
-    : [];
+  useEffect(() => {
+    if (state.view === "console") {
+      setGoalAccessContext({ type: "console" });
+      return;
+    }
+    if (state.view === "conversation" && state.selectedConversationId) {
+      setGoalAccessContext({
+        type: "conversation",
+        conversationId: state.selectedConversationId,
+      });
+      return;
+    }
+    setGoalAccessContext({ type: "console" });
+  }, [state.view, state.selectedConversationId]);
+
+  const conversationTitleMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of state.conversations) {
+      if (state.selectedProjectId && c.projectId !== state.selectedProjectId) continue;
+      map[c.id] = c.title;
+    }
+    return map;
+  }, [state.conversations, state.selectedProjectId]);
+
+  const allConversationTitleMap = useMemo(
+    () => Object.fromEntries(state.conversations.map((c) => [c.id, c.title])),
+    [state.conversations],
+  );
+
+  const projectTitleMap = useMemo(
+    () => Object.fromEntries(state.projects.map((p) => [p.id, p.name])),
+    [state.projects],
+  );
+
+  const conversationProjectIdMap = useMemo(
+    () => Object.fromEntries(state.conversations.map((c) => [c.id, c.projectId])),
+    [state.conversations],
+  );
+
+  const conversationGoalAccess =
+    state.selectedConversationId != null
+      ? ({ type: "conversation", conversationId: state.selectedConversationId } as const)
+      : ({ type: "console" } as const);
+
+  const selectEditableProjectGoals = () => {
+    if (!state.selectedConversationId) return;
+    dispatch({
+      type: "set_tasks_selected",
+      ids: new Set(
+        projectFilteredGoals
+          .filter((g) => canMutateGoal(conversationGoalAccess, g))
+          .map((g) => g.id),
+      ),
+    });
+  };
 
   const openGoalDetail = (id: string) => dispatch({ type: "open_goal_detail", id });
   const closeGoalDetail = () => dispatch({ type: "close_goal_detail" });
@@ -120,6 +178,43 @@ function AppContent() {
       conversationId: conv.id,
       goalId,
     });
+    completeIslandDisplay();
+  };
+
+  const handleIslandAction = async (action: IslandAction, feedback?: string) => {
+    switch (action.type) {
+      case "dismiss":
+        completeIslandDisplay();
+        return;
+      case "navigate":
+        navigateToGoal(action.goalId);
+        return;
+      case "approve":
+        await goalActions.onApprove(action.goalId);
+        completeIslandDisplay();
+        return;
+      case "rework":
+        await goalActions.onRework(action.goalId, action.reason ?? feedback);
+        completeIslandDisplay();
+        return;
+      case "retry":
+        await goalActions.onStart(action.goalId);
+        return;
+      case "trigger_review":
+        try {
+          await api.triggerGoalReview(action.goalId, { force: true });
+          completeIslandDisplay();
+        } catch (err) {
+          requestIsland(
+            islandFromSimpleMessage(
+              `review-fail-${action.goalId}`,
+              `审查触发失败：${err instanceof Error ? err.message : String(err)}`,
+              { severity: "error", goalId: action.goalId },
+            ),
+          );
+        }
+        return;
+    }
   };
 
   const handleAddProjectFromDashboard = async () => {
@@ -127,19 +222,34 @@ function AppContent() {
     if (picked.ok) await createProject(picked.path);
   };
 
+  const handleDeleteProject = (projectId: string) => {
+    const project = state.projects.find((p) => p.id === projectId);
+    const name = project?.name ?? "该项目";
+    if (!window.confirm(`确定删除项目「${name}」？\n将同时删除其下所有对话与任务，且不可恢复。`)) {
+      return;
+    }
+    void deleteProject(projectId);
+  };
+
+  const handleDeleteConversation = (conversationId: string) => {
+    const conv = state.conversations.find((c) => c.id === conversationId);
+    const title = conv?.title ?? "该对话";
+    if (!window.confirm(`确定删除对话「${title}」？\n将同时删除关联任务，且不可恢复。`)) {
+      return;
+    }
+    void deleteConversation(conversationId);
+  };
+
   const openNewGoal = () => {
     if (!state.selectedConversationId) {
-      dispatch({
-        type: "show_island",
-        alert: {
-          id: "new-goal-no-conversation",
-          message:
-            state.view === "console"
-              ? "调度台会话未就绪，请稍后重试"
-              : "请先在侧栏选择一个对话，再创建新目标",
-          kind: "info",
-        },
-      });
+      requestIsland(
+        islandFromSimpleMessage(
+          "new-goal-no-conversation",
+          state.view === "console"
+            ? "调度台会话未就绪，请稍后重试"
+            : "请先在侧栏选择一个对话，再创建新目标",
+        ),
+      );
       return;
     }
     dispatch({ type: "set_show_new_goal", show: true });
@@ -158,14 +268,13 @@ function AppContent() {
         dispatch({ type: "upsert_conversation", conversation: data.conversation });
       })
       .catch((err) => {
-        dispatch({
-          type: "show_island",
-          alert: {
-            id: "console-open-failed",
-            message: `调度台数据刷新失败：${err instanceof Error ? err.message : String(err)}`,
-            kind: "error",
-          },
-        });
+        requestIsland(
+          islandFromSimpleMessage(
+            "console-open-failed",
+            `调度台数据刷新失败：${err instanceof Error ? err.message : String(err)}`,
+            { severity: "error" },
+          ),
+        );
       });
   };
 
@@ -198,6 +307,8 @@ function AppContent() {
           await createProject(workspaceDir);
         }}
         onNewConversation={(projectId) => void createConversation(projectId)}
+        onDeleteProject={handleDeleteProject}
+        onDeleteConversation={handleDeleteConversation}
         onSettings={() => {
           dispatch({ type: "set_view", view: "settings" });
           if (!settingsReady) void refreshMeta();
@@ -213,7 +324,7 @@ function AppContent() {
       <PaneDivider
         className="app-shell-divider"
         ariaLabel="调整侧栏宽度"
-        onPointerDown={onSidebarDragStart}
+        onPointerDown={(e) => onSidebarDragStart(e, shellRef.current)}
         onPointerMove={onSidebarDividerMove}
         onPointerUp={onSidebarDragEnd}
         onPointerCancel={onSidebarDragEnd}
@@ -261,7 +372,7 @@ function AppContent() {
                       ? getRunState(state.runs, detailGoal.id)
                       : undefined
                   }
-                  allGoals={conversationGoals}
+                  allGoals={state.view === "conversation" ? projectGoals : state.goals}
                   onBack={closeGoalDetail}
                   {...goalActions}
                 />
@@ -298,6 +409,7 @@ function AppContent() {
                     })
                   }
                   onNewConversation={() => void createConversation(selectedProject.id)}
+                  onDeleteConversation={handleDeleteConversation}
                   onBatchAction={handleTasksBatchAction}
                   goalActions={goalActions}
                 />
@@ -306,9 +418,7 @@ function AppContent() {
               {!state.detailGoalId && state.view === "console" && state.selectedConversationId && (
                 <ConsolePage
                   conversationId={state.selectedConversationId}
-                  goals={conversationGoals}
-                  filteredGoals={filteredGoals}
-                  allGoals={conversationGoals}
+                  goals={state.goals}
                   statusFilter={state.statusFilter}
                   onFilterChange={(filter) =>
                     dispatch({ type: "set_status_filter", filter })
@@ -328,7 +438,7 @@ function AppContent() {
                   onSelectAllVisible={() =>
                     dispatch({
                       type: "set_tasks_selected",
-                      ids: new Set(filteredGoals.map((g) => g.id)),
+                      ids: new Set(state.goals.map((g) => g.id)),
                     })
                   }
                   onClearSelection={() =>
@@ -350,6 +460,9 @@ function AppContent() {
                   coachStream={state.coachStream}
                   coachMessageEvent={state.coachMessageEvent}
                   goalActions={goalActions}
+                  conversationTitles={allConversationTitleMap}
+                  projectTitles={projectTitleMap}
+                  conversationProjectIds={conversationProjectIdMap}
                 />
               )}
 
@@ -361,8 +474,8 @@ function AppContent() {
                     left={
                       <div className="workspace-pane workspace-pane-tasks">
                         <TasksPanel
-                          goals={filteredGoals}
-                          allGoals={conversationGoals}
+                          goals={projectFilteredGoals}
+                          allGoals={projectGoals}
                           filter={state.statusFilter}
                           onFilterChange={(filter) =>
                             dispatch({ type: "set_status_filter", filter })
@@ -380,17 +493,14 @@ function AppContent() {
                           onToggleSelect={(id) =>
                             dispatch({ type: "toggle_task_select", id })
                           }
-                          onSelectAllVisible={() =>
-                            dispatch({
-                              type: "set_tasks_selected",
-                              ids: new Set(filteredGoals.map((g) => g.id)),
-                            })
-                          }
+                          onSelectAllVisible={selectEditableProjectGoals}
                           onClearSelection={() =>
                             dispatch({ type: "clear_tasks_selection" })
                           }
                           onBatchAction={handleTasksBatchAction}
                           locateRequest={locateRequest}
+                          conversationTitles={conversationTitleMap}
+                          goalAccess={conversationGoalAccess}
                           {...goalActions}
                         />
                       </div>
@@ -460,6 +570,8 @@ function AppContent() {
                       settings={settingsState}
                       workspaceResolved={settings.systemWorkspaceResolved}
                       executors={state.executors}
+                      projectId={state.selectedProjectId}
+                      goals={state.goals}
                       onRefreshExecutors={refreshExecutors}
                       onReloadSettings={async () => {
                         const s = await api.getSettings();
@@ -471,7 +583,7 @@ function AppContent() {
                         });
                       }}
                       onSave={async (s) => {
-                        const saved = await api.putSettings(s);
+                        const saved = await api.saveSettingsFresh(s);
                         dispatch({ type: "set_settings", settings: saved });
                         await refreshProjects();
                         await refreshExecutors();
@@ -492,30 +604,25 @@ function AppContent() {
                       onIntegrationGoalCreated={(goal) => {
                         void refreshGoals();
                         void refreshProjects();
-                        dispatch({
-                          type: "show_island",
-                          alert: {
-                            id: `cli-${goal.id}`,
-                            message: `已创建 CLI 接入任务：${goal.title}（在「OpenX 系统」项目中跟踪）`,
-                            goalId: goal.id,
-                            kind: "info",
-                            status: goal.status,
-                          },
-                        });
+                        requestIsland(
+                          islandFromSimpleMessage(
+                            `cli-${goal.id}`,
+                            `已创建 CLI 接入任务：${goal.title}（在「OpenX 系统」项目中跟踪）`,
+                            { goalId: goal.id },
+                          ),
+                        );
                       }}
                       onConnectReady={(executorId) => {
                         void refreshExecutors();
-                        dispatch({
-                          type: "show_island",
-                          alert: {
-                            id: `connect-${executorId}`,
-                            message: `Connect Agent「${executorId}」已自动自举并上线`,
-                            kind: "info",
-                          },
-                        });
+                        requestIsland(
+                          islandFromSimpleMessage(
+                            `connect-${executorId}`,
+                            `Connect Agent「${executorId}」已自动自举并上线`,
+                          ),
+                        );
                       }}
                       onSave={async (s) => {
-                        const saved = await api.putSettings(s);
+                        const saved = await api.saveSettingsFresh(s);
                         dispatch({ type: "set_settings", settings: saved });
                         await refreshExecutors();
                       }}
@@ -540,9 +647,9 @@ function AppContent() {
       </div>
 
       <BroadcastTicker
-        alert={state.islandAlert}
-        onDismiss={() => dispatch({ type: "dismiss_island" })}
-        onNavigate={navigateToGoal}
+        payload={state.islandPayload}
+        onDismiss={() => completeIslandDisplay(state.islandPayload?.id)}
+        onAction={handleIslandAction}
       />
 
       {state.showNewGoal && state.selectedConversationId && (

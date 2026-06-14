@@ -1,9 +1,28 @@
 import type { CoachIntent } from "./coach.js";
+import { isBugOrAnomalyReport } from "./bug-dispatch.js";
+
+/** 是否像非编程类深度探讨（设计、游戏、股票等） */
+export function isDiscourseTopicMessage(message: string): boolean {
+  const m = message.trim();
+  if (!m) return false;
+  if (
+    /帮我(做|实现|写|修|改|部署|开发|加|建)|派单|创建任务|整理成(任务|工单)|落地|写代码/i.test(
+      m,
+    )
+  ) {
+    return false;
+  }
+  return /设计|游戏|玩法|机制|关卡|股票|投资|理财|基金|债券|期货|架构方案|商业模式|用户体验|UX|UI|交互|剧情|叙事|世界观|创意|平衡性|数值|氪金|Steam|手游|端游|大盘|板块|估值|财报|竞品|产品规划|路线图|讨论|分析|怎么看|值得|深入|聊聊|探讨|评价/i.test(
+    m,
+  );
+}
 
 /** 用户描述里是否像「要落成 Goal」的需求（即使没说「帮我做」） */
 export function mayNeedGoalRefined(message: string): boolean {
   const m = message.trim();
   if (!m) return false;
+
+  if (isDiscourseTopicMessage(m)) return false;
 
   if (
     /功能|模块|需求|任务|目标|工单|子任务|feature|story|接口|api|页面|组件|表单|按钮|服务|微服务/i.test(
@@ -43,6 +62,10 @@ export function classifyCoachIntent(message: string): CoachIntent {
 
   if (/返工|重做|没通过|不满意|再来一次|rework/i.test(m)) {
     return "rework";
+  }
+
+  if (isDiscourseTopicMessage(m)) {
+    return "consult";
   }
 
   if (/状态|进展|情况|最近|怎么样|完成了吗|进度|汇总/.test(m) && !mayNeedGoalRefined(m)) {
@@ -95,19 +118,32 @@ export function isAmbiguousTaskMessage(message: string): boolean {
   const m = message.trim();
   if (!m) return false;
   if (
-    /派单|派给|创建任务|建个任务|立项|整理成(任务|工单|目标)|帮我(做|实现|写|改|修|加)/.test(
-      m,
-    )
+    /派单|派给|创建任务|建个任务|立项|整理成(任务|工单|目标)/.test(m) ||
+    /^帮我(做|实现|写|加)(\s|\S)/.test(m) ||
+    /^帮我改(?!进)/.test(m) ||
+    /^帮我修(?!改)/.test(m)
   ) {
     return false;
   }
   const taskFlavored = classifyCoachIntent(m) === "task" || mayNeedGoalRefined(m);
   if (!taskFlavored) return false;
-  return (
+  if (
     /[？?]\s*$/.test(m) ||
     /(吗|呢|么)\s*[？?。]?\s*$/.test(m) ||
     /^(怎么|如何|为什么|为啥|是否|能不能|可不可以|要不要|该不该|是不是|有没有)/.test(m)
-  );
+  ) {
+    return true;
+  }
+  // 短指令、范围/验收不明确：如「帮我优化一下」
+  if (
+    /^帮我(优化|改进|调整|完善|看看|处理|梳理|整理)(一下|下)?[。.!！]?$/.test(m) ||
+    (m.length <= 24 &&
+      /^帮我/.test(m) &&
+      !/验收|范围|具体|详细|步骤/.test(m))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** 是否走 streamText（任务/返工/像要出工单的需求一律走结构化） */
@@ -115,7 +151,29 @@ export function shouldUseCoachStreaming(
   message: string,
   intent: CoachIntent = classifyCoachIntent(message),
 ): boolean {
+  if (isDiscourseTopicMessage(message)) return true;
   if (intent === "task" || intent === "rework") return false;
   if (mayNeedGoalRefined(message)) return false;
   return isStreamingCoachIntent(intent);
+}
+
+/**
+ * 是否走「结构化 LLM」路径，由模型自行选择 clarify 或 refined。
+ * 用于替代仅 isAmbiguousTaskMessage 的硬编码门槛。
+ */
+export function shouldTryLlmClarify(
+  message: string,
+  intent: CoachIntent = classifyCoachIntent(message),
+): boolean {
+  const m = message.trim();
+  if (!m) return false;
+  if (isDiscourseTopicMessage(m)) return false;
+  if (shouldUseCoachStreaming(m, intent)) return false;
+  return (
+    isAmbiguousTaskMessage(m) ||
+    intent === "task" ||
+    intent === "rework" ||
+    mayNeedGoalRefined(m) ||
+    isBugOrAnomalyReport(m)
+  );
 }

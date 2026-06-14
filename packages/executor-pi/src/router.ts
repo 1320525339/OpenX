@@ -2,7 +2,14 @@ import {
   createAgentSession,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { EXECUTOR_AUTO, isValidExecutorId, type ModelSettingsSlice, type PiExecutorSettings } from "@openx/shared";
+import {
+  buildRoleSystemPrompt,
+  EXECUTOR_AUTO,
+  isValidExecutorId,
+  type LlmContextSettings,
+  type ModelSettingsSlice,
+  type PiExecutorSettings,
+} from "@openx/shared";
 import { createPiModelRegistry, resolvePiModel } from "./model.js";
 import { mergePiSettingsFromModel } from "./pi-bridge.js";
 import { createOpenxResourceLoader } from "./pi-resource-loader.js";
@@ -25,15 +32,8 @@ export type PickExecutorInput = {
     model?: ModelSettingsSlice["model"];
     providers?: ModelSettingsSlice["providers"];
   };
+  llmContextSettings?: Partial<LlmContextSettings>;
 };
-
-const ROUTER_SYSTEM = `你是 OpenX 执行器路由。根据任务内容，从候选列表中选出最合适的一个 executorId。
-只回复 JSON：{"executorId":"..."}，不要 markdown 或其它文字。
-优先规则：
-- 本地代码/文件/仓库操作 → pi
-- 需要特定 CLI（Gemini/Codex/Claude）→ 对应 acp:*
-- 已在线 Connect Agent 且任务适合外部工具 → 该 Connect executorId
-- 不确定 → pi`;
 
 function resolvePiSettings(settings: PickExecutorInput["settings"]): PiExecutorSettings {
   const base = settings.pi ?? { runTimeoutMs: 120_000, noSession: true };
@@ -112,7 +112,11 @@ export async function pickExecutorWithPi(input: PickExecutorInput): Promise<stri
       ...(resourceLoader ? { resourceLoader } : {}),
     });
     session = created.session;
-    await session.prompt(`${ROUTER_SYSTEM}\n\n${userPrompt}`);
+    const routerSystem = buildRoleSystemPrompt(
+      "piRouter",
+      input.llmContextSettings,
+    );
+    await session.prompt(`${routerSystem}\n\n${userPrompt}`);
     const lastAssistant = [...session.state.messages]
       .reverse()
       .find((m) => m.role === "assistant");

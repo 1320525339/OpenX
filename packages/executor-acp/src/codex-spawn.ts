@@ -1,6 +1,4 @@
-import { buildClaudeAcpEnv } from "@openx/shared";
-
-const OPENX_CODEX_PROVIDER = "openx";
+import { buildClaudeAcpEnv, CODEX_OPENX_MODEL_PROVIDER } from "@openx/shared";
 
 export type CodexSpawnCredentials = {
   apiKey: string;
@@ -20,7 +18,7 @@ export function buildCodexAcpSpawnArgs(creds: CodexSpawnCredentials): string[] {
     "-c",
     `model="${creds.model}"`,
     "-c",
-    `model_provider="${OPENX_CODEX_PROVIDER}"`,
+    `model_provider="${CODEX_OPENX_MODEL_PROVIDER}"`,
   ];
 }
 

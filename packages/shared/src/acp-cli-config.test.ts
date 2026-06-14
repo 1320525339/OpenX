@@ -35,10 +35,21 @@ describe("buildClaudeAcpEnv", () => {
   it("uses API key auth for anthropic provider", () => {
     const env = buildClaudeAcpEnv({
       apiKey: "sk-ant-test",
-      baseUrl: "https://api.anthropic.com/v1",
+      baseUrl: "https://api.anthropic.com",
       model: "claude-sonnet-4-20250514",
     });
     expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test");
     expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://api.anthropic.com");
+  });
+
+  it("maps DeepSeek anthropic endpoint for Claude Code", () => {
+    const env = buildClaudeAcpEnv({
+      apiKey: "ds-key",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      model: "deepseek-v4-pro",
+    });
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://api.deepseek.com/anthropic");
+    expect(env.ANTHROPIC_API_KEY).toBe("ds-key");
   });
 });

@@ -9,7 +9,13 @@ import {
   BatchGoalsSchema,
   RecommendExecutorInputSchema,
   canTransition,
+  canMutateGoal,
   DEFAULT_AUTO_REVIEW,
+  goalMutationDeniedMessage,
+  resolveSubGoalDependsOn,
+  MAX_PARALLEL_SUB_GOAL_STARTS,
+  mergeDispatchContext,
+  normalizeDispatchContext,
   type Goal,
 } from "@openx/shared";
 import {
@@ -25,6 +31,7 @@ import {
   buildGoalFeedback,
   listChildGoals,
   listReviewRoundEntries,
+  listCrewExchanges,
   areDependenciesMet,
   deleteGoals,
 } from "../db.js";
@@ -41,10 +48,22 @@ import {
 import { narrateGoalChange } from "../narration.js";
 import { recommendExecutorForGoal, resolveGoalExecutorId } from "../executor-recommend-service.js";
 import { cancelGoalStatus, claimGoalForDispatch } from "../goal-lifecycle.js";
-import { approveGoal, reworkGoal } from "../goal-actions.js";
+import { approveGoal, reworkGoal, waiveChildGoal } from "../goal-actions.js";
+import { checkGoalApprovalGate } from "../goal-completion-gate.js";
 import { buildGoalDispatchContext } from "../goal-dispatch.js";
+import { goalMutationForbidden, parseGoalAccessActor } from "../goal-access-http.js";
 
 export const goalsRoutes = new Hono();
+
+function hasCompleteGoalDraft(input: {
+  title?: string;
+  acceptance?: string;
+  executionPrompt?: string;
+}): boolean {
+  return Boolean(
+    input.title?.trim() && input.acceptance?.trim() && input.executionPrompt?.trim(),
+  );
+}
 
 goalsRoutes.post("/recommend-executor", async (c) => {
   const input = RecommendExecutorInputSchema.parse(await c.req.json());
@@ -75,13 +94,26 @@ goalsRoutes.post("/", async (c) => {
   }
   const settings = loadSettings();
   const executors = await detectExecutors();
-  const { refined, llmError } = await refineGoal(
-    { userDraft: input.userDraft, constraints: input.constraints },
-    settings,
-    settings.defaultConstraints,
-  );
-  if (llmError) {
-    console.warn("[coach] createGoal refine fallback:", llmError);
+  const skipMainRefine =
+    input.refinedMessageId != null || hasCompleteGoalDraft(input);
+  let refined = {
+    title: input.title ?? "",
+    acceptance: input.acceptance ?? "",
+    executionPrompt: input.executionPrompt ?? "",
+    constraints: input.constraints ?? [],
+  };
+  let llmError: string | undefined;
+  if (!skipMainRefine) {
+    const result = await refineGoal(
+      { userDraft: input.userDraft, constraints: input.constraints },
+      settings,
+      settings.defaultConstraints,
+    );
+    refined = result.refined;
+    llmError = result.llmError;
+    if (llmError) {
+      console.warn("[coach] createGoal refine fallback:", llmError);
+    }
   }
 
   const title = input.title ?? refined.title;
@@ -105,6 +137,7 @@ goalsRoutes.post("/", async (c) => {
   const now = new Date().toISOString();
   const goal: Goal = {
     id: nanoid(),
+    orderNo: 0,
     conversationId: input.conversationId,
     title,
     acceptance,
@@ -119,6 +152,7 @@ goalsRoutes.post("/", async (c) => {
     maxIterations: input.maxIterations,
     iterationCount: 0,
     dispatchContext,
+    foremanThreadId: input.conversationId,
     status: "draft",
     progress: 0,
     createdAt: now,
@@ -135,12 +169,23 @@ goalsRoutes.post("/", async (c) => {
 
   const children: Goal[] = [];
   let chainPrevId = goal.id;
-  for (const sub of input.subGoals ?? []) {
-    const { refined: subRefined } = await refineGoal(
-      { userDraft: sub.userDraft, constraints: sub.constraints },
-      settings,
-      settings.defaultConstraints,
-    );
+  const batchInputs = input.subGoals ?? [];
+  for (let subIndex = 0; subIndex < batchInputs.length; subIndex += 1) {
+    const sub = batchInputs[subIndex]!;
+    let subRefined = {
+      title: sub.title ?? "",
+      acceptance: sub.acceptance ?? "",
+      executionPrompt: sub.executionPrompt ?? "",
+      constraints: sub.constraints ?? [],
+    };
+    if (!hasCompleteGoalDraft(sub)) {
+      const result = await refineGoal(
+        { userDraft: sub.userDraft, constraints: sub.constraints },
+        settings,
+        settings.defaultConstraints,
+      );
+      subRefined = result.refined;
+    }
     const subTitle = sub.title ?? subRefined.title;
     const subAcceptance = sub.acceptance ?? subRefined.acceptance;
     const subPrompt = sub.executionPrompt ?? subRefined.executionPrompt;
@@ -156,8 +201,15 @@ goalsRoutes.post("/", async (c) => {
       executors,
     );
     const childNow = new Date().toISOString();
+    const dependsOn = resolveSubGoalDependsOn(
+      subIndex,
+      batchInputs,
+      children.map((c) => c.id),
+      chainPrevId,
+    );
     const child: Goal = {
       id: nanoid(),
+      orderNo: 0,
       conversationId: input.conversationId,
       title: subTitle,
       acceptance: subAcceptance,
@@ -166,12 +218,24 @@ goalsRoutes.post("/", async (c) => {
       constraints: sub.constraints ?? subRefined.constraints,
       executorId: subExec.executorId,
       parentGoalId: goal.id,
-      dependsOn: sub.dependsOn ?? (children.length === 0 ? [] : [chainPrevId]),
+      dependsOn,
       priority: sub.priority ?? "medium",
       autoReview: goal.autoReview ?? false,
       maxIterations: goal.maxIterations,
       iterationCount: 0,
-      dispatchContext: buildGoalDispatchContext(sub, undefined, goal),
+      dispatchContext: normalizeDispatchContext(
+        mergeDispatchContext(
+          goal.dispatchContext,
+          sub.dispatchContext,
+          {
+            agentId: sub.agentId,
+            mcpIds: sub.mcpIds,
+            skillIds: sub.skillIds,
+            permissionMode: sub.permissionMode,
+          },
+        ),
+      ),
+      foremanThreadId: input.conversationId,
       status: "draft",
       progress: 0,
       createdAt: childNow,
@@ -201,7 +265,8 @@ goalsRoutes.post("/", async (c) => {
   }
 
   if (shouldStart) {
-    for (const child of children) {
+    const runnableChildren = children.filter((child) => areDependenciesMet(child));
+    for (const child of runnableChildren.slice(0, MAX_PARALLEL_SUB_GOAL_STARTS)) {
       if (!areDependenciesMet(child)) continue;
       const claimedChild = claimGoalForDispatch(child.id, ["draft"]);
       if (!claimedChild) continue;
@@ -215,7 +280,8 @@ goalsRoutes.post("/", async (c) => {
     }
   }
 
-  return c.json({ goal, children }, 201);
+  const responseGoal = getGoalById(goal.id) ?? goal;
+  return c.json({ goal: responseGoal, children }, 201);
 });
 
 goalsRoutes.get("/:id/children", (c) => {
@@ -256,6 +322,12 @@ goalsRoutes.get("/:id/review-rounds", (c) => {
   return c.json({ rounds: listReviewRoundEntries(goal.id) });
 });
 
+goalsRoutes.get("/:id/crew-messages", (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  return c.json({ messages: listCrewExchanges(goal.id) });
+});
+
 goalsRoutes.post("/:id/trigger-review", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { force?: boolean };
   const goalId = c.req.param("id");
@@ -274,6 +346,9 @@ goalsRoutes.post("/:id/trigger-review", async (c) => {
 goalsRoutes.patch("/:id", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   const patch = UpdateGoalSchema.parse(await c.req.json());
   if (
     (goal.status === "running" || goal.status === "awaiting_review") &&
@@ -293,6 +368,9 @@ goalsRoutes.patch("/:id", async (c) => {
 goalsRoutes.post("/:id/refine", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   const settings = loadSettings();
   const draft = goal.userDraft ?? goal.title;
   const { refined, llmError, quotaExceeded } = await refineGoal(
@@ -317,6 +395,9 @@ goalsRoutes.post("/:id/refine", async (c) => {
 goalsRoutes.post("/:id/start", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   if (goal.status === "running") {
     return c.json({ goal });
   }
@@ -341,6 +422,9 @@ goalsRoutes.post("/:id/start", async (c) => {
 goalsRoutes.post("/:id/retry", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   if (goal.status !== "failed") {
     return c.json({ error: "Only failed goals can be retried" }, 400);
   }
@@ -364,12 +448,46 @@ goalsRoutes.post("/:id/retry", async (c) => {
 });
 
 goalsRoutes.post("/:id/approve", (c) => {
-  const result = approveGoal(c.req.param("id"));
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
+  const result = approveGoal(c.req.param("id"), { source: "user" });
+  if (!result.ok) {
+    return c.json(
+      { error: result.error, gateReasons: result.gateReasons },
+      result.status,
+    );
+  }
+  return c.json({ goal: result.goal });
+});
+
+goalsRoutes.get("/:id/approval-gate", (c) => {
+  const gate = checkGoalApprovalGate(c.req.param("id"), { source: "user" });
+  if (!gate.ok && gate.error === "Not found") {
+    return c.json({ error: gate.error }, 404);
+  }
+  return c.json(gate.ok ? { ok: true } : { ok: false, reasons: gate.reasons });
+});
+
+goalsRoutes.post("/:id/waive", (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
+  const result = waiveChildGoal(c.req.param("id"));
   if (!result.ok) return c.json({ error: result.error }, result.status);
   return c.json({ goal: result.goal });
 });
 
 goalsRoutes.post("/:id/rework", async (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   const body = ReworkSchema.parse(await c.req.json().catch(() => ({})));
   const result = await reworkGoal(c.req.param("id"), body.reason, {
     source: "user",
@@ -381,6 +499,9 @@ goalsRoutes.post("/:id/rework", async (c) => {
 goalsRoutes.post("/:id/cancel", (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   cancelRunning(goal.id);
   const result = cancelGoalStatus(goal.id);
   if (!result.ok) return c.json({ error: result.error }, result.status);
@@ -391,6 +512,9 @@ goalsRoutes.delete("/:id", (c) => {
   const id = c.req.param("id");
   const goal = getGoalById(id);
   if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   if (goal.status === "running") {
     cancelRunning(goal.id);
   }
@@ -406,17 +530,28 @@ goalsRoutes.delete("/:id", (c) => {
 
 goalsRoutes.post("/batch", async (c) => {
   const { action, ids } = BatchGoalsSchema.parse(await c.req.json());
+  const actor = parseGoalAccessActor(c);
   const ok: string[] = [];
   const failed: { id: string; error: string }[] = [];
 
   if (action === "delete") {
     for (const id of ids) {
       const goal = getGoalById(id);
-      if (goal?.status === "running") {
+      if (!goal) {
+        failed.push({ id, error: "Not found" });
+        continue;
+      }
+      const denied = goalMutationForbidden(c, actor, goal);
+      if (denied) {
+        failed.push({ id, error: goalMutationDeniedMessage() });
+        continue;
+      }
+      if (goal.status === "running") {
         cancelRunning(goal.id);
       }
     }
-    const result = deleteGoals(ids);
+    const allowedIds = ids.filter((id) => !failed.some((f) => f.id === id));
+    const result = deleteGoals(allowedIds);
     for (const deletedId of result.deleted) {
       broadcast({ type: "goal.deleted", goalId: deletedId });
     }
@@ -427,6 +562,10 @@ goalsRoutes.post("/batch", async (c) => {
     const goal = getGoalById(id);
     if (!goal) {
       failed.push({ id, error: "Not found" });
+      continue;
+    }
+    if (!canMutateGoal(actor, goal)) {
+      failed.push({ id, error: goalMutationDeniedMessage() });
       continue;
     }
     try {

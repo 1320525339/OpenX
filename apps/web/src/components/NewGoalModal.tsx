@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Goal } from "@openx/shared";
+import type { DispatchPermissionMode } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import { ExecutorPicker } from "./ExecutorPicker";
 import { defaultExecutorChoice, defaultConnectExecutorChoice, filterConnectExecutors } from "../lib/executors";
+import { loadPermissionSelection, permissionModeFromSelection } from "../lib/coach-context";
+import { PERMISSION_PICKER_OPTIONS } from "../lib/workflow-ui";
 
 type Props = {
   conversationId: string;
@@ -37,6 +40,9 @@ export function NewGoalModal({
   );
   const [step, setStep] = useState<"draft" | "review">("draft");
   const [autoReview, setAutoReview] = useState(true);
+  const [permissionMode, setPermissionMode] = useState<
+    DispatchPermissionMode | undefined
+  >(() => permissionModeFromSelection(loadPermissionSelection()));
   const [loading, setLoading] = useState(false);
   const [refineWarn, setRefineWarn] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +89,10 @@ export function NewGoalModal({
         executionPrompt,
         autoStart: start,
         autoReview,
-        dispatchContext: { agentId: "coach" },
+        dispatchContext: {
+          agentId: "coder",
+          ...(permissionMode ? { permissionMode } : {}),
+        },
       });
       onCreated(goal);
     } catch (e) {
@@ -151,6 +160,25 @@ export function NewGoalModal({
               executors={scopedExecutors}
               includeAuto={!connectOnly}
             />
+            <div className="form-field">
+              <label className="form-label">派单权限</label>
+              <select
+                className="mech-input"
+                value={permissionMode ?? "default"}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPermissionMode(
+                    v === "default" ? undefined : (v as DispatchPermissionMode),
+                  );
+                }}
+              >
+                {PERMISSION_PICKER_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label} — {opt.description}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="form-field">
               <label className="form-label">标题</label>
               <input

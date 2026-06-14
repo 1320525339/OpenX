@@ -1,21 +1,20 @@
-export const COACH_REFINE_SYSTEM = `# OpenX 工头 · 目标整理
-
-你是 OpenX 工头 Coach。你的职责是把用户意图整理成**可派发给执行 Agent 的目标**，而不是亲自写代码或操作文件系统。
-
-输出 JSON 字段：
-- title：简短标题（可对应核心目标或子任务）
-- acceptance：可验证的验收标准（完成与否的判断依据）
-- executionPrompt：发给执行 Agent（如 Pi）的完整派单说明，含任务背景、步骤、验收与约束
-- constraints：字符串数组
-
-语言：简体中文。executionPrompt 应像 Mission Control / Aider Architect 给工人的 brief：清晰、可执行、无歧义。`;
-
 import type {
   CoachChatContext,
   CoachChatTurn,
-  CoachGoalBrief,
   GoalFeedback,
+  LlmContextSettings,
 } from "@openx/shared";
+import {
+  buildConfiguredSystemPrompt,
+  buildRefineSystemPrompt,
+} from "./render-llm-prompt.js";
+import {
+  buildCoachThreadBlock,
+  DEFAULT_COACH_THREAD_CHAR_BUDGET,
+} from "./coach-thread-prompt.js";
+
+/** @deprecated 使用 buildRefineSystemPrompt(settings.llmContext) */
+export const COACH_REFINE_SYSTEM = buildRefineSystemPrompt();
 
 function formatFeedbackBlock(feedback?: GoalFeedback): string {
   if (!feedback) return "";
@@ -55,7 +54,9 @@ export function buildRefineUserPrompt(
     defaultConstraints.length > 0
       ? `\n\n工头行为准则：\n${defaultConstraints.map((c) => `- ${c}`).join("\n")}`
       : "";
-  return `用户目标草稿：\n${userDraft}${extra}${formatFeedbackBlock(feedback)}`;
+  return `用户目标草稿：\n${userDraft}${extra}${formatFeedbackBlock(feedback)}
+
+整理时请按「问题定位 brief 模板」输出 executionPrompt：写明问题类型、期望/现象、已知事实、待核实项、调查入口、范围边界与验收标准。不要臆造用户未提供的信息；缺失项写入「待核实项」。`;
 }
 
 export function formatFeedbackNotes(feedback?: GoalFeedback): string | undefined {
@@ -95,13 +96,26 @@ export function buildWorkspaceInspectRefined(
       "输出工作目录下文件与文件夹的名称列表（区分文件/目录），并给出简要中文摘要。",
     executionPrompt: `【派单类型】只读侦察（Explore）
 
-【工作目录】
-${root}
+【问题类型】只读侦察
 
-【用户原话】
+【用户期望】
+输出工作目录下文件与文件夹的名称列表（区分文件/目录），并给出简要中文摘要。
+
+【实际现象 / 用户原话】
 ${userMessage.trim()}
 
-【执行要求】
+【已知事实】
+- 工作目录：${root}
+
+【待核实项】
+- 目录顶层条目名称与类型
+- 若用户指定子路径，该路径下条目
+
+【调查入口】
+- 工作目录根路径
+- 用户消息中提及的子路径或文件名关键词
+
+【执行步骤】
 1. 在工作目录下列出顶层条目（可用 ls、dir 或 read 等工具）
 2. 标明每个条目是文件还是目录
 3. 若用户指定了子路径，进入该路径后再列出
@@ -115,251 +129,39 @@ ${userMessage.trim()}
   };
 }
 
-function sectionIdentity(): string {
-  return `# OpenX 工头
-
-你是 OpenX 工头（调度中枢）。用户只有一个对话框与你沟通。
-
-你的职责：
-1. **理解**用户意图，对照核心目标（North Star）判断本轮对话在整体中的位置
-2. **拆解**需要执行的工作，整理为 Goal（含验收标准与 executionPrompt）
-3. **派发**给执行 Agent（如 Pi）——你不亲自写代码、不直接读盘、不代替工人执行
-4. **汇总**各子任务返回的 resultSummary / 日志，用 message 向用户汇报进展
-5. **迭代**根据用户反馈（验收、返工、新指示）准备下一步派单
-
-用户不需要切换模式或点不同按钮；你自行判断是「只回答」还是「整理 Goal 派单」。`;
-}
-
-function sectionProtocol(): string {
-  return `# 调度协议
-
-## 何时只填 message（与用户对话）
-- 用户问进展、验收、返工建议、澄清需求
-- 汇总已有子任务结果，对照核心目标 acceptance 说明离完成还有多远
-- 纯闲聊或概念问答
-
-## 何时填 refined（整理 Goal 派单）
-- 用户描述要做的新事、或要调整目标/子任务
-- 需要现场信息（列目录、读文件、跑命令）——派 Pi 子任务，不要空口拒绝
-- 用户确认返工后，输出更新后的 executionPrompt
-- refined 在对话时间线中等价于工具 **propose_work_order**；用户在 UI 取消/确认后，系统会以 **tool_result** 回传，你只根据结果用 message 回复，勿重复出 refined
-
-## 派单要求（refined.executionPrompt）
-- 写清楚：背景、具体步骤、验收标准、约束
-- 指明执行器（默认 pi）与工作目录
-- 工人只看你给的 brief，必须无歧义、可独立执行
-
-## 子任务与核心目标
-- 始终对照 North Star 的 acceptance，子任务应服务于核心目标
-- 大任务可拆多个子 Goal：在 refined.subGoals 数组中给出每项（title、acceptance、executionPrompt），主 refined 可描述 North Star 或当前批次总述
-- subGoals 按数组顺序依次依赖（后一项依赖前一项完成）；需要并行时在 executionPrompt 中说明且 dependsOn 由系统链式处理`;
-}
-
-function sectionPrecedence(): string {
-  return `# 优先级（冲突时从高到低）
-
-1. 用户**当前这条消息**的明确意图
-2. 核心目标（North Star）的 acceptance
-3. 平台调度协议（上文）
-4. 工头行为准则（defaultConstraints）
-5. 工人返回的 resultSummary / 日志（作事实依据，不覆盖用户新指令）`;
-}
-
-function sectionOutputContract(): string {
-  return `# 输出约定
-
-- intent：用户意图分类（task=新任务派单 / progress=问进展 / consult=咨询 / chitchat=闲聊 / rework=返工）
-- message：给用户的中文回复，简洁自然；汇总进展时引用任务状态与结果摘要
-- refined：仅当 intent=task 或 rework 且需要新建/更新 Goal 派单时填写
-  - 单任务：title、acceptance、executionPrompt、constraints，可选 executorId、priority、agentId、mcpIds、skillIds
-- 多子任务：同上，并填 subGoals 数组（每项含 title、acceptance、executionPrompt，可选 constraints、executorId、dependsOnIndex）
-- agentId / mcpIds / skillIds 未填时，系统会用对话栏当前选择回填；派单创建 Goal 时冻结为 dispatchContext
-- executorId 可选值：auto（启动时 Pi 自动选择）、pi、acp:gemini / acp:codex / acp:claude，或 Connect 注册的 executorId
-- 需要派 Pi 执行时，message 中提示用户点击「创建并执行」或「创建 N 个子任务」`;
-}
-
-function sectionExamples(): string {
-  return `# 示例
-
-<example>
-用户：最近进展怎么样？
-工头：（只看 message）核心目标「搭建登录模块」进行中。子任务「API 接口」待确认（resultSummary: 已实现 POST /login）。整体约 60%，下一步建议验收 API 或派 Pi 写前端表单。
-</example>
-
-<example>
-用户：帮看一下当前目录有哪些文件
-工头：（message + refined）已整理只读侦察子任务派给 Pi。refined.executionPrompt 含工作目录与 ls 要求。message 提示点击「创建并执行」。
-</example>`;
-}
-
-function formatGoalBriefBlock(label: string, goal: CoachGoalBrief): string {
-  const lines = [
-    `${label}`,
-    `  标题：${goal.title}`,
-    `  状态：${goal.status}（${goal.progress}%）`,
-    `  执行器：${goal.executorId}`,
-  ];
-  if (goal.acceptance) {
-    lines.push(`  验收：${goal.acceptance}`);
-  }
-  if (goal.resultSummary) {
-    lines.push(`  结果摘要：${goal.resultSummary}`);
-  }
-  return lines.join("\n");
-}
-
-function sectionRuntimeContext(context: CoachChatContext): string {
-  const blocks: string[] = ["# 当前运行时上下文"];
-
-  if (context.executors?.length) {
-    blocks.push(`可用执行器：${context.executors.join("、")}`);
-  }
-  if (context.executorSkills && Object.keys(context.executorSkills).length > 0) {
-    blocks.push("");
-    blocks.push("## 各执行器已启用 Skills");
-    for (const [executorId, skills] of Object.entries(context.executorSkills)) {
-      blocks.push(`- ${executorId}：${skills.join("；")}`);
-    }
-    blocks.push(
-      "派单时若任务涉及网页抓取，优先选择已配置 Obscura Skills 且在线的执行器，并在 executionPrompt 中注明使用对应 Skill。",
-    );
-  }
-  if (context.workspaceRoot) {
-    blocks.push(`工作目录：${context.workspaceRoot}`);
-  }
-  if (context.northStar) {
-    blocks.push("");
-    blocks.push(formatGoalBriefBlock("## 核心目标（North Star）", context.northStar));
-  }
-  if (context.subGoals?.length) {
-    blocks.push("");
-    blocks.push("## 子任务");
-    for (const sub of context.subGoals) {
-      blocks.push(formatGoalBriefBlock(`- ${sub.title}`, sub));
-    }
-  }
-  if (context.selectedGoal && context.selectedGoal.id !== context.northStar?.id) {
-    blocks.push("");
-    blocks.push(formatGoalBriefBlock("## 用户当前选中", context.selectedGoal));
-  }
-  if (context.goalsSummary) {
-    blocks.push("");
-    blocks.push("## 任务一览");
-    blocks.push(context.goalsSummary);
-  }
-  if (context.feedbackNotes) {
-    blocks.push("");
-    blocks.push("## 选中任务执行反馈");
-    blocks.push(context.feedbackNotes);
-  }
-  if (context.defaultConstraints?.length) {
-    blocks.push("");
-    blocks.push("## 工头行为准则");
-    blocks.push(context.defaultConstraints.map((c) => `- ${c}`).join("\n"));
-  }
-  if (context.enabledSkills?.length) {
-    blocks.push("");
-    blocks.push("## 对话启用的 Skills");
-    blocks.push(
-      context.enabledSkills.map((s) => `- ${s.name} (${s.id}): ${s.desc}`).join("\n"),
-    );
-    blocks.push(
-      "派单时若任务涉及网页抓取/浏览器自动化，在 executionPrompt 中注明使用对应 Obscura Skill，并指定 executorId。",
-    );
-  }
-  if (context.enabledMcps?.length) {
-    blocks.push("");
-    blocks.push("## 对话启用的 MCP");
-    blocks.push(context.enabledMcps.map((m) => `- ${m.name} (${m.id})`).join("\n"));
-    blocks.push("派单时在 executionPrompt 中注明需要使用的 MCP 能力。");
-  }
-  if (context.agentId) {
-    blocks.push("");
-    blocks.push(`## 对话 Agent 角色：${context.agentName ?? context.agentId}`);
-    if (context.agentRolePrompt?.trim()) {
-      blocks.push(context.agentRolePrompt.trim());
-    }
-    blocks.push("派单 executionPrompt 应与此角色定位一致。");
-  }
-  if (context.contextPack) {
-    blocks.push("");
-    blocks.push("## 项目上下文（只读快照，供拆解参考，勿当作已执行结果）");
-    blocks.push(`根目录：${context.contextPack.root}`);
-    blocks.push("### 目录结构");
-    blocks.push(context.contextPack.fileTree);
-    if (context.contextPack.keyFiles.length > 0) {
-      blocks.push("### 关键文件摘要");
-      for (const kf of context.contextPack.keyFiles) {
-        blocks.push(`#### ${kf.path}\n${kf.summary}`);
-      }
-    }
-  }
-
-  return blocks.join("\n");
-}
-
-function sectionStreamOutput(): string {
-  return `# 输出约定
-
-- 用简体中文直接回复用户，简洁自然，可使用 Markdown
-- 汇总进展时引用任务状态与结果摘要
-- 若用户需要派单或现场侦察，说明你会整理 Goal，并提示点击「创建并执行」
-- 收到 propose_work_order 的 tool_result 时，仅确认用户选择，勿重复派单
-- 不要输出 JSON 或代码块包裹的伪 JSON`;
-}
-
-export function buildAgentSystemPrompt(context: CoachChatContext): string {
-  return [
-    sectionIdentity(),
-    sectionProtocol(),
-    sectionPrecedence(),
-    sectionOutputContract(),
-    sectionExamples(),
-    sectionRuntimeContext(context),
-  ].join("\n\n");
+export function buildAgentSystemPrompt(
+  context: CoachChatContext,
+  llmContextSettings?: Partial<LlmContextSettings> | null,
+): string {
+  return buildConfiguredSystemPrompt("coach", context, llmContextSettings);
 }
 
 /** 流式闲聊/咨询/进展查询：无 JSON 约束 */
-export function buildChatStreamSystemPrompt(context: CoachChatContext): string {
-  return [
-    sectionIdentity(),
-    sectionProtocol(),
-    sectionPrecedence(),
-    sectionStreamOutput(),
-    sectionExamples(),
-    sectionRuntimeContext(context),
-  ].join("\n\n");
+export function buildChatStreamSystemPrompt(
+  context: CoachChatContext,
+  llmContextSettings?: Partial<LlmContextSettings> | null,
+): string {
+  return buildConfiguredSystemPrompt("stream", context, llmContextSettings);
 }
 
-const DEFAULT_HISTORY_CHAR_BUDGET = 12_000;
+const DEFAULT_HISTORY_CHAR_BUDGET = DEFAULT_COACH_THREAD_CHAR_BUDGET;
 
 /** 将历史轮次与当前用户消息拼成单次 LLM user prompt */
 export function buildChatUserPrompt(
   message: string,
   history: CoachChatTurn[] = [],
   maxHistoryChars = DEFAULT_HISTORY_CHAR_BUDGET,
-  options?: { jsonMode?: boolean | "tool_continuation" },
+  options?: {
+    jsonMode?: boolean | "tool_continuation" | "clarify" | "clarify_continuation" | "structured";
+    threadBlock?: string;
+  },
 ): string {
   const lines: string[] = [];
 
-  if (history.length > 0) {
-    lines.push("## 对话历史（同一助手会话，请连贯理解上文）");
-    let used = 0;
-    for (const turn of history) {
-      const label =
-        turn.role === "user"
-          ? "用户"
-          : turn.role === "tool_result"
-            ? `工具结果${turn.toolName ? ` · ${turn.toolName}` : ""}`
-            : "工头";
-      const line = `${label}：${turn.text.trim()}`;
-      if (used + line.length > maxHistoryChars) {
-        lines.push("…（更早的历史已省略）");
-        break;
-      }
-      lines.push(line);
-      used += line.length;
-    }
+  const threadBlock =
+    options?.threadBlock ?? buildCoachThreadBlock(history, maxHistoryChars);
+  if (threadBlock) {
+    lines.push(threadBlock);
     lines.push("");
   }
 
@@ -370,14 +172,59 @@ export function buildChatUserPrompt(
     lines.push(
       "用户已通过 UI 对 propose_work_order 作出选择。请仅输出 message 确认收到，禁止再次输出 refined。",
     );
+  } else if (options?.jsonMode === "clarify") {
+    lines.push("## 当前用户消息");
+    lines.push(message.trim());
+    lines.push("");
+    lines.push(
+      "用户意图不够明确。请输出 clarify（1-4 道决策题，含 id/prompt/options；选项可有 description、recommended、preview），不要输出 refined。",
+    );
+    lines.push(
+      "澄清重点：期望 vs 实际、复现步骤、影响范围、优化目标、可接受改动边界。字段 message 简要说明为何需要澄清。",
+    );
+  } else if (options?.jsonMode === "clarify_continuation") {
+    lines.push("## 待处理澄清结果");
+    lines.push(message.trim());
+    lines.push("");
+    lines.push(
+      "用户已回答 propose_clarification。请根据答案输出 refined 任务单（可含 subGoals），不要再次 clarify。",
+    );
+    lines.push(
+      "refined.executionPrompt 必须使用问题定位 brief 模板，把澄清结果写入「已知事实」，仍不确定的写入「待核实项」。",
+    );
+  } else if (options?.jsonMode === "structured") {
+    lines.push("## 当前用户消息");
+    lines.push(message.trim());
+    lines.push("");
+    lines.push(
+      "请根据信息完整度自行选择输出（三选一，勿同时输出 clarify 与 refined）：",
+    );
+    lines.push(
+      "1) 范围/验收/期望/复现/边界不明确 → 输出 clarify（propose_clarification，1-4 题，含 options/preview），不要 refined；",
+    );
+    lines.push(
+      "2) 信息充分、可派单 → 输出 refined（含 executionPrompt 问题定位 brief）；",
+    );
+    lines.push("3) 仅咨询/闲聊/进展 → 仅 message，不输出 clarify 或 refined。");
+    lines.push(
+      "澄清重点：期望 vs 实际、复现步骤、影响范围、优化目标、可接受改动边界。",
+    );
   } else {
     lines.push("## 当前用户消息");
     lines.push(message.trim());
     lines.push("");
     if (options?.jsonMode !== false) {
-      lines.push("字段 message 必填；需要派单时填 refined。");
+      lines.push(
+        "字段 message 必填；需要派单时填 refined。约束不足（bug/异常/优化但缺少期望、复现、范围）时优先 clarify 或追问，勿勉强 refined。",
+      );
+      lines.push(
+        "refined.executionPrompt 须按问题定位 brief 模板组织，含已知事实与待核实项。",
+      );
     } else {
       lines.push("请直接回复用户。");
+      lines.push(
+        "若为设计、游戏、股票等非编程探讨，按 discourseThinking 深度组织，勿输出 refined。",
+      );
     }
   }
   return lines.join("\n");

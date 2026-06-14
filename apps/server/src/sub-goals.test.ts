@@ -68,18 +68,6 @@ describe("sub-goals", () => {
     delete process.env.OPENX_DB_PATH;
   });
 
-  it("refinedSubGoalsToInput maps coach sub goals", () => {
-    const input = refinedSubGoalsToInput([
-      {
-        title: "写 API",
-        acceptance: "接口可用",
-        executionPrompt: "实现 POST /login",
-      },
-    ]);
-    expect(input[0]?.title).toBe("写 API");
-    expect(input[0]?.userDraft).toBe("实现 POST /login");
-  });
-
   it("createSubGoalsUnderParent chains dependsOn from parent", async () => {
     const parent = makeGoal({ title: "核心目标", status: "running" });
     insertGoal(parent);
@@ -107,6 +95,58 @@ describe("sub-goals", () => {
     expect(children[0]?.dependsOn).toEqual([]);
     expect(children[1]?.dependsOn).toEqual([children[0]!.id]);
     expect(children[0]?.parentGoalId).toBe(parent.id);
+  });
+
+  it("refinedSubGoalsToInput preserves dependsOnIndex and permissionMode", () => {
+    const input = refinedSubGoalsToInput([
+      {
+        title: "侦察 A",
+        acceptance: "报告",
+        executionPrompt: "只读调查 A",
+        dependsOnIndex: [],
+        permissionMode: "read_only",
+      },
+      {
+        title: "修复",
+        acceptance: "修好",
+        executionPrompt: "修复",
+        dependsOnIndex: [0],
+      },
+    ]);
+    expect(input[0]?.dependsOnIndex).toEqual([]);
+    expect(input[0]?.permissionMode).toBe("read_only");
+    expect(input[1]?.dependsOnIndex).toEqual([0]);
+  });
+
+  it("createSubGoalsUnderParent resolves dependsOnIndex batch", async () => {
+    const parent = makeGoal({ title: "Bug 父任务", status: "running" });
+    insertGoal(parent);
+
+    const children = await createSubGoalsUnderParent(
+      parent.id,
+      [
+        {
+          userDraft: "侦察",
+          title: "阶段一侦察",
+          acceptance: "报告",
+          executionPrompt: "只读侦察",
+          dependsOnIndex: [],
+          permissionMode: "read_only",
+        },
+        {
+          userDraft: "修复",
+          title: "阶段二修复",
+          acceptance: "修好",
+          executionPrompt: "修复 bug",
+          dependsOnIndex: [0],
+        },
+      ],
+      false,
+    );
+
+    expect(children[0]?.dependsOn).toEqual([]);
+    expect(children[1]?.dependsOn).toEqual([children[0]!.id]);
+    expect(children[0]?.dispatchContext?.permissionMode).toBe("read_only");
   });
 });
 

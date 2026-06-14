@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyCoachIntent,
+  isAmbiguousTaskMessage,
   isWorkOrderDismissMessage,
   mayNeedGoalRefined,
+  shouldTryLlmClarify,
   shouldUseCoachStreaming,
 } from "./coach-intent.js";
 
@@ -34,12 +36,47 @@ describe("classifyCoachIntent", () => {
     expect(classifyCoachIntent("你好")).toBe("chitchat");
     expect(shouldUseCoachStreaming("你好")).toBe(true);
   });
+
+  it("treats design/game/finance discourse as consult with streaming", () => {
+    expect(classifyCoachIntent("我们来讨论一下这个游戏的数值平衡")).toBe("consult");
+    expect(shouldUseCoachStreaming("我们来讨论一下这个游戏的数值平衡")).toBe(true);
+    expect(mayNeedGoalRefined("分析一下这只股票的基本面")).toBe(false);
+  });
 });
 
 describe("mayNeedGoalRefined", () => {
   it("detects implicit goal descriptions", () => {
     expect(mayNeedGoalRefined("订单导出 Excel 功能")).toBe(true);
     expect(mayNeedGoalRefined("今天天气不错")).toBe(false);
+  });
+});
+
+describe("shouldTryLlmClarify", () => {
+  it("includes explicit task and bug reports", () => {
+    expect(shouldTryLlmClarify("帮我实现登录接口")).toBe(true);
+    expect(shouldTryLlmClarify("登录按钮点了没反应")).toBe(true);
+    expect(shouldTryLlmClarify("帮我优化一下")).toBe(true);
+  });
+
+  it("excludes pure chitchat streaming", () => {
+    expect(shouldTryLlmClarify("你好")).toBe(false);
+    expect(shouldTryLlmClarify("最近进展怎么样？")).toBe(false);
+  });
+});
+
+describe("isAmbiguousTaskMessage", () => {
+  it("detects question-tone task messages", () => {
+    expect(isAmbiguousTaskMessage("要不要优化一下登录页？")).toBe(true);
+  });
+
+  it("detects short vague help-me commands", () => {
+    expect(isAmbiguousTaskMessage("帮我优化一下")).toBe(true);
+    expect(isAmbiguousTaskMessage("帮我改进下")).toBe(true);
+  });
+
+  it("does not treat explicit task orders as ambiguous", () => {
+    expect(isAmbiguousTaskMessage("帮我实现一个登录接口")).toBe(false);
+    expect(isAmbiguousTaskMessage("帮我实现 JWT 登录")).toBe(false);
   });
 });
 

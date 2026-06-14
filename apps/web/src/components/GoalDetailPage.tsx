@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { Goal, GoalRunState } from "@openx/shared";
+import { formatWorkOrderId } from "@openx/shared";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 
 type LogEntry = {
@@ -45,7 +46,10 @@ export function GoalDetailPage({
           ← 返回看板
         </button>
         {goal ? (
-          <span className="goal-detail-page-subtitle">{goal.title}</span>
+          <span className="goal-detail-page-subtitle">
+            {goal.orderNo > 0 ? `${formatWorkOrderId(goal.orderNo)} · ` : ""}
+            {goal.title}
+          </span>
         ) : (
           <span className="goal-detail-page-subtitle muted">目标不存在或已删除</span>
         )}

@@ -1,10 +1,11 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { streamText } from "ai";
-import { resolveModelCredentials, upgradeToModelConfig, type Settings } from "@openx/shared";
-
-const EXECUTE_SYSTEM = `你是 OpenX Connect Agent，负责执行工头派发的任务。
-用简体中文回复，给出可验收的结果摘要：完成了什么、关键输出、若有限制请说明。
-不要编造未执行的操作；若任务无法完成，说明原因与建议。`;
+import {
+  buildRoleSystemPrompt,
+  resolveModelCredentials,
+  upgradeToModelConfig,
+  type Settings,
+} from "@openx/shared";
 
 export async function executeWithLlm(
   settings: Settings,
@@ -33,9 +34,10 @@ export async function executeWithLlm(
     goal.executionPrompt,
   ].join("\n");
 
+  const baseSystem = buildRoleSystemPrompt("connectExecute", settings.llmContext);
   const system = skillsSystemAppend?.trim()
-    ? `${EXECUTE_SYSTEM}\n\n${skillsSystemAppend.trim()}`
-    : EXECUTE_SYSTEM;
+    ? `${baseSystem}\n\n${skillsSystemAppend.trim()}`
+    : baseSystem;
 
   const result = streamText({
     model: provider(creds.model),

@@ -11,8 +11,6 @@ import {
   ClientSideConnection,
   ndJsonStream,
   PROTOCOL_VERSION,
-  type RequestPermissionRequest,
-  type RequestPermissionResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
 
@@ -25,13 +23,22 @@ import {
 import {
   buildExecutionPrompt,
   createRunEmitter,
+  runCrewDialogueLoop,
   type ExecutorAdapter,
   type ExecutorContext,
   type ExecutorDetectEntry,
   type RunEventEmitter,
 } from "@openx/executor-core";
+import {
+  CREW_FOREMAN_PROMPT_APPENDIX,
+  buildAcpCrewSessionKey,
+} from "@openx/shared";
 import { handleAcpSessionUpdate } from "./session-updates.js";
 import { acpSpawnOptions } from "./spawn-win.js";
+import {
+  parseStoredAcpSessionId,
+  resolvePermissionViaForeman,
+} from "./acp-crew.js";
 import {
   buildCodexAcpSpawnArgs,
   buildCodexAcpSpawnEnv,
@@ -66,16 +73,6 @@ function resolveAcpSpawn(runtimeId: AcpRuntimeId) {
     args: [...config.args],
     label: config.label,
   };
-}
-
-function autoApprove(
-  params: RequestPermissionRequest,
-): RequestPermissionResponse["outcome"] {
-  const allow =
-    params.options.find((o) => o.kind === "allow_once") ??
-    params.options.find((o) => o.kind === "allow_always");
-  if (allow) return { outcome: "selected", optionId: allow.optionId };
-  return { outcome: "cancelled" };
 }
 
 async function terminateProcess(proc: ChildProcess): Promise<void> {
@@ -129,7 +126,8 @@ function buildSessionClient(
       });
     },
     async requestPermission(params) {
-      return { outcome: autoApprove(params) };
+      const outcome = await resolvePermissionViaForeman(params, callbacks);
+      return { outcome };
     },
   };
 }
@@ -141,13 +139,17 @@ async function runAcpTurn(
 ): Promise<{ summary: string; sessionId: string }> {
   const { goal, callbacks, workspaceRoot } = ctx;
   const spawnCfg = resolveAcpSpawn(runtimeId);
-  const promptText = buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
-    isRework: ctx.isRework,
-    priorSummaries: ctx.priorSummaries,
-    priorReviewRounds: ctx.priorReviewRounds,
-    agentRole: ctx.agentRole,
-    workspaceRoot: ctx.workspaceRoot,
-  });
+  const promptText = [
+    buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
+      isRework: ctx.isRework,
+      priorSummaries: ctx.priorSummaries,
+      priorReviewRounds: ctx.priorReviewRounds,
+      agentRole: ctx.agentRole,
+      workspaceRoot: ctx.workspaceRoot,
+      llmContext: ctx.llmContext,
+    }),
+    CREW_FOREMAN_PROMPT_APPENDIX,
+  ].join("\n\n");
   const mcpServers = ctx.mcpServers ?? [];
   const spawnCreds =
     runtimeId === "acp:codex" &&
@@ -224,24 +226,51 @@ async function runAcpTurn(
     await conn.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} });
 
     let sessionId: string;
-    if (opts?.resumeSessionId) {
-      sessionId = opts.resumeSessionId;
+    const resumeId =
+      opts?.resumeSessionId ?? parseStoredAcpSessionId(goal.crewSessionId, runtimeId);
+
+    if (resumeId) {
+      sessionId = resumeId;
       await conn.loadSession({ sessionId, cwd: workspaceRoot, mcpServers });
       await callbacks.onProgress(22, "ACP 会话已恢复");
+      await callbacks.onLog("info", `[${runtimeId}] loadSession 续跑 ${sessionId}`);
     } else {
       const opened = await conn.newSession({ cwd: workspaceRoot, mcpServers });
       sessionId = opened.sessionId;
       await callbacks.onProgress(22, "ACP 会话已创建");
+      const crewKey = buildAcpCrewSessionKey(goal.id, runtimeId);
+      await callbacks.onCrewSession?.(`${runtimeId}:${sessionId}`);
+      await callbacks.onLog("info", `[${runtimeId}] crewSession ${crewKey} → ${sessionId}`);
     }
 
-    const resp = await conn.prompt({
-      sessionId,
-      prompt: [{ type: "text", text: promptText }],
-    });
-    const summary =
-      state.assistantText.trim() ||
-      `ACP 任务完成（${runtimeId}，stopReason=${resp.stopReason ?? "unknown"}）`;
-    return { summary, sessionId };
+    const runOnePrompt = async (prompt: string) => {
+      const resp = await conn.prompt({
+        sessionId,
+        prompt: [{ type: "text", text: prompt }],
+      });
+      return resp;
+    };
+
+    const loop = await runCrewDialogueLoop(
+      { conn, sessionId, state },
+      promptText,
+      ctx,
+      async (_handle, followPrompt) => {
+        state.assistantText = "";
+        const resp = await runOnePrompt(followPrompt);
+        return {
+          summary:
+            state.assistantText.trim() ||
+            `ACP 任务完成（${runtimeId}，stopReason=${resp.stopReason ?? "unknown"}）`,
+          assistantText: state.assistantText,
+          park: true,
+          toolBudgetExceeded: false,
+          deliverables: [],
+        };
+      },
+      { initialSteer: Boolean(opts?.steer && resumeId), logTag: runtimeId },
+    );
+    return { summary: loop.summary, sessionId };
   } finally {
     await run?.finish();
     activeRuns.delete(goal.id);
@@ -266,12 +295,15 @@ async function runAcpGoal(ctx: ExecutorContext, runtimeId: AcpRuntimeId): Promis
         `[${runtimeId}] 返工续跑：loadSession + steer（保留 ACP 上下文）`,
       );
     }
+    const storedSession = parseStoredAcpSessionId(ctx.goal.crewSessionId, runtimeId);
     const turn = await runAcpTurn(
       ctx,
       runtimeId,
       resumeSteer && parked
         ? { resumeSessionId: parked.sessionId, steer: true }
-        : undefined,
+        : storedSession
+          ? { resumeSessionId: storedSession, steer: Boolean(ctx.isRework) }
+          : undefined,
     );
     await callbacks.onProgress(100, "ACP 完成");
     await callbacks.onComplete(turn.summary);
@@ -314,7 +346,7 @@ export async function detectAcpRuntime(
 
 export const acpExecutor: ExecutorAdapter = {
   id: "acp",
-  displayName: "ACP CLI 执行器",
+  displayName: "外部 CLI 施工队",
   executionModel: "push",
   matchExecutorId: (goalExecutorId) => goalExecutorId.startsWith("acp:"),
 

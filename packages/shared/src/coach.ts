@@ -1,6 +1,10 @@
 import { z } from "zod";
+import { CoachClarifyPayloadSchema } from "./coach-clarify.js";
 import { ExecutorIdSchema } from "./executor.js";
 import { GoalPrioritySchema } from "./goal.js";
+import type { OperatorTier } from "./operator-tier.js";
+import type { LlmRuntimeSnapshot } from "./llm-runtime-snapshot.js";
+import type { LlmContextSettings } from "./llm-context-config.js";
 
 /** 来自执行器/用户的反馈，供 Coach 优化提示词 */
 export const GoalFeedbackSchema = z.object({
@@ -96,6 +100,18 @@ export type CoachChatContext = {
   agentRolePrompt?: string;
   /** 确定性收集的项目上下文 */
   contextPack?: ContextPack;
+  /** 工头 API 自控权限分级 */
+  operatorTier?: OperatorTier;
+  /** 注入 LLM 的运行时快照（时刻、环境、接口、受众预测） */
+  runtimeSnapshot?: LlmRuntimeSnapshot;
+  /** settings.llmContext 配置切片，供 prompt 渲染 */
+  llmContextSettings?: Partial<LlmContextSettings>;
+  /** 当前项目名（项目对话） */
+  projectName?: string;
+  /** 预计算的工头会话前缀（含 checkpoint / 压缩） */
+  coachThreadBlock?: string;
+  /** 项目级 MEMORY.md 检索片段 */
+  projectMemory?: string;
 };
 
 /** Coach 一次派单可拆分的子任务 */
@@ -111,6 +127,9 @@ export const RefinedSubGoalSchema = z.object({
   agentId: z.string().optional(),
   mcpIds: z.array(z.string()).optional(),
   skillIds: z.array(z.string()).optional(),
+  permissionMode: z
+    .enum(["read_only", "ask_write", "full"])
+    .optional(),
 });
 export type RefinedSubGoal = z.infer<typeof RefinedSubGoalSchema>;
 
@@ -137,12 +156,15 @@ export const CoachChatInputSchema = z.object({
   skillIds: z.array(z.string()).optional(),
   /** 对话栏选中的 MCP server id 列表 */
   mcpIds: z.array(z.string()).optional(),
-  /** 对话栏选中的 Agent 角色 id */
+  /** @deprecated 工头固定 coach；仅 refined 工单可指定执行角色 agentId */
   agentId: z.string().optional(),
   /** 用户确认「整理成任务单」后的重发：必须产出 refined，不重复保存用户消息 */
   forceRefine: z.boolean().optional(),
   /** 用户取消任务单：只回复对话，禁止产出 refined */
   skipRefine: z.boolean().optional(),
+  /** Web 客户端自动附带，用于格式化当前时刻（用户无需配置） */
+  clientTimezone: z.string().optional(),
+  clientLocale: z.string().optional(),
 });
 export type CoachChatInput = z.infer<typeof CoachChatInputSchema>;
 
@@ -159,5 +181,6 @@ export const AgentChatResponseSchema = z.object({
   message: z.string(),
   intent: CoachIntentSchema.optional(),
   refined: RefinedGoalSchema.optional(),
+  clarify: CoachClarifyPayloadSchema.optional(),
 });
 export type AgentChatResponse = z.infer<typeof AgentChatResponseSchema>;

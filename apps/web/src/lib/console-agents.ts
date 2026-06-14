@@ -11,10 +11,13 @@ export type ConsoleConnection = {
   lastHeartbeatAt: string;
 };
 
+export type ConsoleAgentStatusTone = "ok" | "warn" | "off";
+
 export type ConsoleAgentRow = CliEntry & {
   lastHeartbeatAt?: string;
   connectLinked: boolean;
   statusLabel: string;
+  statusTone: ConsoleAgentStatusTone;
 };
 
 function formatHeartbeat(iso: string): string {
@@ -36,14 +39,26 @@ export function buildConsoleAgentRows(
     const conn = connByExecutor.get(cli.id);
     const connectLinked = cli.kind === "connect" && Boolean(conn);
     const statusLabel = resolveStatusLabel(cli, conn?.lastHeartbeatAt, connectLinked);
+    const available = cli.available || connectLinked;
     return {
       ...cli,
-      available: cli.available || connectLinked,
+      available,
       connectLinked,
       lastHeartbeatAt: conn?.lastHeartbeatAt,
       statusLabel,
+      statusTone: resolveStatusTone(cli, available, connectLinked),
     };
   });
+}
+
+function resolveStatusTone(
+  cli: CliEntry,
+  available: boolean,
+  connectLinked: boolean,
+): ConsoleAgentStatusTone {
+  if (available) return "ok";
+  if (cli.kind === "connect" && !connectLinked) return "off";
+  return "warn";
 }
 
 function resolveStatusLabel(

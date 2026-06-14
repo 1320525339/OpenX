@@ -21,10 +21,16 @@ import {
 } from "./orchestrator.js";
 import { autoDraftNextSubGoals } from "./sub-goals.js";
 import { maybeRollUpParentGoal } from "./parent-goal-rollup.js";
+import { checkGoalApprovalGate } from "./goal-completion-gate.js";
+import { pushIsland } from "./island-push.js";
 
 export type ActionResult =
   | { ok: true; goal: Goal; mode?: "steer" | "restart" }
-  | { ok: false; status: 400 | 404; error: string };
+  | { ok: false; status: 400 | 404; error: string; gateReasons?: import("@openx/shared").GoalGateReason[] };
+
+export type ApproveGoalOptions = {
+  source?: "user" | "auto";
+};
 
 /** 父目标合成验收打回：将已 done 的子任务重新打开并 steer 返工 */
 export async function reopenChildGoalForReview(
@@ -78,12 +84,56 @@ export async function reopenChildGoalForReview(
   return true;
 }
 
-export function approveGoal(goalId: string): ActionResult {
+export function approveGoal(
+  goalId: string,
+  opts?: ApproveGoalOptions,
+): ActionResult {
   const goal = getGoalById(goalId);
   if (!goal) return { ok: false, status: 404, error: "Not found" };
   if (!canTransition(goal.status, "done")) {
     return { ok: false, status: 400, error: "Not awaiting review" };
   }
+
+  const gate = checkGoalApprovalGate(goalId, { source: opts?.source ?? "user" });
+  if (!gate.ok) {
+    if (opts?.source !== "auto") {
+      pushIsland({
+        id: `gate-block-${goal.id}-${Date.now()}`,
+        kind: "goal.gate_blocked",
+        severity: "warning",
+        title: goal.title,
+        message: gate.error,
+        goalId: goal.id,
+        expanded: true,
+        autoDismissMs: 0,
+        meta: {
+          status: goal.status,
+          gateReasons: gate.reasons,
+        },
+        actions: [
+          {
+            id: "review",
+            label: "触发审查",
+            variant: "primary",
+            action: { type: "trigger_review", goalId: goal.id },
+          },
+          {
+            id: "dismiss",
+            label: "知道了",
+            variant: "ghost",
+            action: { type: "dismiss" },
+          },
+        ],
+      });
+    }
+    return {
+      ok: false,
+      status: 400,
+      error: gate.error,
+      gateReasons: gate.reasons,
+    };
+  }
+
   goal.status = "done";
   goal.effectStatus = "approved";
   goal.updatedAt = new Date().toISOString();
@@ -92,6 +142,26 @@ export function approveGoal(goalId: string): ActionResult {
   narrateGoalChange(goal, "done");
   tryDispatchDependents(goal.id);
   void autoDraftNextSubGoals(goal.id, "approve");
+  void maybeRollUpParentGoal(goal.id);
+  return { ok: true, goal };
+}
+
+/** 豁免子任务：父目标完成门禁视同已完成 */
+export function waiveChildGoal(goalId: string): ActionResult {
+  const goal = getGoalById(goalId);
+  if (!goal) return { ok: false, status: 404, error: "Not found" };
+  if (!goal.parentGoalId) {
+    return { ok: false, status: 400, error: "Only child goals can be waived" };
+  }
+  if (goal.status === "running") {
+    cancelRunning(goal.id);
+  }
+  goal.waived = true;
+  goal.status = "cancelled";
+  goal.updatedAt = new Date().toISOString();
+  updateGoal(goal);
+  broadcast({ type: "goal.updated", goal });
+  appendLog(goal.id, "info", "子任务已豁免，父目标完成门禁将视同已完成");
   void maybeRollUpParentGoal(goal.id);
   return { ok: true, goal };
 }

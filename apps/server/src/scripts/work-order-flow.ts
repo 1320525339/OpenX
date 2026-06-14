@@ -15,8 +15,23 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function refinedCount(messages: { kind: string }[]) {
+type CoachMessage = {
+  kind: string;
+  id?: number;
+  role?: string;
+  text?: string;
+  refined?: { title: string };
+};
+
+function refinedCount(messages: CoachMessage[]) {
   return messages.filter((m) => m.kind === "refined").length;
+}
+
+async function listMessages(conversationId: string): Promise<CoachMessage[]> {
+  const { messages } = await json<{ messages: CoachMessage[] }>(
+    `/api/coach/messages?conversationId=${conversationId}`,
+  );
+  return messages;
 }
 
 async function main() {
@@ -43,9 +58,7 @@ async function main() {
   });
   console.log("create intent:", createReply.refined?.title ?? "(no refined)", "suggest:", createReply.suggestRefine);
 
-  let { messages } = await json<{ messages: { kind: string; id?: number; refined?: { title: string } }[] }>(
-    `/api/coach/messages?conversationId=${convId}`,
-  );
+  let messages = await listMessages(convId);
   const beforeCancel = refinedCount(messages);
   console.log("refined count after task:", beforeCancel);
   if (beforeCancel < 1) {
@@ -70,13 +83,12 @@ async function main() {
   }
   console.log("cancel coach:", cancelReply.message.slice(0, 60));
 
-  ({ messages } = await json(`/api/coach/messages?conversationId=${convId}`));
+  messages = await listMessages(convId);
   const cancelUserMsgs = messages.filter(
     (m) =>
       m.kind === "text" &&
-      "role" in m &&
       m.role === "user" &&
-      /先不创建|任务单了/.test((m as { text: string }).text ?? ""),
+      /先不创建|任务单了/.test(m.text ?? ""),
   );
   if (cancelUserMsgs.length > 0) {
     throw new Error("cancel should not create fake user dismiss messages");
@@ -101,7 +113,7 @@ async function main() {
   if (followUp.refined) {
     throw new Error("chitchat follow-up should not return refined");
   }
-  ({ messages } = await json(`/api/coach/messages?conversationId=${convId}`));
+  messages = await listMessages(convId);
   console.log("final refined count:", refinedCount(messages));
   console.log("OK work-order flow");
 }

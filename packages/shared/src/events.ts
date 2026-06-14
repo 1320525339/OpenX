@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { CoachIntentSchema, RefinedGoalSchema } from "./coach.js";
+import { CoachClarifyPayloadSchema } from "./coach-clarify.js";
 import { CoachMessageRecordSchema } from "./coach-messages.js";
+import { DynamicIslandPayloadSchema } from "./island.js";
 import { GoalSchema } from "./goal.js";
 import { RunDeltaEventSchema, RunEndStatusSchema } from "./run.js";
 
@@ -13,9 +15,12 @@ export const SseEventTypeSchema = z.enum([
   "coach.delta",
   "coach.stream.end",
   "coach.message",
+  "coach.tool_call",
+  "coach.tool_result",
   "run.started",
   "run.event",
   "run.ended",
+  "island.push",
 ]);
 export type SseEventType = z.infer<typeof SseEventTypeSchema>;
 
@@ -53,6 +58,7 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     timestamp: z.string(),
     intent: CoachIntentSchema.optional(),
     refined: RefinedGoalSchema.optional(),
+    clarify: CoachClarifyPayloadSchema.optional(),
     /** Coach 建议把这条消息整理成任务单（待用户轻确认） */
     suggestRefine: z.boolean().optional(),
     meta: z
@@ -81,6 +87,20 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     message: CoachMessageRecordSchema,
   }),
   z.object({
+    type: z.literal("coach.tool_call"),
+    conversationId: z.string(),
+    toolName: z.string(),
+    args: z.record(z.unknown()).optional(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("coach.tool_result"),
+    conversationId: z.string(),
+    toolName: z.string(),
+    result: z.unknown(),
+    timestamp: z.string().optional(),
+  }),
+  z.object({
     type: z.literal("run.started"),
     goalId: z.string(),
     runId: z.string(),
@@ -100,6 +120,10 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     status: RunEndStatusSchema,
     summary: z.string().optional(),
     timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("island.push"),
+    payload: DynamicIslandPayloadSchema,
   }),
 ]);
 export type SseEvent = z.infer<typeof SseEventSchema>;

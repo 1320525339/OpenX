@@ -1,5 +1,5 @@
 import type { RefinedGoal, RefinedSubGoal } from "@openx/shared";
-import { COACH_AGENT_ROLES } from "@openx/shared";
+import { COACH_AGENT_ROLES, DEFAULT_EXECUTION_AGENT_ID } from "@openx/shared";
 
 type Props = {
   refined: RefinedGoal;
@@ -54,8 +54,10 @@ export function RefinedPreviewCard({
   };
 
   const constraintsText = refined.constraints.join("\n");
+  const executionAgentId = refined.agentId ?? DEFAULT_EXECUTION_AGENT_ID;
   const agentLabel =
-    COACH_AGENT_ROLES[refined.agentId ?? ""]?.name ?? refined.agentId ?? "（未指定）";
+    COACH_AGENT_ROLES[executionAgentId]?.name ??
+    executionAgentId;
   const mcpLabel = refined.mcpIds?.length ? refined.mcpIds.join(", ") : "（未指定）";
   const skillLabel = refined.skillIds?.length ? refined.skillIds.join(", ") : "（未指定）";
   const setConstraintsFromText = (text: string) => {
@@ -108,12 +110,20 @@ export function RefinedPreviewCard({
         <label>派单上下文</label>
         <div className="refined-dispatch-grid">
           <span>
-            <em>Persona</em> {editable ? (
+            <em>执行角色</em>{" "}
+            {editable ? (
               <input
                 className="field-input"
-                value={refined.agentId ?? ""}
-                placeholder="coach"
-                onChange={(e) => patch({ agentId: e.target.value || undefined })}
+                value={refined.agentId ?? DEFAULT_EXECUTION_AGENT_ID}
+                placeholder={DEFAULT_EXECUTION_AGENT_ID}
+                onChange={(e) =>
+                  patch({
+                    agentId:
+                      e.target.value.trim() === DEFAULT_EXECUTION_AGENT_ID
+                        ? undefined
+                        : e.target.value.trim() || undefined,
+                  })
+                }
               />
             ) : (
               agentLabel

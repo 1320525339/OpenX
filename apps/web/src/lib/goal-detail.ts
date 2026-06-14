@@ -1,5 +1,5 @@
 import type { Goal } from "@openx/shared";
-import { GOAL_STATUS_LABELS } from "@openx/shared";
+import { DISPATCH_PERMISSION_LABELS, goalDisplayHint, goalDisplayLabel } from "@openx/shared";
 
 const PRIORITY_LABELS: Record<Goal["priority"], string> = {
   low: "低",
@@ -9,8 +9,9 @@ const PRIORITY_LABELS: Record<Goal["priority"], string> = {
 };
 
 export function goalStatusText(goal: Goal): string {
-  if (goal.effectStatus === "rework" && goal.status !== "done") return "需要返工";
-  return GOAL_STATUS_LABELS[goal.status] ?? goal.status;
+  const hint = goalDisplayHint(goal);
+  const label = goalDisplayLabel(goal);
+  return hint ? `${label} · ${hint}` : label;
 }
 
 export function buildGoalContext(allGoals: Goal[], goal: Goal) {
@@ -29,10 +30,9 @@ export function truncate(text: string, max = 320): string {
   return `${t.slice(0, max)}…`;
 }
 
-const PERSONA_LABELS: Record<string, string> = {
-  coach: "工头助手",
-  coder: "编码助手",
-  reviewer: "审查员",
+const EXECUTION_ROLE_LABELS: Record<string, string> = {
+  coder: "编码执行",
+  reviewer: "审查（仅流水线）",
 };
 
 export function formatDispatchSummary(goal: Goal): string | null {
@@ -40,10 +40,15 @@ export function formatDispatchSummary(goal: Goal): string | null {
   if (!dc) return null;
   const parts: string[] = [];
   if (dc.agentId) {
-    parts.push(`Persona: ${PERSONA_LABELS[dc.agentId] ?? dc.agentId}`);
+    parts.push(`执行角色: ${EXECUTION_ROLE_LABELS[dc.agentId] ?? dc.agentId}`);
   }
   if (dc.mcpIds?.length) parts.push(`MCP: ${dc.mcpIds.join(", ")}`);
   if (dc.skillIds?.length) parts.push(`Skills: ${dc.skillIds.join(", ")}`);
+  if (dc.permissionMode) {
+    parts.push(
+      `权限: ${DISPATCH_PERMISSION_LABELS[dc.permissionMode]?.label ?? dc.permissionMode}`,
+    );
+  }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 

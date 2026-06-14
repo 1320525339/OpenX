@@ -47,6 +47,46 @@ describe("upgradeToModelConfig", () => {
     expect(upgraded.providers?.zen).toBeTruthy();
     expect(upgraded.model?.coach).toBe(DEFAULT_MODEL_REF);
   });
+
+  it("preserves configured model when providers include the slug", () => {
+    const providers = {
+      zen: {
+        name: "Zen",
+        api: { type: "openai-compatible" as const, baseUrl: "https://opencode.ai/zen/v1" },
+        auth: { apiKey: "public" },
+        models: { "big-pickle": { name: "big-pickle" } },
+      },
+      deepseek: {
+        name: "DeepSeek",
+        api: { type: "openai-compatible" as const, baseUrl: "https://api.deepseek.com/v1" },
+        auth: { apiKey: "sk-test" },
+        models: { "deepseek-v4-flash": { name: "deepseek-v4-flash" } },
+      },
+    };
+    const upgraded = upgradeToModelConfig({
+      ...SettingsSchema.parse({}),
+      model: {
+        coach: "deepseek/deepseek-v4-flash",
+        pi: "deepseek/deepseek-v4-flash",
+        default: "deepseek/deepseek-v4-flash",
+      },
+      providers,
+    });
+    expect(upgraded.model?.coach).toBe("deepseek/deepseek-v4-flash");
+  });
+
+  it("falls back to zen when model refs cannot resolve", () => {
+    const upgraded = upgradeToModelConfig({
+      ...SettingsSchema.parse({}),
+      model: {
+        coach: "deepseek/deepseek-v4-flash",
+        pi: "deepseek/deepseek-v4-flash",
+        default: "deepseek/deepseek-v4-flash",
+      },
+      providers: {},
+    });
+    expect(upgraded.model?.coach).toBe(DEFAULT_MODEL_REF);
+  });
 });
 
 describe("upsertProvider / deleteProvider", () => {

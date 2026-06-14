@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeClaudeAnthropicBaseUrl } from "./llm-endpoints.js";
 import { ModelRefSchema } from "./model-config.js";
 
 /** 支持在本机同步 API 配置的 ACP 运行时 */
@@ -39,11 +40,7 @@ export type AcpCliResolvedCredentials = {
 };
 
 /** Claude Code 的 ANTHROPIC_BASE_URL 不含 /v1（CC 自行拼接 /v1/messages） */
-export function normalizeClaudeAnthropicBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  if (trimmed.endsWith("/v1")) return trimmed.slice(0, -3);
-  return trimmed;
-}
+export { normalizeClaudeAnthropicBaseUrl } from "./llm-endpoints.js";
 
 export function isOpencodeZenProvider(sourceTemplate?: string, baseUrl?: string): boolean {
   if (sourceTemplate === "opencode-zen") return true;

@@ -132,6 +132,17 @@ select:focus {
   box-shadow: none !important;
 }
 
+input:not([type="checkbox"])::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+select option {
+  background: var(--surface-elevated);
+  color: var(--text);
+}
+
 .mech-panel {
   background: transparent;
   border: 0;

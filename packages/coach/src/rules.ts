@@ -1,4 +1,15 @@
-import type { CoachChatContext, RefinedGoal, RefineInput } from "@openx/shared";
+import type {
+  CoachChatContext,
+  CoachClarifyPayload,
+  RefinedGoal,
+  RefineInput,
+} from "@openx/shared";
+import {
+  buildBriefExecutionPrompt,
+  DEFAULT_BRIEF_TEMPLATE_SECTIONS,
+  enforceBugTwoPhaseSubGoals,
+  isBugOrAnomalyReport,
+} from "@openx/shared";
 
 export function refineGoalRules(
   input: RefineInput,
@@ -35,20 +46,40 @@ export function refineGoalRules(
     ...new Set([...defaultConstraints, ...(input.constraints ?? []), ...parsedConstraints]),
   ];
 
-  const constraintBlock =
-    constraints.length > 0
-      ? `\n\n【约束】\n${constraints.map((c) => `- ${c}`).join("\n")}`
-      : "";
+  const looksLikeIssue = isBugOrAnomalyReport(draft);
+  let executionPrompt: string;
 
-  let executionPrompt = `【任务】${title}
+  if (looksLikeIssue) {
+    executionPrompt = buildBriefExecutionPrompt(DEFAULT_BRIEF_TEMPLATE_SECTIONS, {
+      issueType: "待确认（bug / 表现异常）",
+      userExpectation: "（待澄清：用户认为应该怎样）",
+      actualPhenomenon: draft,
+      knownFacts: "- 来源：用户目标草稿",
+      toVerify: [
+        "复现步骤与必现/偶发情况",
+        "报错信息或 Network/日志证据（若有）",
+        "影响范围与正常路径对照",
+        "问题层级（UI / API / 逻辑 / 配置）",
+      ].join("\n- "),
+      investigationEntry: "（根据用户描述提取关键词、路径、接口名）",
+      scopeBoundary: "（待澄清：本次改什么、不改什么）",
+      steps: "1. 阶段一：只读侦察收集证据\n2. 阶段二：在约束内修复并验证",
+      acceptanceCriteria: acceptance,
+      constraints: constraints.map((c) => `- ${c}`).join("\n") || undefined,
+    });
+  } else {
+    executionPrompt = buildBriefExecutionPrompt(DEFAULT_BRIEF_TEMPLATE_SECTIONS, {
+      issueType: "新功能 / 任务",
+      userExpectation: draft,
+      knownFacts: "- 来源：用户目标草稿",
+      toVerify: "需工人自行确认的技术细节（若草稿未写明）",
+      steps: "按验收标准完成工作",
+      acceptanceCriteria: acceptance,
+      constraints: constraints.map((c) => `- ${c}`).join("\n") || undefined,
+    });
+  }
 
-【目标描述】
-${draft}
-
-【验收标准】
-${acceptance}${constraintBlock}
-
-请按验收标准完成工作，完成后给出简要结果摘要。`;
+  executionPrompt += "\n\n完成后给出简要结果摘要，列出关键证据（路径、命令输出、测试结果）。";
 
   const fb = input.feedback;
   if (fb?.reworkReason?.trim()) {
@@ -65,7 +96,18 @@ ${acceptance}${constraintBlock}
       tail.map((l) => `- [${l.level}] ${l.message}`).join("\n");
   }
 
-  return { title, acceptance, executionPrompt, constraints };
+  const base: RefinedGoal = {
+    title,
+    acceptance,
+    executionPrompt,
+    constraints,
+  };
+
+  if (looksLikeIssue) {
+    return enforceBugTwoPhaseSubGoals(base, draft);
+  }
+
+  return base;
 }
 
 export function coachChatReplyRules(
@@ -122,4 +164,109 @@ export function coachChatReplyRules(
   }
 
   return "我是 OpenX 工头，负责理解你的目标、拆解任务、派发给 Pi 等执行 Agent，并汇总结果。你可以问「最近进展」或描述下一步要做的事。";
+}
+
+/** 歧义任务消息的规则澄清卡（LLM 不可用时的回退） */
+export function buildAmbiguousClarifyFallback(message: string): CoachClarifyPayload {
+  const issueLike = /bug|修复|fix|缺陷|报错|异常|不对|没反应|失败|表现/i.test(
+    message,
+  );
+  const optimizeLike = /优化|改进|性能|体验/.test(message);
+
+  const questions: CoachClarifyPayload["questions"] = issueLike
+    ? [
+        {
+          id: "expected_vs_actual",
+          prompt: "期望行为 vs 实际看到什么？",
+          allowFreeform: true,
+          options: [
+            {
+              id: "describe",
+              label: "我在下方补充期望与实际现象",
+              recommended: true,
+            },
+          ],
+        },
+        {
+          id: "repro",
+          prompt: "如何复现？",
+          options: [
+            { id: "always", label: "必现（每次都能复现）", recommended: true },
+            { id: "sometimes", label: "偶发" },
+            { id: "unknown", label: "还不确定怎么复现" },
+          ],
+        },
+        {
+          id: "scope",
+          prompt: "影响范围？",
+          options: [
+            { id: "single_path", label: "单一页面/接口/操作路径" },
+            { id: "multiple", label: "多个模块或路径" },
+            { id: "unknown", label: "不确定", recommended: true },
+          ],
+        },
+      ]
+    : optimizeLike
+      ? [
+          {
+            id: "optimize_target",
+            prompt: "这次优化主要目标是什么？",
+            options: [
+              { id: "perf", label: "性能 / 响应速度" },
+              { id: "ux", label: "交互 / 体验" },
+              { id: "maintain", label: "代码结构 / 可维护性" },
+              { id: "other", label: "其他（下方补充）", recommended: true },
+            ],
+          },
+          {
+            id: "scope",
+            prompt: "优先关注哪一块？",
+            options: [
+              { id: "backend", label: "后端 / API" },
+              { id: "frontend", label: "前端 / 界面" },
+              { id: "e2e", label: "端到端打通" },
+              { id: "unsure", label: "不确定", recommended: true },
+            ],
+          },
+        ]
+      : [
+          {
+            id: "scope",
+            prompt: "这次希望做到哪一步？",
+            options: [
+              { id: "mvp", label: "最小可用版本（MVP）", recommended: true },
+              { id: "full", label: "完整功能一次性交付" },
+              { id: "spike", label: "先调研/打样，不写生产代码" },
+            ],
+          },
+          {
+            id: "focus",
+            prompt: "优先关注哪一块？",
+            options: [
+              { id: "backend", label: "后端 / API" },
+              { id: "frontend", label: "前端 / 界面" },
+              { id: "e2e", label: "端到端打通" },
+            ],
+          },
+        ];
+
+  questions.push({
+    id: "notes",
+    prompt: "还有其他约束或补充吗？",
+    allowFreeform: true,
+    options: [{ id: "none", label: "没有补充" }],
+  });
+
+  return {
+    title: issueLike
+      ? "先确认问题细节再整理任务单"
+      : optimizeLike
+        ? "先确认优化目标再整理任务单"
+        : "先确认几项再整理任务单",
+    introHtml: issueLike
+      ? "<p>问题描述还不够具体。请先补充期望与实际现象、复现方式等，我再整理成带完整约束的任务单。</p>"
+      : "<p>你的描述可能有多种理解。请先选择下面几项，我再整理成可派发的任务单。</p>",
+    status: "pending",
+    questions,
+  };
 }

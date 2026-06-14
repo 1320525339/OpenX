@@ -13,13 +13,18 @@ import type {
   CoachIntent,
   CoachMessageRecord,
   Conversation,
+  DynamicIslandPayload,
   Goal,
   GoalRunState,
   Project,
   RefinedGoal,
   SseEvent,
 } from "@openx/shared";
-import { SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
+import {
+  goalMatchesDisplayFilter,
+  SYSTEM_MAIN_CONVERSATION_ID,
+  SYSTEM_PROJECT_ID,
+} from "@openx/shared";
 import {
   api,
   connectEvents,
@@ -34,11 +39,14 @@ import {
   hydrateRunState,
   reconcileRunState,
 } from "./run-state";
+import { islandFromBroadcast, islandFromGoalChange } from "./island-payload";
 import {
-  islandAlertFromGoalChange,
-  islandAlertFromMessage,
-  type IslandAlert,
-} from "./island-alert";
+  bindIslandQueueHandlers,
+  hydrateIslandSeenFromServer,
+  isIslandCatchupMode,
+  requestIsland,
+  setIslandCatchupMode,
+} from "./island-queue";
 import type { AppView } from "../components/SideNav";
 
 export type ExecutorScope = "all" | string;
@@ -58,6 +66,7 @@ export type CoachReplyEvent = {
   timestamp: string;
   intent?: CoachIntent;
   refined?: RefinedGoal;
+  clarify?: import("@openx/shared").CoachClarifyPayload;
   suggestRefine?: boolean;
   meta?: { llmError?: string; quotaExceeded?: boolean };
 };
@@ -80,7 +89,7 @@ type AppState = {
   settings: SettingsResponse | null;
   executors: ExecutorInfo[];
   coachRuntime: ModelRuntime | null;
-  islandAlert: IslandAlert | null;
+  islandPayload: DynamicIslandPayload | null;
   sseStatus: SseStatus;
   logs: LogEntry[];
   runs: Record<string, GoalRunState>;
@@ -116,9 +125,8 @@ type Action =
   | { type: "set_settings"; settings: SettingsResponse }
   | { type: "set_executors"; executors: ExecutorInfo[] }
   | { type: "set_coach_runtime"; runtime: ModelRuntime | null }
-  | { type: "show_island"; alert: IslandAlert }
+  | { type: "show_island"; payload: DynamicIslandPayload }
   | { type: "dismiss_island" }
-  | { type: "push_broadcast"; message: string; goalId?: string; kind?: IslandAlert["kind"] }
   | { type: "set_sse_status"; status: SseStatus }
   | { type: "append_log"; log: LogEntry }
   | { type: "set_runs"; updater: (prev: Record<string, GoalRunState>) => Record<string, GoalRunState> }
@@ -153,6 +161,13 @@ type Action =
 
 const LAST_CONV_KEY = "openx.lastConversationId";
 
+function notifyIsland(
+  message: string,
+  opts?: { goalId?: string; severity?: DynamicIslandPayload["severity"] },
+) {
+  requestIsland(islandFromBroadcast(message, opts));
+}
+
 const initialState: AppState = {
   view: "console",
   projects: [],
@@ -165,7 +180,7 @@ const initialState: AppState = {
   settings: null,
   executors: [],
   coachRuntime: null,
-  islandAlert: null,
+  islandPayload: null,
   sseStatus: "reconnecting",
   logs: [],
   runs: {},
@@ -218,6 +233,7 @@ function reducer(state: AppState, action: Action): AppState {
         view: "console",
         selectedProjectId: action.projectId,
         selectedConversationId: action.conversationId,
+        statusFilter: "all",
         detailGoalId: null,
         tasksEditMode: false,
         tasksSelectedIds: new Set(),
@@ -318,16 +334,11 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, goals: action.goals, loadError: null };
     case "patch_goal": {
       const idx = state.goals.findIndex((g) => g.id === action.goal.id);
-      const prev = idx >= 0 ? state.goals[idx] : undefined;
       const goals =
         idx >= 0
           ? state.goals.map((g, i) => (i === idx ? action.goal : g))
           : [action.goal, ...state.goals];
-      const islandAlert =
-        prev != null
-          ? (islandAlertFromGoalChange(prev, action.goal) ?? state.islandAlert)
-          : state.islandAlert;
-      return { ...state, goals, islandAlert };
+      return { ...state, goals };
     }
     case "remove_goal": {
       const tasksSelectedIds = new Set(state.tasksSelectedIds);
@@ -349,17 +360,9 @@ function reducer(state: AppState, action: Action): AppState {
     case "set_coach_runtime":
       return { ...state, coachRuntime: action.runtime };
     case "show_island":
-      return { ...state, islandAlert: action.alert };
+      return { ...state, islandPayload: action.payload };
     case "dismiss_island":
-      return { ...state, islandAlert: null };
-    case "push_broadcast":
-      return {
-        ...state,
-        islandAlert: islandAlertFromMessage(action.message, {
-          goalId: action.goalId,
-          kind: action.kind ?? "info",
-        }),
-      };
+      return { ...state, islandPayload: null };
     case "set_sse_status":
       return { ...state, sseStatus: action.status };
     case "append_log":
@@ -448,6 +451,8 @@ type AppContextValue = {
   refreshExecutors: () => Promise<void>;
   createProject: (workspaceDir: string) => Promise<Project | null>;
   createConversation: (projectId: string) => Promise<Conversation | null>;
+  deleteProject: (projectId: string) => Promise<boolean>;
+  deleteConversation: (conversationId: string) => Promise<boolean>;
   saveWorkspace: (path: string) => Promise<void>;
   saveSystemWorkspace: (path: string) => Promise<void>;
   goalActions: {
@@ -459,6 +464,8 @@ type AppContextValue = {
   handleTasksBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
   filteredGoals: Goal[];
   conversationGoals: Goal[];
+  projectGoals: Goal[];
+  projectFilteredGoals: Goal[];
   selected: Goal | undefined;
   selectedProject: Project | undefined;
   selectedConversation: Conversation | undefined;
@@ -685,11 +692,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         return project;
       } catch (err) {
-        dispatch({
-          type: "push_broadcast",
-          message: `添加项目失败：${err instanceof Error ? err.message : String(err)}`,
-          kind: "error",
-        });
+        notifyIsland(
+          `添加项目失败：${err instanceof Error ? err.message : String(err)}`,
+          { severity: "error" },
+        );
         return null;
       }
     },
@@ -707,12 +713,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       return conversation;
     } catch (err) {
-      dispatch({
-        type: "push_broadcast",
-        message: `创建对话失败：${err instanceof Error ? err.message : String(err)}`,
-        kind: "error",
-      });
+      notifyIsland(
+        `创建对话失败：${err instanceof Error ? err.message : String(err)}`,
+        { severity: "error" },
+      );
       return null;
+    }
+  }, []);
+
+  const deleteProject = useCallback(async (projectId: string) => {
+    try {
+      await api.deleteProject(projectId);
+      dispatch({ type: "remove_project", projectId });
+      return true;
+    } catch (err) {
+      notifyIsland(
+        `删除项目失败：${err instanceof Error ? err.message : String(err)}`,
+        { severity: "error" },
+      );
+      return false;
+    }
+  }, []);
+
+  const deleteConversation = useCallback(async (conversationId: string) => {
+    try {
+      await api.deleteConversation(conversationId);
+      dispatch({ type: "remove_conversation", conversationId });
+      return true;
+    } catch (err) {
+      notifyIsland(
+        `删除对话失败：${err instanceof Error ? err.message : String(err)}`,
+        { severity: "error" },
+      );
+      return false;
     }
   }, []);
 
@@ -760,13 +793,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.conversations]);
 
   useEffect(() => {
+    bindIslandQueueHandlers({
+      show: (payload) => dispatch({ type: "show_island", payload }),
+      dismiss: () => dispatch({ type: "dismiss_island" }),
+    });
+    setIslandCatchupMode(true);
+    void hydrateIslandSeenFromServer();
+
     return connectEvents({
+      onCatchupComplete: () => setIslandCatchupMode(false),
       onEvent: (event: SseEvent) => {
         if (event.type === "goal.deleted") {
           dispatch({ type: "remove_goal", goalId: event.goalId });
         }
         if (event.type === "goal.updated") {
+          const prev = stateRef.current.goals.find((g) => g.id === event.goal.id);
           dispatch({ type: "patch_goal", goal: event.goal });
+          if (!isIslandCatchupMode() && prev) {
+            const island = islandFromGoalChange(prev, event.goal);
+            if (island) requestIsland(island);
+          }
           if (event.goal.status !== "running") {
             dispatch({
               type: "set_runs",
@@ -795,6 +841,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (event.type === "run.ended") {
           dispatch({ type: "set_runs", updater: (prev) => handleRunEnded(prev, event) });
+        }
+        if (event.type === "island.push") {
+          requestIsland(event.payload);
         }
         if (event.type === "log.append") {
           dispatch({ type: "append_log", log: event });
@@ -829,17 +878,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
               timestamp: event.timestamp,
               intent: event.intent,
               refined: event.refined,
+              clarify: event.clarify,
               suggestRefine: event.suggestRefine,
               meta: event.meta,
             },
           });
         }
         if (event.type === "narration.append") {
-          dispatch({
-            type: "push_broadcast",
-            message: event.message,
-            kind: "info",
-          });
+          notifyIsland(event.message, { severity: "info" });
         }
       },
       onGap: () => {
@@ -917,7 +963,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveWorkspace = useCallback(
     async (path: string) => {
       if (!state.settings) return;
-      const saved = await api.putSettings({ ...state.settings, workspaceRoot: path });
+      const saved = await api.saveSettingsFresh({ ...state.settings, workspaceRoot: path });
       dispatch({ type: "set_settings", settings: saved });
     },
     [state.settings],
@@ -926,7 +972,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveSystemWorkspace = useCallback(
     async (path: string) => {
       if (!state.settings) return;
-      const saved = await api.putSettings({
+      const saved = await api.saveSettingsFresh({
         ...state.settings,
         systemWorkspaceRoot: path,
       });
@@ -942,22 +988,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           await api.approveGoal(id);
         } catch (err) {
-          dispatch({
-            type: "push_broadcast",
-            message: `确认失败：${err instanceof Error ? err.message : String(err)}`,
-            kind: "error",
-          });
+          notifyIsland(
+            `确认失败：${err instanceof Error ? err.message : String(err)}`,
+            { severity: "error" },
+          );
         }
       },
       onRework: async (id: string, reason?: string) => {
         try {
           await api.reworkGoal(id, reason);
         } catch (err) {
-          dispatch({
-            type: "push_broadcast",
-            message: `返工失败：${err instanceof Error ? err.message : String(err)}`,
-            kind: "error",
-          });
+          notifyIsland(
+            `返工失败：${err instanceof Error ? err.message : String(err)}`,
+            { severity: "error" },
+          );
         }
       },
       onStart: async (id: string) => {
@@ -969,22 +1013,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
             await api.startGoal(id);
           }
         } catch (err) {
-          dispatch({
-            type: "push_broadcast",
-            message: `启动失败：${err instanceof Error ? err.message : String(err)}`,
-            kind: "error",
-          });
+          notifyIsland(
+            `启动失败：${err instanceof Error ? err.message : String(err)}`,
+            { severity: "error" },
+          );
         }
       },
       onCancel: async (id: string) => {
         try {
           await api.cancelGoal(id);
         } catch (err) {
-          dispatch({
-            type: "push_broadcast",
-            message: `取消失败：${err instanceof Error ? err.message : String(err)}`,
-            kind: "error",
-          });
+          notifyIsland(
+            `取消失败：${err instanceof Error ? err.message : String(err)}`,
+            { severity: "error" },
+          );
         }
       },
     }),
@@ -1004,11 +1046,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .slice(0, 3)
             .map((f) => f.error)
             .join("；");
-          dispatch({
-            type: "push_broadcast",
-            message: `批量操作：成功 ${ok.length}，失败 ${failed.length}${sample ? `（${sample}）` : ""}`,
-            kind: "warning",
-          });
+          notifyIsland(
+            `批量操作：成功 ${ok.length}，失败 ${failed.length}${sample ? `（${sample}）` : ""}`,
+            { severity: "warning" },
+          );
         } else if (ok.length > 0) {
           const labels: Record<BatchGoalsAction, string> = {
             start: "已开始推进",
@@ -1016,18 +1057,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             approve: "已确认完成",
             delete: "已删除",
           };
-          dispatch({
-            type: "push_broadcast",
-            message: `${labels[action]} ${ok.length} 个目标`,
-            kind: "success",
-          });
+          notifyIsland(`${labels[action]} ${ok.length} 个目标`, { severity: "success" });
         }
       } catch (err) {
-        dispatch({
-          type: "push_broadcast",
-          message: `批量操作失败：${err instanceof Error ? err.message : String(err)}`,
-          kind: "error",
-        });
+        notifyIsland(
+          `批量操作失败：${err instanceof Error ? err.message : String(err)}`,
+          { severity: "error" },
+        );
       }
     },
     [],
@@ -1044,14 +1080,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return scoped;
   }, [state.goals, state.selectedConversationId, state.executorScope]);
 
+  const projectGoals = useMemo(() => {
+    if (!state.selectedProjectId) return conversationGoals;
+    const convIds = new Set(
+      state.conversations
+        .filter((c) => c.projectId === state.selectedProjectId)
+        .map((c) => c.id),
+    );
+    let scoped = state.goals.filter((g) => convIds.has(g.conversationId));
+    if (state.executorScope !== "all") {
+      scoped = scoped.filter((g) => g.executorId === state.executorScope);
+    }
+    return scoped;
+  }, [
+    state.goals,
+    state.selectedProjectId,
+    state.conversations,
+    state.executorScope,
+    conversationGoals,
+  ]);
+
   const filteredGoals = useMemo(() => {
     const { statusFilter } = state;
-    if (statusFilter === "all") return conversationGoals;
-    if (statusFilter === "rework") {
-      return conversationGoals.filter((g) => g.effectStatus === "rework");
-    }
-    return conversationGoals.filter((g) => g.status === statusFilter);
+    return conversationGoals.filter((g) => goalMatchesDisplayFilter(g, statusFilter));
   }, [conversationGoals, state.statusFilter]);
+
+  const projectFilteredGoals = useMemo(() => {
+    const { statusFilter } = state;
+    return projectGoals.filter((g) => goalMatchesDisplayFilter(g, statusFilter));
+  }, [projectGoals, state.statusFilter]);
 
   const selected = state.goals.find((g) => g.id === state.selectedId);
   const selectedProject = state.projects.find((p) => p.id === state.selectedProjectId);
@@ -1091,12 +1148,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshExecutors,
     createProject,
     createConversation,
+    deleteProject,
+    deleteConversation,
     saveWorkspace,
     saveSystemWorkspace,
     goalActions,
     handleTasksBatchAction,
     filteredGoals,
     conversationGoals,
+    projectGoals,
+    projectFilteredGoals,
     selected,
     selectedProject,
     selectedConversation,

@@ -6,6 +6,7 @@ import {
   GoalTaskActions,
   type GoalTaskActionHandlers,
 } from "./GoalTaskActions";
+import { ReviewTimelineCompact } from "./ReviewTimelineCompact";
 
 type Props = {
   goal: Goal;
@@ -60,7 +61,29 @@ export function GoalTaskExpandBody({ goal, handlers }: Props) {
         <p className="goal-task-line dim">暂无结果</p>
       )}
 
-      <GoalTaskActions goal={goal} handlers={handlers} compact />
+      {goal.status === "awaiting_review" && handlers ? (
+        <ReviewTimelineCompact
+          goalId={goal.id}
+          compact
+          showFeedback
+          onApprove={handlers.onApprove ? () => handlers.onApprove!(goal.id) : undefined}
+          onRework={
+            handlers.onRework
+              ? (reason) => handlers.onRework!(goal.id, reason || undefined)
+              : undefined
+          }
+        />
+      ) : null}
+
+      <GoalTaskActions
+        goal={goal}
+        handlers={
+          goal.status === "awaiting_review" && handlers
+            ? { onOpenDetail: handlers.onOpenDetail }
+            : handlers
+        }
+        compact
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { GoalDeliverableSchema } from "./deliverable.js";
 import { ExecutorIdSchema } from "./executor.js";
 import { DispatchContextSchema } from "./dispatch-context.js";
+import { CrewStatusSchema } from "./crew.js";
 
 export { ExecutorIdSchema, type ExecutorId } from "./executor.js";
 
@@ -23,6 +24,8 @@ export type GoalPriority = z.infer<typeof GoalPrioritySchema>;
 
 export const GoalSchema = z.object({
   id: z.string(),
+  /** 全局任务单序号（展示为 WO-000001） */
+  orderNo: z.number().int().positive(),
   /** 所属对话 */
   conversationId: z.string(),
   title: z.string(),
@@ -49,6 +52,14 @@ export const GoalSchema = z.object({
   iterationCount: z.number().int().min(0).optional(),
   /** 派单快照：对话栏 Persona / MCP / Skill 选择 */
   dispatchContext: DispatchContextSchema.optional(),
+  /** 子任务豁免：不计入父目标完成门禁，依赖方视同已完成 */
+  waived: z.boolean().optional(),
+  /** 工头监工线程（默认 conversationId） */
+  foremanThreadId: z.string().optional(),
+  /** 施工队持久会话 ID（Pi: pi:{goalId}；ACP: acp sessionId） */
+  crewSessionId: z.string().optional(),
+  /** 施工队 ↔ 工头 协作子状态 */
+  crewStatus: CrewStatusSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -67,10 +78,15 @@ export const SubGoalInputSchema = z.object({
   executionPrompt: z.string().optional(),
   constraints: z.array(z.string()).optional(),
   dependsOn: z.array(z.string()).optional(),
+  /** 同批子任务索引依赖；显式 [] 表示并行 */
+  dependsOnIndex: z.array(z.number().int().min(0)).optional(),
   priority: GoalPrioritySchema.optional(),
   agentId: z.string().optional(),
   mcpIds: z.array(z.string()).optional(),
   skillIds: z.array(z.string()).optional(),
+  permissionMode: z
+    .enum(["read_only", "ask_write", "full"])
+    .optional(),
   dispatchContext: DispatchContextSchema.optional(),
 });
 export type SubGoalInput = z.infer<typeof SubGoalInputSchema>;

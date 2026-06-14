@@ -103,12 +103,17 @@ body.split-dragging .split-workspace-swap {
 }
 
 body.split-dragging {
-  cursor: col-resize;
   user-select: none;
 }
 
-body.split-dragging * {
+body.split-dragging.split-dragging-cols,
+body.split-dragging.split-dragging-cols * {
   cursor: col-resize !important;
+}
+
+body.split-dragging.split-dragging-rows,
+body.split-dragging.split-dragging-rows * {
+  cursor: row-resize !important;
 }
 
 /* ── 目标详情二级页 ── */

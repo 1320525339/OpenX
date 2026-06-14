@@ -49,6 +49,14 @@ describe("buildChatUserPrompt", () => {
     expect(prompt).toContain("继续刚才那个");
     expect(prompt.indexOf("帮我整理登录 API")).toBeLessThan(prompt.indexOf("继续刚才那个"));
   });
+  it("includes structured clarify/refine guidance", () => {
+    const prompt = buildChatUserPrompt("登录按钮没反应", [], undefined, {
+      jsonMode: "structured",
+    });
+    expect(prompt).toContain("propose_clarification");
+    expect(prompt).toContain("勿同时输出 clarify 与 refined");
+    expect(prompt).toContain("登录按钮没反应");
+  });
 });
 
 describe("buildAgentSystemPrompt", () => {
@@ -80,6 +88,8 @@ describe("buildAgentSystemPrompt", () => {
     expect(sys).toContain("API 接口");
     expect(sys).toContain("/tmp/openx");
     expect(sys).toContain("调度协议");
+    expect(sys).toContain("问题定位");
+    expect(sys).toContain("深度探讨");
     expect(sys).toContain("subGoals");
   });
 });

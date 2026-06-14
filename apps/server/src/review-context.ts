@@ -8,8 +8,9 @@ import {
   type GoalDeliverable,
 } from "@openx/shared";
 import type { ReviewVerdict } from "@openx/coach";
+import { clipPromptText } from "@openx/shared";
 import type { VerifyCommandResult } from "./review-verify.js";
-import { appendLog, REVIEW_ROUND_LOG_PREFIX } from "./db.js";
+import { appendLog, listRunEventRecords, REVIEW_ROUND_LOG_PREFIX } from "./db.js";
 import { readWorkspaceFilePreview } from "./workspace-file-preview.js";
 
 const MAX_EVIDENCE_FILES = 8;
@@ -19,7 +20,53 @@ export type ReviewPacket = {
   fileEvidence: string;
   deliverablesSummary: string;
   priorReviewRounds: string[];
+  runTrajectory: string;
 };
+
+function clipInline(text: string | undefined, max: number): string {
+  const t = text?.trim() ?? "";
+  if (!t) return "";
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
+}
+
+/** 从 run_events 提取工具轨迹，供审查员冷读（对齐 MiMo judge 读 transcript） */
+export function summarizeRunTrajectory(
+  goalId: string,
+  maxTokens = 2_500,
+): string {
+  const events = listRunEventRecords(goalId, 200);
+  const lines: string[] = [];
+
+  for (const event of events) {
+    if (event.type === "tool.start") {
+      const preview = clipInline(event.argsPreview, 120);
+      lines.push(
+        preview
+          ? `- ${event.tool}: ${preview}`
+          : `- ${event.tool}`,
+      );
+      continue;
+    }
+    if (event.type === "tool.end") {
+      const preview = clipInline(event.resultPreview, 160);
+      if (event.isError) {
+        lines.push(preview ? `  → ERROR: ${preview}` : "  → ERROR");
+      } else if (preview) {
+        lines.push(`  → ${preview}`);
+      }
+      continue;
+    }
+    if (event.type === "status") {
+      lines.push(`- status: ${clipInline(event.message, 200)}`);
+    }
+  }
+
+  if (lines.length === 0) {
+    return "（无工具轨迹记录；请依据结果摘要、文件证据与验证命令输出判断）";
+  }
+
+  return clipPromptText(lines.join("\n"), maxTokens);
+}
 
 function uniqueFilePaths(goal: Goal): string[] {
   const paths = new Set<string>();
@@ -110,6 +157,7 @@ export function recordReviewRound(
     reason: verdict.reason,
     reworkInstruction: verdict.reworkInstruction,
     reworkTargets: verdict.reworkTargets,
+    blocked: verdict.blocked,
     verifyResults: verifyResults?.map((r) => ({
       command: r.command,
       ok: r.ok,
@@ -131,5 +179,6 @@ export function buildReviewPacket(
     fileEvidence: collectReviewFileEvidence(goal, workspaceRoot),
     deliverablesSummary: summarizeDeliverables(goal),
     priorReviewRounds,
+    runTrajectory: summarizeRunTrajectory(goal.id),
   };
 }

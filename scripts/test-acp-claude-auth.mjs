@@ -9,7 +9,8 @@ const MIMO_BASE =
   process.env.MIMO_BASE_URL ?? "https://token-plan-sgp.xiaomimimo.com/anthropic";
 const MIMO_KEY = process.env.MIMO_API_KEY ?? "";
 const MIMO_MODEL = process.env.MIMO_MODEL ?? "mimo-v2.5-pro";
-const PROVIDER_SLUG = "mimo-sgp";
+const CLUSTER = process.env.MIMO_CLUSTER?.trim() || "sgp";
+const PROVIDER_SLUG = process.env.MIMO_PROVIDER_SLUG ?? `mimo-${CLUSTER}-anthropic`;
 const MODEL_REF = `${PROVIDER_SLUG}/${MIMO_MODEL}`;
 
 if (!MIMO_KEY) {
@@ -73,7 +74,10 @@ async function main() {
     probe.ok ? "OK" : `FAIL ${probe.status}`,
     probeBody.slice(0, 80),
   );
-  if (!probe.ok) throw new Error(`Anthropic 探活失败: ${probeBody.slice(0, 200)}`);
+  if (!probe.ok && probe.status !== 429) {
+    throw new Error(`Anthropic 探活失败: ${probeBody.slice(0, 200)}`);
+  }
+  if (!probe.ok) console.log("[CC/ACP] Anthropic 探活限流，跳过直连探活继续配置");
 
   const acpCfg = await api("PUT", "/api/cli/acp-config/acp:claude", {
     modelRef: MODEL_REF,
@@ -90,13 +94,26 @@ async function main() {
     throw new Error("ACP CLI 配置未同步到本机 ~/.claude/settings.json");
   }
 
-  const { projects, conversations } = await api("GET", "/api/projects");
-  let conv = conversations.find((c) => c.title?.includes("自举")) ?? conversations[0];
-  if (!conv && projects[0]) {
-    const created = await api("POST", `/api/projects/${projects[0].id}/conversations`, {
+  const workspace = process.env.OPENX_WORKSPACE ?? process.cwd();
+  let { projects, conversations } = await api("GET", "/api/projects");
+  let project = projects.find((p) => p.workspaceDir === workspace) ?? projects[0];
+  if (!project) {
+    const created = await api("POST", "/api/projects", {
+      name: "OpenX",
+      workspaceDir: workspace,
+    });
+    project = created.project;
+    console.log("[CC/ACP] 创建项目:", project.id);
+  }
+  let conv =
+    conversations.find((c) => c.projectId === project.id && c.title?.includes("ACP")) ??
+    conversations.find((c) => c.projectId === project.id);
+  if (!conv) {
+    const created = await api("POST", `/api/projects/${project.id}/conversations`, {
       title: "CC ACP 测试",
     });
     conv = created.conversation;
+    console.log("[CC/ACP] 创建对话:", conv.id);
   }
   if (!conv) throw new Error("无可用对话");
 

@@ -30,7 +30,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 1rem 1.1rem;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--surface-inset);
+  color: var(--text);
 }
 
 .tools-skill-grid {
@@ -137,7 +138,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 0.95rem 1rem;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--surface-inset);
+  color: var(--text);
 }
 
 .tools-cli-card.unavailable {
@@ -151,8 +153,9 @@
 
 .tools-cli-card.clickable:hover,
 .tools-cli-card.clickable:focus-visible {
-  border-color: rgba(0, 113, 227, 0.35);
-  box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.08);
+  border-color: var(--accent);
+  background: var(--btn-hover-bg);
+  box-shadow: none;
   outline: none;
 }
 
@@ -353,8 +356,8 @@
 }
 
 .tools-skill-row.enabled {
-  border-color: rgba(0, 113, 227, 0.24);
-  background: rgba(0, 113, 227, 0.03);
+  border-color: var(--accent);
+  background: var(--btn-tab-active-bg);
 }
 
 .tools-skill-row-head {
@@ -434,8 +437,8 @@
   align-items: center;
   gap: 0.65rem;
   padding: 0.62rem 1rem 0.75rem;
-  border-top: 1px solid rgba(15, 23, 42, 0.06);
-  background: rgba(15, 23, 42, 0.02);
+  border-top: 1px solid var(--border);
+  background: var(--hover-bg);
 }
 
 .tools-skill-cli-label {
@@ -459,9 +462,9 @@
   align-items: center;
   gap: 0.2rem;
   padding: 0.28rem 0.62rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--btn-bg);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
   cursor: pointer;
@@ -473,13 +476,14 @@
 }
 
 .tools-cli-chip:hover:not(:disabled) {
-  border-color: rgba(0, 113, 227, 0.28);
+  border-color: var(--btn-hover-border);
+  background: var(--btn-hover-bg);
   color: var(--text);
 }
 
 .tools-cli-chip.on {
-  border-color: rgba(0, 113, 227, 0.35);
-  background: rgba(0, 113, 227, 0.1);
+  border-color: var(--accent);
+  background: var(--btn-tab-active-bg);
   color: var(--accent);
 }
 
@@ -586,14 +590,15 @@
   padding: 0.85rem 0.95rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--surface-inset);
+  color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 
 .tools-template-card.active {
-  border-color: rgba(0, 113, 227, 0.4);
-  background: rgba(0, 113, 227, 0.06);
+  border-color: var(--accent);
+  background: var(--btn-tab-active-bg);
 }
 
 .tools-template-card strong {
@@ -652,7 +657,8 @@
   padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface-inset);
+  color: var(--text);
 }
 
 .tools-mcp-row .mech-switch {
@@ -667,19 +673,19 @@
 }
 
 .warn-text {
-  color: #b86e00;
+  color: var(--amber);
 }
 
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(245, 245, 247, 0.64);
+  background: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 200;
   padding: 1rem;
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(12px);
 }
 
 .modal-panel {

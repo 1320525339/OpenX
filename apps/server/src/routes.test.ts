@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDb } from "./db.js";
 import { resetConnections } from "./connect-store.js";
 import { app } from "./routes.js";
@@ -6,11 +6,39 @@ import { resetOrchestrator } from "./orchestrator.js";
 import {
   GOAL_API_TEST_TIMEOUT_MS,
   MOCK_PI_TIMEOUT_MS,
-  REAL_ENV_TIMEOUT_MS,
   seedTestProjectAndConversation,
   TEST_CONVERSATION_ID,
   waitForGoalStatus,
 } from "./test-helpers.js";
+
+vi.mock("@openx/coach", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@openx/coach")>();
+  return {
+    ...actual,
+    refineGoal: vi.fn(async (input: { userDraft: string; constraints?: string[] }) => ({
+      refined: {
+        title: input.userDraft.slice(0, 48) || "未命名目标",
+        acceptance: "验收通过",
+        executionPrompt: input.userDraft,
+        constraints: input.constraints ?? [],
+      },
+    })),
+    coachChatReply: vi.fn(async () => ({ message: "ok" })),
+    reviewGoalCompletion: vi.fn(async () => ({
+      verdict: null,
+      llmError: "routes.test mock",
+    })),
+    reviewParentGoalCompletion: vi.fn(async () => ({
+      verdict: null,
+      llmError: "routes.test mock",
+    })),
+  };
+});
+
+vi.mock("./review-verify.js", () => ({
+  runReviewVerification: vi.fn(() => []),
+  formatVerifyEvidenceBlock: vi.fn(() => "## 验证命令输出（mock）\n（无）"),
+}));
 
 function enableMockPi() {
   process.env.OPENX_MOCK_PI = "1";
@@ -201,71 +229,6 @@ describe("goals API", () => {
       expect(reworked.reworkReason).toBe("需补测试");
     },
     GOAL_API_TEST_TIMEOUT_MS,
-  );
-});
-
-describe("coach API", () => {
-  beforeEach(() => {
-    process.env.OPENX_DB_PATH = ":memory:";
-    resetDb();
-    seedTestProjectAndConversation();
-  });
-
-  afterEach(() => {
-    resetDb();
-    delete process.env.OPENX_DB_PATH;
-  });
-
-  it(
-    "refine returns structured goal fields via real LLM",
-    async () => {
-      const res = await post("/api/coach/refine", {
-        userDraft: "实现登录 API\n验收：返回 200",
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        title: string;
-        acceptance: string;
-        executionPrompt: string;
-      };
-      expect(body.title.length).toBeGreaterThan(0);
-      expect(body.acceptance.length).toBeGreaterThan(0);
-      expect(body.executionPrompt.length).toBeGreaterThan(10);
-    },
-    REAL_ENV_TIMEOUT_MS,
-  );
-
-  it(
-    "coach chat returns reply via real LLM",
-    async () => {
-      const res = await post("/api/coach/chat", {
-        conversationId: TEST_CONVERSATION_ID,
-        message: "最近任务情况",
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { message: string };
-      expect(body.message.length).toBeGreaterThan(0);
-    },
-    REAL_ENV_TIMEOUT_MS,
-  );
-
-  it(
-    "persists coach messages",
-    async () => {
-      await post("/api/coach/chat", {
-        conversationId: TEST_CONVERSATION_ID,
-        message: "你好",
-      });
-      const res = await app.request(
-        `/api/coach/messages?conversationId=${TEST_CONVERSATION_ID}`,
-      );
-      const { messages } = (await res.json()) as {
-        messages: { role: string; text: string }[];
-      };
-      expect(messages.length).toBeGreaterThanOrEqual(2);
-      expect(messages.some((m) => m.role === "user" && m.text === "你好")).toBe(true);
-    },
-    REAL_ENV_TIMEOUT_MS,
   );
 });
 

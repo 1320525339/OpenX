@@ -62,7 +62,7 @@
   content: "";
   position: absolute;
   pointer-events: none;
-  background: var(--divider);
+  background: var(--border);
   transition: background 0.12s ease;
 }
 
@@ -85,7 +85,7 @@
 .pane-divider:hover::after,
 .pane-divider:focus-visible::after,
 body.split-dragging .pane-divider::after {
-  background: var(--divider-hover);
+  background: var(--border-strong);
 }
 
 .pane-divider:focus-visible {
@@ -123,7 +123,7 @@ body.split-dragging .pane-divider::after {
   height: 1.25rem;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--bg);
   box-shadow: none;
   color: var(--text-dim);
@@ -162,12 +162,115 @@ body.split-dragging .split-workspace-swap {
 }
 
 body.split-dragging {
-  cursor: col-resize;
   user-select: none;
 }
 
-body.split-dragging * {
+body.split-dragging.split-dragging-cols,
+body.split-dragging.split-dragging-cols * {
   cursor: col-resize !important;
+}
+
+body.split-dragging.split-dragging-rows,
+body.split-dragging.split-dragging-rows * {
+  cursor: row-resize !important;
+}
+
+/* ── 上下分栏（与 split-workspace 左右分栏对称） ── */
+
+.split-pane-stack {
+  display: grid;
+  align-items: stretch;
+  gap: 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.split-pane-stack-top,
+.split-pane-stack-bottom {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.split-pane-stack-top {
+  overflow: auto;
+}
+
+.split-pane-stack-swapped .split-pane-stack-top {
+  overflow: hidden;
+}
+
+.split-pane-stack-swapped .split-pane-stack-bottom {
+  overflow: auto;
+}
+
+.split-pane-stack-divider {
+  align-self: stretch;
+  touch-action: none;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.split-pane-stack-swap {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg);
+  box-shadow: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    opacity 0.15s ease;
+}
+
+.pane-divider-horizontal .split-pane-stack-swap {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.pane-divider-horizontal:hover .split-pane-stack-swap,
+.pane-divider-horizontal:focus-within .split-pane-stack-swap {
+  opacity: 1;
+}
+
+.split-pane-stack-swap svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  transform: rotate(90deg);
+}
+
+.split-pane-stack-swap:hover {
+  color: var(--accent);
+  border-color: rgba(0, 113, 227, 0.35);
+}
+
+.split-pane-stack-swap:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+body.split-dragging .split-pane-stack-swap {
+  pointer-events: none;
+  opacity: 0.55;
 }
 
 /* ── 工作区面板：统一内边距与顶栏分隔线 ── */
@@ -219,4 +322,8 @@ body.split-dragging * {
   margin-inline: calc(-1 * var(--space-page-x));
   padding-inline: var(--space-page-x);
   border-top: 1px solid var(--border);
+}
+
+.app-minimal .cursor-workspace .workspace-pane.workspace-pane-tasks {
+  padding-inline: 0;
 }

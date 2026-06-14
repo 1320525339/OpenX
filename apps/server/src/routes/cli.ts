@@ -10,13 +10,22 @@ import { removeConnectionByExecutorId } from "../connect-store.js";
 import {
   bootstrapConnectProfile,
   bootstrapConnectProfileAndWait,
+  formatBootstrapFailureHint,
   getBootstrapCommand,
   getConnectBootstrapStatus,
   listConnectBootstrapStatuses,
   syncBootstrapOnlineStatus,
 } from "../cli-bootstrap.js";
+import {
+  collectCodexProxyUpstreamEnv,
+  exportCodexProxyProviders,
+  parseModelRef,
+  resolveCodexProxyBaseUrl,
+  resolveCodexProxyPort,
+} from "@openx/shared";
 import { readAcpCliConfig, syncAcpCliFromModelRef } from "../acp-cli-config.js";
 import { ensureSystemCliConversation } from "../system-workspace.js";
+import { getServerBaseUrl } from "../server-base-url.js";
 
 export const cliRoutes = new Hono();
 
@@ -30,6 +39,39 @@ cliRoutes.get("/acp-config/:executorId", (c) => {
   const snapshot = readAcpCliConfig(c.req.param("executorId"), settings);
   if (!snapshot) return c.json({ error: "该 CLI 不支持 API 配置" }, 404);
   return c.json({ config: snapshot });
+});
+
+cliRoutes.get("/codex-proxy/providers", (c) => {
+  const settings = loadSettings();
+  const exported = exportCodexProxyProviders(settings);
+  const port = resolveCodexProxyPort();
+  const bound = settings.acpCli?.["acp:codex"];
+  const parsed = bound ? parseModelRef(bound) : null;
+  return c.json({
+    providers: exported.providers,
+    port,
+    proxyBaseUrl: resolveCodexProxyBaseUrl(port),
+    defaultProviderId: parsed?.slug,
+    defaultModel: parsed?.modelId,
+    envKeys: Object.keys(collectCodexProxyUpstreamEnv(settings)),
+    engine: "mimo2codex",
+  });
+});
+
+cliRoutes.get("/codex-proxy/health", async (c) => {
+  const port = resolveCodexProxyPort();
+  const url = `http://127.0.0.1:${port}/`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    return c.json({ ok: res.ok, port, url, status: res.status });
+  } catch (err) {
+    return c.json({
+      ok: false,
+      port,
+      url,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 cliRoutes.put("/acp-config/:executorId", async (c) => {
@@ -70,14 +112,26 @@ cliRoutes.post("/profiles", async (c) => {
 
   let bootstrap;
   if (profile.kind === "connect" && settings.autoBootstrapConnect) {
-    const base = new URL(c.req.url).origin;
+    const base = getServerBaseUrl();
     try {
       bootstrap = await bootstrapConnectProfileAndWait(profile, base);
+      if (!bootstrap.online) {
+        bootstrap = {
+          ...bootstrap,
+          error: formatBootstrapFailureHint(bootstrap),
+        };
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       bootstrap = {
         error: message,
-        status: getConnectBootstrapStatus(profile.executorId),
+        command: getBootstrapCommand(profile, base),
+        status: getConnectBootstrapStatus(profile.executorId) ?? {
+          executorId: profile.executorId,
+          phase: "exited",
+          online: false,
+          lastError: message,
+        },
       };
     }
   }
@@ -105,7 +159,7 @@ cliRoutes.get("/profiles/:executorId/bootstrap", (c) => {
   const settings = loadSettings();
   const profile = settings.cliProfiles.find((p) => p.executorId === executorId);
   if (!profile) return c.json({ error: "Not found" }, 404);
-  const base = new URL(c.req.url).origin;
+  const base = getServerBaseUrl();
   const status = syncBootstrapOnlineStatus(executorId);
   return c.json({
     command: getBootstrapCommand(profile, base),
@@ -123,10 +177,16 @@ cliRoutes.post("/profiles/:executorId/bootstrap", async (c) => {
   const body = BootstrapConnectBodySchema.parse(rawBody);
 
   try {
-    const base = new URL(c.req.url).origin;
+    const base = getServerBaseUrl();
     const result = body.wait
       ? await bootstrapConnectProfileAndWait(profile, base)
       : bootstrapConnectProfile(profile, base);
+    if (body.wait && !result.online) {
+      return c.json({
+        ...result,
+        error: formatBootstrapFailureHint(result),
+      });
+    }
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

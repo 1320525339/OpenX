@@ -40,11 +40,16 @@ describe("review-verify", () => {
   });
 
   it("runs allowed node verify command", () => {
-    const root = process.cwd();
-    const results = runReviewVerification(root, [
-      '验收：`node -e "process.exit(0)"`',
-    ]);
-    expect(results.length).toBe(1);
-    expect(results[0]?.ok).toBe(true);
+    const root = join(tmpdir(), `openx-verify-run-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const results = runReviewVerification(root, [
+        '验收：`node -e "process.exit(0)"`',
+      ]);
+      expect(results.length).toBe(1);
+      expect(results[0]?.ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

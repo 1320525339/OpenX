@@ -9,17 +9,17 @@ export const ACP_RUNTIMES = {
   "acp:gemini": {
     command: "npx",
     args: ["-y", "@google/gemini-cli@latest", "--experimental-acp"],
-    label: "Gemini CLI (ACP)",
+    label: "Gemini 施工队",
   },
   "acp:codex": {
     command: "npx",
     args: ["-y", "@zed-industries/codex-acp@latest"],
-    label: "Codex CLI (ACP)",
+    label: "Codex 施工队",
   },
   "acp:claude": {
     command: "npx",
     args: ["-y", "@agentclientprotocol/claude-agent-acp@latest"],
-    label: "Claude Code (ACP)",
+    label: "Claude 施工队",
   },
 } as const;
 

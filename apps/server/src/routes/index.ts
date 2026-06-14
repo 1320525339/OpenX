@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import { SkillBindingsMapSchema } from "@openx/shared";
+import {
+  SkillBindingsMapSchema,
+  SettingsSchema,
+  McpServersSchema,
+  buildApiCatalogResponse,
+} from "@openx/shared";
 import {
   countSseEventsAfter,
   listSseEventsAfter,
@@ -11,7 +16,13 @@ import {
 } from "../db.js";
 import { getOpenxSkillsDir } from "@openx/shared/skills-path";
 import { browserCsrfGuard } from "../api-guard.js";
-import { loadSettings, saveSettings } from "../settings-store.js";
+import {
+  loadSettings,
+  mergeAndSaveSettings,
+  patchSettings,
+  saveSettings,
+  SettingsRevisionConflictError,
+} from "../settings-store.js";
 import { addSseClient, removeSseClient } from "../sse.js";
 import {
   listSkillCatalog,
@@ -41,7 +52,6 @@ import { withWorkspaceResolved, normalizeWorkspaceRootForStorage } from "../work
 import { buildIdeOpenUrl, classifyPath, openPathInIde, resolveOpenPath } from "../ide-open.js";
 import { readWorkspaceFilePreview } from "../workspace-file-preview.js";
 import { pickWorkspaceFolder } from "../workspace-pick.js";
-import { SettingsSchema, McpServersSchema, buildApiCatalogResponse } from "@openx/shared";
 import { detectExecutors } from "../orchestrator.js";
 import { listMcpCatalog } from "../dispatch-context.js";
 
@@ -52,8 +62,10 @@ import { cliRoutes } from "./cli.js";
 import { modelRoutes } from "./model.js";
 import { coachRoutes } from "./coach.js";
 import { connectRoutes } from "./connect.js";
+import { islandRoutes } from "./island.js";
 import { systemRoutes } from "./system.js";
 import { bootstrapRoutes } from "./bootstrap.js";
+import { operatorRoutes } from "./operator.js";
 
 export const app = new Hono();
 
@@ -69,6 +81,7 @@ app.use("/api/*", browserCsrfGuard);
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.route("/api/bootstrap", bootstrapRoutes);
+app.route("/api/operator", operatorRoutes);
 
 app.get("/api/catalog", (c) => c.json(buildApiCatalogResponse()));
 
@@ -104,6 +117,8 @@ app.get("/api/events", (c) => {
     } else {
       const recent = listRecentSseEvents(80);
       for (const stored of recent) {
+        // 首次连接不重放灵动岛，避免一进页面弹出历史通知
+        if (stored.eventType === "island.push") continue;
         await stream.writeSSE({
           id: String(stored.id),
           event: stored.eventType,
@@ -138,16 +153,53 @@ app.get("/api/events", (c) => {
 app.get("/api/settings", (c) => c.json(withWorkspaceResolved(loadSettings())));
 
 app.put("/api/settings", async (c) => {
-  const body = await c.req.json();
-  const parsed = SettingsSchema.parse(body);
-  const settings = saveSettings({
-    ...parsed,
-    workspaceRoot: normalizeWorkspaceRootForStorage(parsed.workspaceRoot),
-    systemWorkspaceRoot: parsed.systemWorkspaceRoot?.trim()
-      ? normalizeWorkspaceRootForStorage(parsed.systemWorkspaceRoot)
-      : parsed.systemWorkspaceRoot,
-  });
-  return c.json(withWorkspaceResolved(settings));
+  try {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const baseRevision =
+      typeof body.baseRevision === "number" ? body.baseRevision : undefined;
+    const { baseRevision: _br, ...rest } = body;
+    const parsed = SettingsSchema.parse(rest);
+    const settings = mergeAndSaveSettings(
+      {
+        ...parsed,
+        workspaceRoot: normalizeWorkspaceRootForStorage(parsed.workspaceRoot),
+        systemWorkspaceRoot: parsed.systemWorkspaceRoot?.trim()
+          ? normalizeWorkspaceRootForStorage(parsed.systemWorkspaceRoot)
+          : parsed.systemWorkspaceRoot,
+      },
+      { baseRevision },
+    );
+    return c.json(withWorkspaceResolved(settings));
+  } catch (err) {
+    if (err instanceof SettingsRevisionConflictError) {
+      return c.json({ error: err.message, revision: err.currentRevision }, 409);
+    }
+    throw err;
+  }
+});
+
+app.patch("/api/settings", async (c) => {
+  try {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const baseRevision =
+      typeof body.baseRevision === "number" ? body.baseRevision : undefined;
+    const { baseRevision: _br, ...rest } = body;
+    const parsed = SettingsSchema.partial().parse(rest);
+    const patch: Partial<typeof parsed> = { ...parsed };
+    if (parsed.workspaceRoot !== undefined) {
+      patch.workspaceRoot = normalizeWorkspaceRootForStorage(parsed.workspaceRoot);
+    }
+    if (parsed.systemWorkspaceRoot?.trim()) {
+      patch.systemWorkspaceRoot = normalizeWorkspaceRootForStorage(parsed.systemWorkspaceRoot);
+    }
+    const settings = patchSettings(patch, { baseRevision });
+    return c.json(withWorkspaceResolved(settings));
+  } catch (err) {
+    if (err instanceof SettingsRevisionConflictError) {
+      return c.json({ error: err.message, revision: err.currentRevision }, 409);
+    }
+    throw err;
+  }
 });
 
 app.post("/api/workspace/pick", async (c) => {
@@ -320,5 +372,6 @@ app.route("/api/cli", cliRoutes);
 app.route("/api/model", modelRoutes);
 app.route("/api/coach", coachRoutes);
 app.route("/api/connect", connectRoutes);
+app.route("/api/island", islandRoutes);
 app.route("/api/system", systemRoutes);
 app.route("/internal", internalRoutes);

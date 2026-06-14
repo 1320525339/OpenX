@@ -80,4 +80,12 @@ describe("coach-context", () => {
     expect(ctx.selectedGoal?.title).toBe("写 API");
     expect(ctx.workspaceRoot).toBeTruthy();
   });
+
+  it("always uses foreman agent regardless of legacy agentId opt", () => {
+    const ctx = buildCoachChatContext(TEST_CONVERSATION_ID, undefined, {
+      message: "你好",
+    });
+    expect(ctx.agentId).toBe("coach");
+    expect(ctx.agentName).toContain("工头");
+  });
 });

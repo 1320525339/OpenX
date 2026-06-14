@@ -101,6 +101,7 @@ GET  /api/events                → SSE 推送
 - [x] Coach 对话刷新不丢失（按 goal 可选过滤）
 - [x] Connect + Heartbeat 可发现待办任务
 - [x] `/internal/*` 本机鉴权
+- [x] **Operator 自控**：`settings.operatorTier` + `GET /api/operator/playbook` + `POST /api/operator/self-test` + Coach Tool Calling（`openx_list_apis` / `openx_call_api`）
 - [ ] 第二 Executor（OpenCode/ACP）— 下一阶段
 - [ ] 跨 Goal 经验统计 optimize — 下一阶段
 

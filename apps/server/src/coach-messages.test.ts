@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
-import { createEmptyRunState } from "@openx/shared";
+import { createEmptyRunState, CLARIFY_TOOL_NAME } from "@openx/shared";
 import {
+  hasClarifyToolResult,
   hasCoachExecutionMessage,
   listCoachMessages,
   resetDb,
+  saveCoachClarifyMessage,
   saveCoachExecutionMessage,
   saveCoachMessage,
+  saveCoachToolResultMessage,
+  updateCoachClarifyStatus,
   insertProject,
   insertConversation,
 } from "./db.js";
@@ -77,6 +81,37 @@ describe("coach messages scope", () => {
         .filter((m) => m.kind === "text")
         .map((m) => m.text),
     ).toEqual(["仅B"]);
+  });
+
+  it("persists clarify messages and tool results", () => {
+    const convA = seedConversation("conv-a");
+    const clarify = saveCoachClarifyMessage(convA, {
+      title: "确认范围",
+      questions: [{ id: "q1", prompt: "改哪里？" }],
+      status: "pending",
+    });
+    expect(clarify.kind).toBe("clarify");
+    const msgs = listCoachMessages(convA);
+    expect(msgs.some((m) => m.kind === "clarify")).toBe(true);
+    expect(hasClarifyToolResult(convA, clarify.id)).toBe(false);
+    saveCoachToolResultMessage(convA, {
+      toolName: CLARIFY_TOOL_NAME,
+      clarifyMessageId: clarify.id,
+      outcome: "answered",
+      answers: { q1: "ui" },
+    });
+    expect(hasClarifyToolResult(convA, clarify.id)).toBe(true);
+  });
+
+  it("updates clarify status", () => {
+    const convA = seedConversation("conv-a");
+    const clarify = saveCoachClarifyMessage(convA, {
+      questions: [{ id: "q1", prompt: "?" }],
+      status: "pending",
+    });
+    updateCoachClarifyStatus(clarify.id, "answered");
+    const row = listCoachMessages(convA).find((m) => m.id === clarify.id);
+    expect(row?.kind === "clarify" ? row.clarify.status : null).toBe("answered");
   });
 
   it("persists execution snapshot messages", () => {

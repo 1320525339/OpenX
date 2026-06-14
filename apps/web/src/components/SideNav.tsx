@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import type { Conversation, Goal, Project } from "@openx/shared";
-import { SYSTEM_PROJECT_ID } from "@openx/shared";
+import { SYSTEM_PROJECT_ID, isSystemConversationId } from "@openx/shared";
 import { pickWorkspaceDirectory } from "../lib/workspace";
 import { WorkspacePicker } from "./WorkspacePicker";
+import { RowDeleteButton } from "./RowDeleteButton";
 
 export type AppView = "home" | "console" | "project" | "conversation" | "settings";
 
@@ -21,6 +22,8 @@ type Props = {
   onToggleProject: (projectId: string) => void;
   onAddProject: (workspaceDir: string) => Promise<void>;
   onNewConversation: (projectId: string) => void;
+  onDeleteProject?: (projectId: string) => void;
+  onDeleteConversation?: (conversationId: string) => void;
   onSettings: () => void;
   onNewGoal: () => void;
   inboxBadgeCount?: number;
@@ -64,6 +67,8 @@ export function SideNav({
   onToggleProject,
   onAddProject,
   onNewConversation,
+  onDeleteProject,
+  onDeleteConversation,
   onSettings,
   onNewGoal,
   inboxBadgeCount = 0,
@@ -175,6 +180,16 @@ export function SideNav({
                   >
                     +
                   </button>
+                  {onDeleteProject ? (
+                    <RowDeleteButton
+                      label={`删除项目 ${project.name}`}
+                      title="删除项目及下属对话"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProject(project.id);
+                      }}
+                    />
+                  ) : null}
                 </div>
 
                 {expanded ? (
@@ -185,17 +200,31 @@ export function SideNav({
                         active === "conversation" &&
                         selectedConversationId === conv.id;
                       return (
-                        <button
+                        <div
                           key={conv.id}
-                          type="button"
-                          className={`sidebar-tree-conv${convActive ? " active" : ""}`}
-                          onClick={() => onOpenConversation(project.id, conv.id)}
+                          className={`sidebar-tree-conv-row${convActive ? " active" : ""}`}
                         >
-                          <span className="sidebar-tree-label">{conv.title}</span>
-                          {cBadge > 0 ? (
-                            <span className="sidebar-badge">{cBadge}</span>
+                          <button
+                            type="button"
+                            className={`sidebar-tree-conv${convActive ? " active" : ""}`}
+                            onClick={() => onOpenConversation(project.id, conv.id)}
+                          >
+                            <span className="sidebar-tree-label">{conv.title}</span>
+                            {cBadge > 0 ? (
+                              <span className="sidebar-badge">{cBadge}</span>
+                            ) : null}
+                          </button>
+                          {onDeleteConversation && !isSystemConversationId(conv.id) ? (
+                            <RowDeleteButton
+                              label={`删除对话 ${conv.title}`}
+                              title="删除对话及关联任务"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteConversation(conv.id);
+                              }}
+                            />
                           ) : null}
-                        </button>
+                        </div>
                       );
                     })}
                   </div>

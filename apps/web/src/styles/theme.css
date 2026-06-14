@@ -75,6 +75,29 @@ html[data-theme="light"] {
   --btn-warn-border: rgba(191, 136, 3, 0.4);
   --btn-warn-hover-bg: rgba(191, 136, 3, 0.08);
   --btn-tab-active-bg: var(--selected-bg);
+  --overlay-bg: rgba(250, 250, 250, 0.78);
+
+  --clarify-accent: #4f46e5;
+  --clarify-accent-muted: rgba(79, 70, 229, 0.75);
+  --clarify-surface: rgba(79, 70, 229, 0.04);
+  --clarify-surface-strong: rgba(79, 70, 229, 0.08);
+  --clarify-border: rgba(79, 70, 229, 0.28);
+  --clarify-border-strong: rgba(79, 70, 229, 0.45);
+  --clarify-tag-bg: rgba(79, 70, 229, 0.12);
+  --clarify-preview-border: rgba(79, 70, 229, 0.25);
+  --clarify-preview-surface: rgba(79, 70, 229, 0.03);
+
+  /* 与 legacy --surface-2 引用对齐 */
+  --surface-2: var(--surface-inset);
+
+  /* 工头↔施工队对话卡片 */
+  --crew-exchange-bg: var(--surface-inset);
+  --crew-exchange-label: var(--text-dim);
+  --crew-exchange-body: var(--text);
+  --crew-accent-crew: var(--amber);
+  --crew-accent-foreman: var(--green);
+  --crew-accent-escalation: var(--red);
+  --crew-accent-review: var(--clarify-accent);
 }
 
 html[data-theme="dark"] {
@@ -149,6 +172,27 @@ html[data-theme="dark"] {
   --btn-warn-border: rgba(210, 153, 34, 0.45);
   --btn-warn-hover-bg: rgba(210, 153, 34, 0.12);
   --btn-tab-active-bg: var(--selected-bg);
+  --overlay-bg: rgba(0, 0, 0, 0.58);
+
+  --clarify-accent: #818cf8;
+  --clarify-accent-muted: rgba(129, 140, 248, 0.85);
+  --clarify-surface: rgba(129, 140, 248, 0.08);
+  --clarify-surface-strong: rgba(129, 140, 248, 0.14);
+  --clarify-border: rgba(129, 140, 248, 0.32);
+  --clarify-border-strong: rgba(129, 140, 248, 0.5);
+  --clarify-tag-bg: rgba(129, 140, 248, 0.18);
+  --clarify-preview-border: rgba(129, 140, 248, 0.28);
+  --clarify-preview-surface: rgba(129, 140, 248, 0.06);
+
+  --surface-2: var(--surface-inset);
+
+  --crew-exchange-bg: var(--panel-inset);
+  --crew-exchange-label: var(--text-dim);
+  --crew-exchange-body: var(--text);
+  --crew-accent-crew: var(--amber);
+  --crew-accent-foreman: var(--green);
+  --crew-accent-escalation: var(--red);
+  --crew-accent-review: var(--clarify-accent);
 }
 
 .theme-preference-row {

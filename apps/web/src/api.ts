@@ -21,8 +21,10 @@ export type BootstrapConnectResult = {
   online?: boolean;
   error?: string;
 };
-import { SSE_EVENT_TYPES } from "@openx/shared";
+import { mergeSettingsForSave, SSE_EVENT_TYPES } from "@openx/shared";
 import { getApiBase } from "./lib/api-base";
+import { goalAccessHeaders } from "./lib/goal-access-context";
+import { readClientTimeContext } from "./lib/client-time-context";
 
 export type SettingsResponse = Settings & {
   workspaceResolved?: string;
@@ -53,6 +55,16 @@ export type BootstrapResponse = {
 };
 
 const BASE = getApiBase();
+
+function withGoalAccess(init?: RequestInit): RequestInit {
+  return {
+    ...init,
+    headers: {
+      ...goalAccessHeaders(),
+      ...(init?.headers ?? {}),
+    },
+  };
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -182,6 +194,15 @@ export const api = {
   deleteProject: (id: string) =>
     request<{ ok: boolean }>(`/api/projects/${encodeURIComponent(id)}`, {
       method: "DELETE",
+    }),
+
+  patchProject: (
+    id: string,
+    body: import("@openx/shared").UpdateProjectInput,
+  ) =>
+    request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
     }),
 
   createConversation: (projectId: string, title?: string) =>
@@ -336,6 +357,11 @@ export const api = {
   getGoalReviewRounds: (id: string) =>
     request<{ rounds: ReviewRoundEntry[] }>(`/api/goals/${id}/review-rounds`),
 
+  getGoalCrewMessages: (id: string) =>
+    request<{ messages: import("@openx/shared").CrewExchangeRecord[] }>(
+      `/api/goals/${id}/crew-messages`,
+    ),
+
   triggerGoalReview: (id: string, opts?: { force?: boolean }) =>
     request<{ ok: boolean; goal?: Goal; rounds: ReviewRoundEntry[] }>(
       `/api/goals/${id}/trigger-review`,
@@ -362,15 +388,15 @@ export const api = {
     }),
 
   patchGoal: (id: string, body: Record<string, unknown>) =>
-    request<{ goal: Goal }>(`/api/goals/${id}`, {
+    request<{ goal: Goal }>(`/api/goals/${id}`, withGoalAccess({
       method: "PATCH",
       body: JSON.stringify(body),
-    }),
+    })),
 
   refineGoal: (id: string) =>
-    request<{ goal: Goal; refined: RefinedGoal }>(`/api/goals/${id}/refine`, {
+    request<{ goal: Goal; refined: RefinedGoal }>(`/api/goals/${id}/refine`, withGoalAccess({
       method: "POST",
-    }),
+    })),
 
   getModelStatus: () =>
     request<{ coach: ModelRuntime; pi: ModelRuntime }>("/api/model/status"),
@@ -458,6 +484,31 @@ export const api = {
       }),
     }),
 
+  respondClarify: (
+    clarifyMessageId: number,
+    opts: {
+      conversationId: string;
+      outcome: "answered" | "dismissed";
+      answers?: Record<string, string | string[]>;
+      annotations?: Record<string, { notes?: string }>;
+    },
+  ) =>
+    request<{
+      message: string;
+      conversationId: string;
+      refined?: import("@openx/shared").RefinedGoal;
+      toolResult: import("@openx/shared").ClarifyToolResult;
+      meta?: CoachMeta;
+    }>(`/api/coach/clarify/${clarifyMessageId}/respond`, {
+      method: "POST",
+      body: JSON.stringify({
+        conversationId: opts.conversationId,
+        outcome: opts.outcome,
+        answers: opts.answers,
+        annotations: opts.annotations,
+      }),
+    }),
+
   coachChat: (
     message: string,
     opts: {
@@ -474,6 +525,7 @@ export const api = {
       message: string;
       conversationId: string;
       refined?: RefinedGoal;
+      clarify?: import("@openx/shared").CoachClarifyPayload;
       suggestRefine?: boolean;
       meta?: CoachMeta;
     }>("/api/coach/chat", {
@@ -487,6 +539,7 @@ export const api = {
         agentId: opts.agentId,
         forceRefine: opts.forceRefine,
         skipRefine: opts.skipRefine,
+        ...readClientTimeContext(),
       }),
     }),
 
@@ -515,7 +568,18 @@ export const api = {
         crossProjectRunning: number;
       };
       crossProjectReviewGoals: Goal[];
+      systemGoals: Goal[];
+      allGoals: Goal[];
     }>("/api/system/console"),
+
+  getIslandSeen: (limit = 500) =>
+    request<{ seenIds: string[] }>(`/api/island/seen?limit=${limit}`),
+
+  markIslandSeen: (ids: string[]) =>
+    request<{ ok: true; marked: number }>("/api/island/seen", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
 
   getMcp: () =>
     request<{
@@ -561,47 +625,135 @@ export const api = {
     }>(`/api/coach/messages?conversationId=${encodeURIComponent(conversationId)}`),
 
   startGoal: (id: string) =>
-    request<{ goal: Goal }>(`/api/goals/${id}/start`, { method: "POST" }),
+    request<{ goal: Goal }>(`/api/goals/${id}/start`, withGoalAccess({ method: "POST" })),
 
   retryGoal: (id: string) =>
-    request<{ goal: Goal }>(`/api/goals/${id}/retry`, { method: "POST" }),
+    request<{ goal: Goal }>(`/api/goals/${id}/retry`, withGoalAccess({ method: "POST" })),
 
   approveGoal: (id: string) =>
-    request<{ goal: Goal }>(`/api/goals/${id}/approve`, { method: "POST" }),
+    request<{ goal: Goal }>(`/api/goals/${id}/approve`, withGoalAccess({ method: "POST" })),
 
   reworkGoal: (id: string, reason?: string) =>
-    request<{ goal: Goal }>(`/api/goals/${id}/rework`, {
+    request<{ goal: Goal }>(`/api/goals/${id}/rework`, withGoalAccess({
       method: "POST",
       body: JSON.stringify({ reason }),
-    }),
+    })),
 
   cancelGoal: (id: string) =>
-    request<{ goal: Goal }>(`/api/goals/${id}/cancel`, { method: "POST" }),
+    request<{ goal: Goal }>(`/api/goals/${id}/cancel`, withGoalAccess({ method: "POST" })),
 
   deleteGoal: (id: string) =>
     request<{ deleted: string[]; failed: { id: string; error: string }[] }>(
       `/api/goals/${id}`,
-      { method: "DELETE" },
+      withGoalAccess({ method: "DELETE" }),
     ),
 
   batchGoals: (action: "start" | "cancel" | "approve" | "delete", ids: string[]) =>
     request<{ ok: string[]; failed: { id: string; error: string }[] }>(
       "/api/goals/batch",
-      {
+      withGoalAccess({
         method: "POST",
         body: JSON.stringify({ action, ids }),
-      },
+      }),
     ),
 
   getBootstrap: () => request<BootstrapResponse>("/api/bootstrap"),
 
   getSettings: () => request<SettingsResponse>("/api/settings"),
 
-  putSettings: (settings: Settings) =>
+  getOperatorPlaybook: () =>
+    request<import("@openx/shared").OperatorPlaybook & {
+      workflows?: Array<{
+        id: string;
+        title: string;
+        description?: string;
+        minTier: string;
+        stepCount: number;
+      }>;
+    }>("/api/operator/playbook"),
+
+  getOperatorWorkflows: () =>
+    request<{
+      workflows: Array<{
+        id: string;
+        title: string;
+        description?: string;
+        minTier: string;
+        stepCount: number;
+      }>;
+    }>("/api/operator/workflows"),
+
+  runOperatorWorkflow: (
+    id: string,
+    body?: { vars?: Record<string, string>; stopOnError?: boolean },
+  ) =>
+    request<{
+      workflowId: string;
+      ok: boolean;
+      steps: Array<{ id: string; ok: boolean; detail: string; status?: number }>;
+    }>(`/api/operator/workflows/${encodeURIComponent(id)}/run`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
+
+  getProjectMemory: (projectId: string) =>
+    request<{ projectId: string; memory: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/memory`,
+    ),
+
+  distillProjectMemory: (projectId: string) =>
+    request<{
+      ok: boolean;
+      projectId: string;
+      sectionsWritten: number;
+      memoryChars: number;
+      detail: string;
+    }>(`/api/projects/${encodeURIComponent(projectId)}/memory/distill`, {
+      method: "POST",
+    }),
+
+  confirmOperatorAction: (id: string, messageId?: number) =>
+    request<{ ok: boolean; action: unknown }>(`/api/operator/actions/${id}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(messageId != null ? { messageId } : {}),
+    }),
+
+  dismissOperatorAction: (id: string, messageId?: number) =>
+    request<{ ok: boolean; action: unknown }>(`/api/operator/actions/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify(messageId != null ? { messageId } : {}),
+    }),
+
+  runOperatorSelfTest: (opts?: { skipConnect?: boolean }) =>
+    request<{ ok: boolean; steps: Array<{ id: string; ok: boolean; detail: string }> }>(
+      "/api/operator/self-test",
+      {
+        method: "POST",
+        body: JSON.stringify(opts ?? {}),
+      },
+    ),
+
+  putSettings: (settings: Settings, opts?: { baseRevision?: number }) =>
     request<SettingsResponse>("/api/settings", {
       method: "PUT",
-      body: JSON.stringify(settings),
+      body: JSON.stringify({ ...settings, baseRevision: opts?.baseRevision }),
     }),
+
+  patchSettings: (patch: Partial<Settings>, opts?: { baseRevision?: number }) =>
+    request<SettingsResponse>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ ...patch, baseRevision: opts?.baseRevision }),
+    }),
+
+  /** 保存前拉取最新配置并 merge，带 revision 乐观锁 */
+  saveSettingsFresh: async (local: Settings) => {
+    const fresh = await request<SettingsResponse>("/api/settings");
+    const merged = mergeSettingsForSave(fresh, local);
+    return request<SettingsResponse>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ ...merged, baseRevision: fresh.revision }),
+    });
+  },
 
   openInIde: (path: string) =>
     request<{
@@ -642,12 +794,14 @@ export const api = {
 export type EventConnectionHandlers = {
   onEvent: (e: SseEvent) => void;
   onOpen?: () => void;
+  /** SSE 历史回放结束（收到 connected 事件） */
+  onCatchupComplete?: () => void;
   onError?: () => void;
   onGap?: (reason: string, pending?: number) => void;
 };
 
 export function connectEvents(handlers: EventConnectionHandlers | ((e: SseEvent) => void)): () => void {
-  const { onEvent, onOpen, onError, onGap } =
+  const { onEvent, onOpen, onCatchupComplete, onError, onGap } =
     typeof handlers === "function" ? { onEvent: handlers } : handlers;
 
   const es = new EventSource(`${BASE}/api/events`);
@@ -656,6 +810,7 @@ export function connectEvents(handlers: EventConnectionHandlers | ((e: SseEvent)
     try {
       const data = JSON.parse(ev.data as string) as SseEvent | { type: string };
       if (data.type === "connected") {
+        onCatchupComplete?.();
         onOpen?.();
         return;
       }

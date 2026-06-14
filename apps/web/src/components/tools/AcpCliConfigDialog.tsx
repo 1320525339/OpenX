@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AcpCliConfigSnapshot, Settings } from "@openx/shared";
-import { formatModelRef, parseModelRef } from "@openx/shared";
+import {
+  formatModelRef,
+  isAcpClaudeEligibleProvider,
+  isCodexProxyEligibleProvider,
+  parseModelRef,
+} from "@openx/shared";
 import { api } from "../../api";
 
 type Props = {
@@ -23,13 +28,18 @@ export function AcpCliConfigDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const providers = useMemo(
-    () =>
-      Object.entries(settings.providers ?? {}).filter(
-        ([, provider]) => !provider.disabled,
-      ),
-    [settings.providers],
-  );
+  const providers = useMemo(() => {
+    const entries = Object.entries(settings.providers ?? {}).filter(
+      ([, provider]) => !provider.disabled,
+    );
+    if (executorId === "acp:claude") {
+      return entries.filter(([, provider]) => isAcpClaudeEligibleProvider(provider));
+    }
+    if (executorId === "acp:codex") {
+      return entries.filter(([, provider]) => isCodexProxyEligibleProvider(provider));
+    }
+    return entries;
+  }, [executorId, settings.providers]);
 
   const modelsForProvider = useMemo(() => {
     const provider = settings.providers?.[providerSlug];
@@ -181,7 +191,18 @@ export function AcpCliConfigDialog({
 
                 {selectedProvider && (
                   <p className="settings-hint">
-                    将同步 Base URL：<code>{selectedProvider.api.baseUrl}</code>
+                    {executorId === "acp:codex" ? (
+                      <>
+                        Codex 经本地 Responses 代理（<code>{config.baseUrl}</code>）路由到渠道{" "}
+                        <code>{selectedProvider.api.baseUrl}</code>。请先运行{" "}
+                        <code>node scripts/start-codex-proxy.mjs</code>。
+                      </>
+                    ) : (
+                      <>
+                        Claude 直连上游 Anthropic 兼容端点（<code>{selectedProvider.api.baseUrl}</code>
+                        ），不经 Responses 代理。
+                      </>
+                    )}
                     {config.synced ? " · 本机已同步" : " · 保存后写入本机"}
                   </p>
                 )}

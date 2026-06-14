@@ -3,6 +3,8 @@ import {
   ACP_RUNTIMES,
   GOAL_STATUS_LABELS,
   SYSTEM_MAIN_CONVERSATION_ID,
+  buildLlmRuntimeSnapshot,
+  mergeLlmContextSettings,
   type CoachChatContext,
   type CoachGoalBrief,
   type Goal,
@@ -10,18 +12,22 @@ import {
 import {
   buildGoalFeedback,
   getGoalById,
+  getConversationById,
   getWorkspaceDirForConversation,
   listChildGoals,
   listGoals,
+  getProjectById,
 } from "./db.js";
 import { loadSettings } from "./settings-store.js";
 import { listConnections } from "./connect-store.js";
 import { resolveWorkspaceRoot } from "./workspace-path.js";
 import { buildExecutorSkillsMap } from "./executor-recommend-service.js";
 import { gatherContextPack, shouldGatherProjectContext } from "./context-pack.js";
+import { loadProjectMemoryContext } from "./memory-store.js";
 import { COACH_MCP_CATALOG } from "@openx/shared";
 import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
 import { resolveCoachAgent } from "./agents-service.js";
+import { getServerBaseUrl } from "./server-base-url.js";
 
 function buildExecutorsList(): string[] {
   const executors = new Set<string>(["pi"]);
@@ -125,7 +131,8 @@ export function buildCoachChatContext(
   opts?: {
     message?: string;
     mcpIds?: string[];
-    agentId?: string;
+    clientTimezone?: string;
+    clientLocale?: string;
   },
 ): CoachChatContext {
   const settings = loadSettings();
@@ -149,6 +156,7 @@ export function buildCoachChatContext(
     : [];
   const feedback = goalId ? buildGoalFeedback(goalId) : undefined;
 
+  const conversation = getConversationById(conversationId);
   const projectDir = getWorkspaceDirForConversation(conversationId);
   const workspaceRoot = isSystemMain
     ? resolveSystemWorkspaceRoot(settings)
@@ -157,10 +165,18 @@ export function buildCoachChatContext(
       : resolveSystemWorkspaceRoot(settings);
 
   let contextPack: CoachChatContext["contextPack"];
+  let projectMemory: string | undefined;
   if (isSystemMain) {
     contextPack = buildSystemContextPack(settings);
-  } else if (opts?.message && shouldGatherProjectContext(opts.message)) {
-    contextPack = gatherContextPack(workspaceRoot) ?? undefined;
+  } else {
+    if (opts?.message) {
+      projectMemory = conversation
+        ? loadProjectMemoryContext(workspaceRoot, conversation.projectId, opts.message)
+        : undefined;
+    }
+    if (opts?.message && shouldGatherProjectContext(opts.message)) {
+      contextPack = gatherContextPack(workspaceRoot) ?? undefined;
+    }
   }
 
   const enabledMcps = opts?.mcpIds?.length
@@ -170,9 +186,14 @@ export function buildCoachChatContext(
       }))
     : undefined;
 
-  const coachAgent = resolveCoachAgent(opts?.agentId);
+  const coachAgent = resolveCoachAgent();
+  const project = conversation ? getProjectById(conversation.projectId) : undefined;
+  const mergedLlmContext = mergeLlmContextSettings(
+    settings.llmContext,
+    project?.llmContext,
+  );
 
-  return {
+  const partial: CoachChatContext = {
     goalsSummary: summary || undefined,
     northStar: northStarGoal ? toBrief(northStarGoal) : undefined,
     subGoals: subGoals.length > 0 ? subGoals : undefined,
@@ -186,9 +207,25 @@ export function buildCoachChatContext(
         ? settings.defaultConstraints
         : undefined,
     contextPack,
+    projectMemory,
     enabledMcps,
     agentId: coachAgent.id,
     agentName: coachAgent.name,
     agentRolePrompt: coachAgent.rolePrompt,
+    operatorTier: settings.operatorTier ?? "off",
+    llmContextSettings: mergedLlmContext,
+    projectName: project?.name,
   };
+
+  partial.runtimeSnapshot = buildLlmRuntimeSnapshot({
+    context: partial,
+    message: opts?.message,
+    baseUrl: getServerBaseUrl(),
+    llmContextSettings: mergedLlmContext,
+    clientTimezone: opts?.clientTimezone,
+    clientLocale: opts?.clientLocale,
+    conversationKind: isSystemMain ? "system" : "project",
+  });
+
+  return partial;
 }

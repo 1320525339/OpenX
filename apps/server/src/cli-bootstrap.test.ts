@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  formatBootstrapFailureHint,
   getConnectBootstrapStatus,
   listConnectBootstrapStatuses,
   resetBootstrapProcesses,
@@ -31,6 +32,31 @@ describe("connect bootstrap status", () => {
     const status = getConnectBootstrapStatus("test-worker");
     expect(status?.online).toBe(true);
     expect(status?.phase).toBe("online");
+  });
+
+  it("formatBootstrapFailureHint describes exited bootstrap", () => {
+    const hint = formatBootstrapFailureHint({
+      command: "node cli.js",
+      status: {
+        executorId: "worker",
+        phase: "exited",
+        online: false,
+        exitCode: 1,
+      },
+      online: false,
+    });
+    expect(hint).toContain("退出");
+    expect(hint).toContain("1");
+  });
+
+  it("formatBootstrapFailureHint prefers explicit error", () => {
+    const hint = formatBootstrapFailureHint({
+      command: "",
+      error: "未找到 connect-client",
+      status: { executorId: "w", phase: "exited", online: false },
+      online: false,
+    });
+    expect(hint).toBe("未找到 connect-client");
   });
 
   it("syncBootstrapOnlineStatus reflects connect registration", () => {

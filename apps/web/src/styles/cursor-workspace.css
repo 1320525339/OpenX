@@ -1,7 +1,8 @@
-/* Cursor 极简工作区：助手 + 目标双栏 */
+/* Cursor 极简工作区：助手 + 目标双栏 — 线条贯通、直角网格 */
 
 .cursor-workspace {
   --split-divider-w: var(--pane-divider-hit, 7px);
+  --workspace-grid-pad: var(--space-page-x, 0.75rem);
 }
 
 /* 分隔线样式见 layout-shell.css */
@@ -15,6 +16,40 @@
 .cursor-workspace .split-workspace-divider::before,
 .cursor-workspace .pane-divider::before {
   display: none;
+}
+
+.cursor-workspace .pane-divider::after {
+  background: var(--border);
+}
+
+.cursor-workspace .pane-divider:hover::after,
+.cursor-workspace .pane-divider:focus-visible::after,
+body.split-dragging .cursor-workspace .pane-divider::after {
+  background: var(--border-strong);
+}
+
+/* 任务列贴边网格：工具栏横线贯通，内容区内缩 */
+.app-minimal .cursor-workspace .workspace-pane.workspace-pane-tasks,
+.cursor-workspace .workspace-pane.workspace-pane-tasks {
+  padding-inline: 0;
+}
+
+.cursor-workspace .workspace-pane-tasks .tasks-toolbar {
+  margin-inline: 0;
+  padding-inline: var(--workspace-grid-pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.cursor-workspace .workspace-pane-tasks .goal-card {
+  padding-inline: var(--workspace-grid-pad);
+}
+
+.cursor-workspace .workspace-pane-tasks .empty-hint {
+  padding-inline: var(--workspace-grid-pad);
+}
+
+.cursor-workspace .workspace-pane-assistant {
+  padding-inline: var(--workspace-grid-pad);
 }
 
 /* ── 面板通用 ── */
@@ -45,6 +80,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   flex-wrap: nowrap;
   scrollbar-width: none;
 }
@@ -93,7 +129,7 @@
   font-size: 0.72rem;
   font-weight: 500;
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   box-shadow: none;
 }
 
@@ -185,6 +221,7 @@
 .cursor-workspace .goal-actions .btn {
   padding: 0.32rem 0.65rem;
   font-size: 0.72rem;
+  border-radius: 0;
 }
 
 .cursor-workspace .goal-actions .btn.primary {
@@ -258,7 +295,7 @@
   background: var(--bubble-user-bg);
   color: var(--bubble-user-fg);
   max-width: min(100%, 28rem);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.45rem 0.6rem;
 }
 
@@ -266,7 +303,7 @@
   background: rgba(255, 149, 0, 0.08);
   color: var(--text);
   padding: 0.45rem 0.6rem;
-  border-radius: 6px;
+  border-radius: 0;
 }
 
 .cursor-workspace .chat-dock {
@@ -305,16 +342,21 @@
 }
 
 .cursor-workspace .chat-context-banner {
-  border-radius: var(--radius-md);
+  border-radius: 0;
   border: 1px solid var(--border);
   background: var(--surface-elevated);
-  box-shadow: var(--shadow-dropdown);
+  box-shadow: none;
 }
 
 .cursor-workspace .refined-preview {
-  border-radius: 8px;
+  border-radius: 0;
   border: 1px solid var(--border);
   background: rgba(0, 0, 0, 0.02);
+}
+
+.cursor-workspace .split-workspace-swap,
+.cursor-workspace .split-pane-stack-swap {
+  border-radius: 0;
 }
 
 /* ── 任务详情侧栏（我的任务页） ── */
@@ -330,27 +372,45 @@
   font-weight: 600;
 }
 
-/* ── 调度台 ── */
+/* ── 调度台：单栏直角网格，线与左右分栏对齐 ── */
 
-.console-workspace .console-left {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  overflow: auto;
+.app-minimal .console-workspace .split-pane-stack.console-left.workspace-pane,
+.console-workspace .split-pane-stack.console-left.workspace-pane {
+  margin-inline: calc(-1 * var(--workspace-grid-pad));
+  padding-inline: 0;
+}
+
+.console-workspace .split-pane-stack.console-left .split-pane-stack-top,
+.console-workspace .split-pane-stack.console-left .split-pane-stack-bottom {
+  padding: 0;
+  gap: 0;
+}
+
+.console-workspace .split-pane-stack-divider.pane-divider-horizontal::after {
+  background: var(--border);
 }
 
 .console-section {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  padding: 0.65rem 0.75rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.console-section-executors {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .console-section-pool {
-  flex: 1;
-  min-height: 240px;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
 .console-section-head {
@@ -358,18 +418,26 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  margin: 0;
+  padding: 0.32rem var(--workspace-grid-pad);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.console-section-review {
+  border-top: 1px solid var(--border);
 }
 
 .console-section-title {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
 .console-section-meta {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .console-muted {
@@ -385,42 +453,97 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0;
+}
+
+.console-cli-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .console-cli-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.45rem 0.55rem;
-  background: rgba(0, 0, 0, 0.02);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 0.35rem;
+  row-gap: 0.05rem;
+  align-items: center;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0.26rem var(--workspace-grid-pad);
+  background: transparent;
+}
+
+.console-cli-card:last-child {
+  border-bottom: none;
+}
+
+.console-cli-card:hover {
+  background: var(--hover-bg);
+}
+
+.console-cli-status-dot {
+  grid-row: 1 / span 2;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.console-cli-status-dot[data-tone="ok"] {
+  background: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
+}
+
+.console-cli-status-dot[data-tone="warn"] {
+  background: #d97706;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.18);
+}
+
+.console-cli-status-dot[data-tone="off"] {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.16);
 }
 
 .console-cli-name {
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.console-cli-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: 0.15rem;
-  font-size: 0.75rem;
+.console-cli-id {
+  grid-column: 2;
+  font-size: 0.625rem;
   color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .console-review-item {
   width: 100%;
   text-align: left;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.45rem 0.55rem;
-  background: #fff;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0.38rem var(--workspace-grid-pad);
+  background: transparent;
   cursor: pointer;
 }
 
+.console-review-list li:last-child .console-review-item {
+  border-bottom: none;
+}
+
 .console-review-item:hover {
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--hover-bg);
 }
 
 .console-review-title {
@@ -436,25 +559,14 @@
   color: var(--orange, #c2410c);
 }
 
-.console-cli-card-online {
-  border-color: rgba(22, 163, 74, 0.35);
-  background: rgba(22, 163, 74, 0.04);
-}
-
-.console-cli-name-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
 .console-cli-kind {
-  font-size: 0.6875rem;
-  padding: 0.1rem 0.35rem;
-  border-radius: 4px;
+  font-size: 0.5625rem;
+  padding: 0.05rem 0.28rem;
+  border-radius: 0;
   border: 1px solid var(--border);
   color: var(--muted);
   white-space: nowrap;
+  line-height: 1.3;
 }
 
 .console-cli-kind.connect {
@@ -467,17 +579,39 @@
   color: #7c3aed;
 }
 
-.console-cli-status-ok {
-  color: #15803d;
+.console-workspace .split-pane-stack-top,
+.console-workspace .split-pane-stack-bottom {
+  min-height: 0;
 }
 
-.console-hint {
-  margin-top: 0.5rem;
-  font-size: 0.75rem;
-  line-height: 1.45;
+.console-workspace .split-pane-stack-top:has(.console-section-pool),
+.console-workspace .split-pane-stack-bottom:has(.console-section-pool) {
+  overflow: hidden;
 }
 
 .console-section-pool .tasks-panel {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
+}
+
+.console-section-pool .mech-panel-body.panel-stack {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.console-section-pool .panel-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.console-workspace .console-section-pool .tasks-toolbar {
+  margin-inline: 0;
+  padding-inline: var(--workspace-grid-pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.console-workspace .console-muted {
+  padding: 0.45rem var(--workspace-grid-pad);
+  font-size: 0.75rem;
 }

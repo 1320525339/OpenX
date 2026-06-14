@@ -1,4 +1,4 @@
-import type { Goal, GoalDeliverable, LogLevel, ModelSettingsSlice, PiExecutorSettings, RunDeltaEvent, ExecutionSkillHint } from "@openx/shared";
+import type { Goal, GoalDeliverable, LogLevel, LlmContextSettings, ModelSettingsSlice, PiExecutorSettings, RunDeltaEvent, ExecutionSkillHint, CrewDirective, CrewQuestion } from "@openx/shared";
 
 
 
@@ -13,6 +13,12 @@ export interface ExecutorCallbacks {
   onComplete: (resultSummary: string, deliverables?: GoalDeliverable[]) => Promise<void>;
 
   onFail: (errorMessage: string) => Promise<void>;
+
+  /** 施工队向工头提问；返回工头指令后在同一会话续跑 */
+  onCrewQuestion?: (question: CrewQuestion) => Promise<CrewDirective>;
+
+  /** 绑定施工队会话 ID（持久化到 Goal.crewSessionId） */
+  onCrewSession?: (crewSessionId: string) => Promise<void>;
 
 }
 
@@ -61,6 +67,9 @@ export interface ExecutorContext {
   /** Agent 角色设定（前置到执行 prompt） */
   agentRole?: string;
 
+  /** 合并后的 LLM 上下文（全局 + 项目，用于执行 prompt 与路由） */
+  llmContext?: Partial<LlmContextSettings>;
+
   /** ACP 子进程额外环境变量（来自 OpenX 渠道映射） */
   spawnEnv?: Record<string, string>;
 }
@@ -68,7 +77,16 @@ export interface ExecutorContext {
 
 
 export { buildExecutionPrompt } from "./prompt.js";
-export { RunEventEmitter, createRunEmitter } from "./run-events.js";
+export {
+  RunEventEmitter,
+  createRunEmitter,
+} from "./run-events.js";
+export {
+  runCrewDialogueLoop,
+  MAX_CREW_DIALOGUE_ROUNDS,
+  type CrewTurnResult,
+  type CrewTurnRunner,
+} from "./crew-loop.js";
 export {
   extractDeliverableFromTool,
   extractPathFromToolArgs,

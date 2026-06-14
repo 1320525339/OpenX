@@ -26,7 +26,7 @@ describe("refineGoal parse fallback", () => {
       ["全局约束"],
     );
     expect(result.refined.title).toContain("接入登录");
-    expect(result.refined.executionPrompt).toContain("【任务】");
+    expect(result.refined.executionPrompt).toContain("【用户期望】");
     expect(result.llmError).toContain("规则引擎兜底");
     expect(result.refined).toEqual(
       refineGoalRules(

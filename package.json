@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @openx/executor-core --filter @openx/executor-acp --filter @openx/executor-connect --filter @openx/executor-pi --filter @openx/mcp-openx run build && pnpm --parallel --filter @openx/server --filter @openx/web dev",
+    "dev": "pnpm --filter @openx/executor-core --filter @openx/executor-acp --filter @openx/executor-connect --filter @openx/executor-pi --filter @openx/mcp-openx --filter @openx/connect-client run build && pnpm --parallel --filter @openx/server --filter @openx/web dev",
     "dev:server": "pnpm --filter @openx/server dev",
     "dev:web": "pnpm --filter @openx/web dev",
     "build": "pnpm -r run build",
@@ -12,7 +12,8 @@
     "connect:demo": "pnpm --filter @openx/connect-client build && node packages/connect-client/dist/cli.js",
     "e2e:connect": "node scripts/e2e-connect-auto.mjs",
     "e2e:acp": "node scripts/e2e-acp-run.mjs --mock",
-    "e2e:acp-dispatch": "node scripts/e2e-acp-dispatch.mjs"
+    "e2e:acp-dispatch": "node scripts/e2e-acp-dispatch.mjs",
+    "e2e:self": "node scripts/e2e-self-bootstrap.mjs"
   },
   "engines": {
     "node": ">=20"

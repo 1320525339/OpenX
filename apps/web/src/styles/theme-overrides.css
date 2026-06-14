@@ -25,6 +25,23 @@
   color: var(--bubble-user-fg);
 }
 
+.cursor-workspace .chat-crew-exchange-card {
+  background: var(--crew-exchange-bg);
+  color: var(--crew-exchange-body);
+}
+
+.cursor-workspace .chat-crew-exchange-label {
+  color: var(--crew-exchange-label);
+}
+
+.cursor-workspace .chat-crew-exchange-body {
+  color: var(--crew-exchange-body);
+}
+
+.cursor-workspace .chat-turn-time {
+  color: var(--text-muted);
+}
+
 .cursor-workspace .goal-card:hover {
   background: var(--hover-bg);
 }
@@ -74,7 +91,7 @@
   background: var(--surface-elevated);
   color: var(--text);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-toast);
+  box-shadow: var(--shadow-toast, 0 6px 24px rgba(0, 0, 0, 0.08));
 }
 
 .chat-markdown .chat-md-pre,

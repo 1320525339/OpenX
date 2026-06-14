@@ -10,7 +10,7 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
-import { generateObject, streamText } from "ai";
+import { generateObject, generateText, streamText } from "ai";
 
 import { z } from "zod";
 
@@ -23,6 +23,8 @@ import {
   resolveModelCredentials,
 
   upgradeToModelConfig,
+
+  resolveReviewerModelRef,
 
   type AgentChatResponse,
 
@@ -40,19 +42,21 @@ import {
 
   type ResolvedModelCredentials,
 
+  CoachClarifyPayloadSchema,
+
+  type CoachClarifyPayload,
+
 } from "@openx/shared";
 
 import {
-
-  COACH_REFINE_SYSTEM,
-
   buildAgentSystemPrompt,
   buildChatStreamSystemPrompt,
   buildChatUserPrompt,
-
   buildRefineUserPrompt,
-
 } from "./prompts.js";
+import { buildRefineSystemPrompt } from "./render-llm-prompt.js";
+import type { LlmContextSettings } from "@openx/shared";
+import { isDiscourseTopicMessage } from "@openx/shared";
 
 import { formatCoachLlmError, isCoachParseError, isCoachTimeoutError } from "./llm-errors.js";
 
@@ -79,7 +83,8 @@ function coachLlmAbortSignal(): { signal: AbortSignal; cancel: () => void } {
   };
 }
 
-async function generateCoachObject<T>(options: {
+/** 工头/审查员共用的结构化 JSON 调用（含解析失败重试） */
+export async function generateStructuredObject<T>(options: {
   model: ReturnType<ReturnType<typeof createOpenAICompatible>>;
   schema: z.ZodTypeAny;
   system: string;
@@ -119,6 +124,28 @@ async function generateCoachObject<T>(options: {
   }
 }
 
+/** 工头↔施工队自然语言对话（纯文本，无 JSON schema） */
+export async function generateCoachText(options: {
+  model: ReturnType<ReturnType<typeof createOpenAICompatible>>;
+  system: string;
+  prompt: string;
+  temperature?: number;
+}): Promise<string> {
+  const { signal, cancel } = coachLlmAbortSignal();
+  try {
+    const { text } = await generateText({
+      model: options.model,
+      system: options.system,
+      prompt: options.prompt.trim(),
+      temperature: options.temperature ?? 0.4,
+      abortSignal: signal,
+    });
+    return text.trim();
+  } finally {
+    cancel();
+  }
+}
+
 
 
 export type LlmEnv = {
@@ -133,7 +160,7 @@ export type LlmEnv = {
 
 
 
-export type LlmRole = "coach" | "pi";
+export type LlmRole = "coach" | "pi" | "reviewer";
 
 
 
@@ -155,6 +182,10 @@ export function resolveLlmCredentials(
 
       ? upgraded.model?.coach ?? upgraded.model?.default
 
+      : role === "reviewer"
+
+        ? resolveReviewerModelRef(upgraded.model)
+
       : upgraded.model?.pi ?? upgraded.model?.default;
 
   if (!ref) return null;
@@ -165,7 +196,9 @@ export function resolveLlmCredentials(
 
 
 
-function createModel(creds: { apiKey: string; baseUrl: string; model: string }) {
+export function createModel(creds: { apiKey: string; baseUrl: string; model: string }): ReturnType<
+  ReturnType<typeof createOpenAICompatible>
+> {
 
   const provider = createOpenAICompatible({
 
@@ -211,9 +244,44 @@ const RefinedSubGoalLooseSchema = z.object({
 
 /** 兼容模型把 constraints 写成 string 的情况 */
 
+const CoachClarifyLooseSchema = z.object({
+  title: z.string().optional(),
+  introHtml: z.string().optional(),
+  questions: z
+    .array(
+      z.object({
+        id: z.string(),
+        prompt: z.string(),
+        multiSelect: z.boolean().optional(),
+        allowFreeform: z.boolean().optional(),
+        dependsOnIndex: z.number().int().min(0).optional(),
+        dependsOnOptionIds: z.array(z.string()).optional(),
+        options: z
+          .array(
+            z.object({
+              id: z.string(),
+              label: z.string(),
+              description: z.string().optional(),
+              recommended: z.boolean().optional(),
+              preview: z
+                .object({
+                  format: z.enum(["html", "markdown", "mermaid", "text"]),
+                  content: z.string(),
+                })
+                .optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+});
+
 const AgentChatResponseLooseSchema = z.object({
   message: z.string(),
   intent: z.enum(["task", "progress", "consult", "chitchat", "rework"]).optional(),
+  clarify: CoachClarifyLooseSchema.optional(),
   refined: z
 
     .object({
@@ -285,8 +353,20 @@ function parseSubGoals(raw?: z.infer<typeof RefinedSubGoalLooseSchema>[]): Refin
 
 
 
+function parseClarify(raw?: z.infer<typeof CoachClarifyLooseSchema>): CoachClarifyPayload | undefined {
+  if (!raw?.questions?.length) return undefined;
+  return CoachClarifyPayloadSchema.parse({
+    ...raw,
+    status: "pending",
+  });
+}
+
 function parseAgentReply(raw: z.infer<typeof AgentChatResponseLooseSchema>): AgentChatResponse {
-  if (!raw.refined) return { message: raw.message, intent: raw.intent };
+  const clarify = parseClarify(raw.clarify);
+  if (clarify) {
+    return { message: raw.message, intent: raw.intent ?? "consult", clarify };
+  }
+  if (!raw.refined) return { message: raw.message, intent: raw.intent, clarify };
 
   const constraints = normalizeConstraints(raw.refined.constraints);
   const subGoals = parseSubGoals(raw.refined.subGoals);
@@ -335,6 +415,8 @@ export async function refineGoalLlm(
 
   env?: LlmEnv,
 
+  llmContextSettings?: Partial<LlmContextSettings> | null,
+
 ): Promise<RefinedGoal> {
 
   const creds = resolveLlmCredentials(settings, "coach", env);
@@ -349,13 +431,13 @@ export async function refineGoalLlm(
 
   try {
 
-    return await generateCoachObject<RefinedGoal>({
+    return await generateStructuredObject<RefinedGoal>({
 
       model: createModel(creds),
 
       schema: RefinedGoalSchema,
 
-      system: COACH_REFINE_SYSTEM,
+      system: buildRefineSystemPrompt(llmContextSettings),
 
       prompt: buildRefineUserPrompt(
 
@@ -401,14 +483,15 @@ export async function coachChatStreamLlm(
   try {
     const result = streamText({
       model: createModel(creds),
-      system: buildChatStreamSystemPrompt(context),
+      system: buildChatStreamSystemPrompt(context, context.llmContextSettings),
       prompt: buildChatUserPrompt(message, chatHistory, undefined, {
+        threadBlock: context.coachThreadBlock,
         jsonMode:
           options?.promptMode === "tool_continuation"
             ? "tool_continuation"
             : false,
       }),
-      temperature: 0.3,
+      temperature: isDiscourseTopicMessage(message) ? 0.45 : 0.3,
       abortSignal: signal,
     });
     let full = "";
@@ -425,7 +508,7 @@ export async function coachChatStreamLlm(
 }
 
 export type CoachAgentReplyLlmOptions = {
-  promptMode?: "tool_continuation";
+  promptMode?: "tool_continuation" | "clarify" | "clarify_continuation" | "structured";
 };
 
 export async function coachAgentReplyLlm(
@@ -456,19 +539,26 @@ export async function coachAgentReplyLlm(
 
   try {
 
-    const object = await generateCoachObject<z.infer<typeof AgentChatResponseLooseSchema>>({
+    const object = await generateStructuredObject<z.infer<typeof AgentChatResponseLooseSchema>>({
 
       model: createModel(creds),
 
       schema: AgentChatResponseLooseSchema,
 
-      system: buildAgentSystemPrompt(context),
+      system: buildAgentSystemPrompt(context, context.llmContextSettings),
 
       prompt: buildChatUserPrompt(message, chatHistory, undefined, {
+        threadBlock: context.coachThreadBlock,
         jsonMode:
           options?.promptMode === "tool_continuation"
             ? "tool_continuation"
-            : undefined,
+            : options?.promptMode === "clarify"
+              ? "clarify"
+              : options?.promptMode === "clarify_continuation"
+                ? "clarify_continuation"
+                : options?.promptMode === "structured"
+                  ? "structured"
+                  : undefined,
       }),
 
     });

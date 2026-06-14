@@ -18,9 +18,11 @@ import {
   parseModelRef,
   resolveProviderConfig,
   type AcpRuntimeId,
+  type GoalDeliverable,
   type RunDeltaEvent,
 } from "@openx/shared";
 import { canTransition } from "@openx/shared";
+import { resolveMergedLlmContext } from "./llm-context-resolve.js";
 import {
   appendLog,
   areDependenciesMet,
@@ -31,7 +33,15 @@ import {
   listLogs,
   listRunnableDraftGoals,
   updateGoal,
+  updateGoalCrewBinding,
 } from "./db.js";
+import { handleCrewQuestion, isCrewEscalation } from "./foreman-loop.js";
+import {
+  persistCrewQuestion,
+  persistForemanDirective,
+  persistForemanEscalation,
+} from "./crew-persist.js";
+import type { CrewDirective, CrewQuestion } from "@openx/shared";
 import {
   getConnectionByExecutorId,
   listConnections,
@@ -41,6 +51,7 @@ import {
 import { narrateGoalChange } from "./narration.js";
 import { resolveAcpCliCredentialsFromRef } from "./acp-cli-config.js";
 import { bootstrapConnectProfile } from "./cli-bootstrap.js";
+import { getServerBaseUrl } from "./server-base-url.js";
 import { shouldRunPiInWorker, runPiInWorker, cancelPiChild } from "./pi-isolated-run.js";
 import { loadSettings } from "./settings-store.js";
 import { resolveWorkspaceRoot } from "./workspace-path.js";
@@ -116,7 +127,7 @@ function buildCallbacks(goalId: string) {
     onRunEvent: async (event: RunDeltaEvent) => {
       emitGoalRunEvent(goalId, event);
     },
-    onComplete: async (resultSummary: string, deliverables?) => {
+    onComplete: async (resultSummary: string, deliverables?: GoalDeliverable[]) => {
       const g = getGoalById(goalId);
       if (!g || g.status !== "running") return;
       clearGoalCancelledForConnect(goalId);
@@ -129,7 +140,59 @@ function buildCallbacks(goalId: string) {
       const g = getGoalById(goalId);
       if (!g || g.status !== "running") return;
       clearGoalCancelledForConnect(goalId);
+      updateGoalCrewBinding(goalId, { crewStatus: null });
       markGoalFailed(goalId, errorMessage);
+    },
+    onCrewSession: async (crewSessionId: string) => {
+      const g = getGoalById(goalId);
+      if (!g) return;
+      updateGoalCrewBinding(goalId, {
+        foremanThreadId: g.foremanThreadId ?? g.conversationId,
+        crewSessionId,
+        crewStatus: "idle",
+      });
+      const updated = getGoalById(goalId);
+      if (updated) broadcast({ type: "goal.updated", goal: updated });
+    },
+    onCrewQuestion: async (question: CrewQuestion): Promise<CrewDirective> => {
+      const g = getGoalById(goalId);
+      if (!g) {
+        return {
+          kind: "directive",
+          message: "工头暂不可用，请按验收标准自行选择合理方案继续。",
+          source: "foreman_rule",
+        };
+      }
+      updateGoalCrewBinding(goalId, { crewStatus: "awaiting_foreman" });
+      persistCrewQuestion(goalId, question);
+      const outcome = await handleCrewQuestion({
+        goal: g,
+        question,
+      });
+      if (isCrewEscalation(outcome)) {
+        updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
+        persistForemanEscalation(goalId, outcome);
+        appendLog(
+          goalId,
+          "warn",
+          `工头上报开发商：${outcome.prompt.slice(0, 200)}`,
+        );
+        const updated = getGoalById(goalId);
+        if (updated) broadcast({ type: "goal.updated", goal: updated });
+        return {
+          kind: "directive",
+          message: outcome.reason
+            ? `工头已提请开发商确认：${outcome.reason}。在等待回复期间，请先推进不依赖该决策的部分。`
+            : "工头已提请开发商确认，请先推进可独立完成的工作。",
+          source: "foreman_rule",
+        };
+      }
+      updateGoalCrewBinding(goalId, { crewStatus: "idle" });
+      persistForemanDirective(goalId, outcome);
+      appendLog(goalId, "info", `工头指令 › ${outcome.message.slice(0, 240)}`);
+      const updated = getGoalById(goalId);
+      if (updated) broadcast({ type: "goal.updated", goal: updated });
+      return outcome;
     },
   };
 }
@@ -163,7 +226,11 @@ function buildExecutorContext(goalId: string, isRework?: boolean) {
   if (isAcpCliConfigTarget(goal.executorId)) {
     const modelRef = settings.acpCli?.[goal.executorId];
     if (modelRef) {
-      const creds = resolveAcpCliCredentialsFromRef(settings, modelRef);
+      const creds = resolveAcpCliCredentialsFromRef(
+        settings,
+        modelRef,
+        goal.executorId as "acp:codex" | "acp:claude",
+      );
       if (creds) {
         if (goal.executorId === "acp:claude") {
           const parsed = parseModelRef(modelRef);
@@ -196,6 +263,7 @@ function buildExecutorContext(goalId: string, isRework?: boolean) {
     enabledSkills,
     mcpServers,
     agentRole,
+    llmContext: resolveMergedLlmContext({ goalId }),
     spawnEnv,
     callbacks: buildCallbacks(goalId),
   };
@@ -287,6 +355,7 @@ async function materializeAutoExecutor(goalId: string): Promise<void> {
         model: settings.model,
         providers: settings.providers,
       },
+      llmContextSettings: resolveMergedLlmContext({ goalId }),
     });
     appendLog(goalId, "info", `Pi 自动选择执行器：${chosen}`);
   }
@@ -295,12 +364,6 @@ async function materializeAutoExecutor(goalId: string): Promise<void> {
   goal.updatedAt = new Date().toISOString();
   updateGoal(goal);
   broadcast({ type: "goal.updated", goal });
-}
-
-function getServerBaseUrl(): string {
-  const host = process.env.HOST ?? "127.0.0.1";
-  const port = process.env.PORT ?? "3921";
-  return `http://${host}:${port}`;
 }
 
 const BOOTSTRAP_WAIT_MS = Number(process.env.OPENX_BOOTSTRAP_WAIT_MS ?? 45_000);

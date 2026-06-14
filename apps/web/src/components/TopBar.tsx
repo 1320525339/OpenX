@@ -5,13 +5,10 @@ import { goalStatusText } from "../lib/goal-detail";
 
 const FILTER_LABELS: Record<string, string> = {
   all: "全部",
-  draft: "先放着",
-  running: "正在推进",
-  awaiting_review: "等你确认",
+  incomplete: "未完成",
+  failed: "失败",
   done: "已完成",
-  failed: "卡住了",
-  rework: "需要返工",
-  cancelled: "已取消",
+  rework: "返工中",
 };
 
 type Props = {

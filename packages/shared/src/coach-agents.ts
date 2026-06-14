@@ -1,4 +1,13 @@
-/** 对话 Agent 角色（Coach 上下文 + 派单 prompt 前置） */
+/** 工头对话固定身份（用户不切换） */
+export const FOREMAN_AGENT_ID = "coach";
+
+/** 派单执行默认角色 prompt（注入 Pi/ACP，非聊天人格） */
+export const DEFAULT_EXECUTION_AGENT_ID = "coder";
+
+/** 自动验收角色（仅 auto-review 流水线，非聊天人格） */
+export const REVIEW_AGENT_ID = "reviewer";
+
+/** Agent 角色定义：工头 / 执行 / 验收（后两者为阶段配置，不在对话栏选择） */
 export const COACH_AGENT_ROLES: Record<
   string,
   { name: string; desc: string; rolePrompt: string }
@@ -7,13 +16,13 @@ export const COACH_AGENT_ROLES: Record<
     name: "工头助手",
     desc: "拆解目标、对话协调、跟踪进展",
     rolePrompt:
-      "你是 OpenX 工头助手，负责拆解目标、跟踪进展、协调 Pi 在本机执行，输出清晰可派单的 brief。",
+      "你是 OpenX 工头助手，负责定位用户问题、收集前置约束、拆解目标、跟踪进展，并输出完整可派单的 brief 给 Pi 执行。",
   },
   coder: {
     name: "编码助手",
     desc: "在本机工作目录写代码、跑命令",
     rolePrompt:
-      "你是编码执行助手，专注在本机工作目录完成代码与命令类任务，输出可验收结果，遵守约束不越权。",
+      "你是编码执行助手。严格按工头 brief 中的「已知事实」「待核实项」「调查入口」「范围边界」执行：先完成待核实项的证据收集，再在约束内实施。输出可验收结果与关键证据，不越权、不臆造。",
   },
   reviewer: {
     name: "审查员",

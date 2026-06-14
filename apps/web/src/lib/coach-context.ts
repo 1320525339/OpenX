@@ -1,5 +1,5 @@
 import type { AgentCatalogEntry, SkillCatalogEntry } from "@openx/shared";
-import { CORE_SKILLS, COACH_AGENT_ROLES } from "@openx/shared";
+import { CORE_SKILLS, COACH_AGENT_ROLES, type DispatchPermissionMode } from "@openx/shared";
 
 export type CoachSkill = {
   id: string;
@@ -74,6 +74,9 @@ const SKILLS_KEY = "openx.tools.skills";
 const SKILLS_BINDINGS_KEY = "openx.tools.skillBindings";
 const MCPS_KEY = "openx.chat.mcps";
 const AGENT_KEY = "openx.chat.agent";
+const PERMISSION_KEY = "openx.chat.permissionMode";
+
+export type ChatPermissionSelection = DispatchPermissionMode | "default";
 
 export type SkillBinding = {
   enabled: boolean;
@@ -181,6 +184,26 @@ export function loadAgentSelection(catalog: CoachAgent[] = COACH_AGENTS): string
 
 export function saveAgentSelection(agentId: string) {
   localStorage.setItem(AGENT_KEY, agentId);
+}
+
+export function loadPermissionSelection(): ChatPermissionSelection {
+  const raw = localStorage.getItem(PERMISSION_KEY);
+  if (raw === "read_only" || raw === "ask_write" || raw === "full") return raw;
+  return "default";
+}
+
+export function savePermissionSelection(mode: ChatPermissionSelection) {
+  if (mode === "default") {
+    localStorage.removeItem(PERMISSION_KEY);
+    return;
+  }
+  localStorage.setItem(PERMISSION_KEY, mode);
+}
+
+export function permissionModeFromSelection(
+  selection: ChatPermissionSelection,
+): DispatchPermissionMode | undefined {
+  return selection === "default" ? undefined : selection;
 }
 
 export function countEnabled(map: Record<string, boolean>) {

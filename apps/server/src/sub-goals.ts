@@ -6,6 +6,11 @@ import {
 } from "@openx/coach";
 import {
   DEFAULT_AUTO_REVIEW,
+  mergeDispatchContext,
+  normalizeDispatchContext,
+  resolveSubGoalDependsOn,
+  MAX_PARALLEL_SUB_GOAL_STARTS,
+  type DispatchContext,
   type Goal,
   type RefinedSubGoal,
   type SubGoalInput,
@@ -25,7 +30,6 @@ import {
 import { dispatchGoal, tryDispatchDependents } from "./orchestrator.js";
 import { loadSettings } from "./settings-store.js";
 import { broadcast } from "./sse.js";
-import { buildGoalDispatchContext } from "./goal-dispatch.js";
 import { claimGoalForDispatch } from "./goal-lifecycle.js";
 
 export function refinedSubGoalsToInput(subs: RefinedSubGoal[]): SubGoalInput[] {
@@ -40,7 +44,23 @@ export function refinedSubGoalsToInput(subs: RefinedSubGoal[]): SubGoalInput[] {
     agentId: sg.agentId,
     mcpIds: sg.mcpIds,
     skillIds: sg.skillIds,
+    dependsOnIndex: sg.dependsOnIndex,
+    permissionMode: sg.permissionMode,
   }));
+}
+
+function buildSubGoalDispatchContext(
+  sub: SubGoalInput,
+  parent?: Pick<Goal, "dispatchContext">,
+): DispatchContext | undefined {
+  return normalizeDispatchContext(
+    mergeDispatchContext(parent?.dispatchContext, sub.dispatchContext, {
+      agentId: sub.agentId,
+      mcpIds: sub.mcpIds,
+      skillIds: sub.skillIds,
+      permissionMode: sub.permissionMode,
+    }),
+  );
 }
 
 function resolveChainAnchor(parentId: string): string {
@@ -81,6 +101,7 @@ export async function createSubGoalsUnderParent(
   const settings = loadSettings();
   let chainPrevId = resolveChainAnchor(parentId);
   const children: Goal[] = [];
+  const batchInputs: SubGoalInput[] = [];
 
   for (const sub of subGoalsInput) {
     const { refined: subRefined } = await refineGoal(
@@ -89,8 +110,16 @@ export async function createSubGoalsUnderParent(
       settings.defaultConstraints,
     );
     const childNow = new Date().toISOString();
+    batchInputs.push(sub);
+    const dependsOn = resolveSubGoalDependsOn(
+      children.length,
+      batchInputs,
+      children.map((c) => c.id),
+      chainPrevId,
+    );
     const child: Goal = {
       id: nanoid(),
+      orderNo: 0,
       conversationId: parent.conversationId,
       title: sub.title ?? subRefined.title,
       acceptance: sub.acceptance ?? subRefined.acceptance,
@@ -99,12 +128,12 @@ export async function createSubGoalsUnderParent(
       constraints: sub.constraints ?? subRefined.constraints,
       executorId: sub.executorId ?? settings.defaultExecutorId,
       parentGoalId: parentId,
-      dependsOn: sub.dependsOn ?? (children.length === 0 ? [] : [chainPrevId]),
+      dependsOn,
       priority: sub.priority ?? "medium",
       autoReview: parent.autoReview ?? DEFAULT_AUTO_REVIEW,
       maxIterations: parent.maxIterations,
       iterationCount: 0,
-      dispatchContext: buildGoalDispatchContext(sub, undefined, parent),
+      dispatchContext: buildSubGoalDispatchContext(sub, parent),
       status: "draft",
       progress: 0,
       createdAt: childNow,
@@ -118,7 +147,8 @@ export async function createSubGoalsUnderParent(
 
   const shouldStart = autoStart ?? settings.autoExecute;
   if (shouldStart) {
-    for (const child of children) {
+    const runnable = children.filter((child) => areDependenciesMet(child));
+    for (const child of runnable.slice(0, MAX_PARALLEL_SUB_GOAL_STARTS)) {
       startRunnableDraft(child);
     }
   }
@@ -197,6 +227,7 @@ export function spawnReviewFixSubGoals(
   const now = new Date().toISOString();
   const fix: Goal = {
     id: nanoid(),
+    orderNo: 0,
     conversationId: parent.conversationId,
     title: `修补 · ${parent.title}`.slice(0, 120),
     acceptance: instruction,

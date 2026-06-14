@@ -1,10 +1,18 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 
-import type { BatchGoalsAction, Conversation, Goal, Project } from "@openx/shared";
+import type {
+  BatchGoalsAction,
+  Conversation,
+  Goal,
+  Project,
+} from "@openx/shared";
+import { goalMatchesDisplayFilter, isSystemConversationId } from "@openx/shared";
 
 import { api } from "../api";
 
 import { TasksPanel } from "./TasksPanel";
+import { ProjectBriefTemplatePanel } from "./ProjectBriefTemplatePanel";
+import { RowDeleteButton } from "./RowDeleteButton";
 
 
 
@@ -32,6 +40,8 @@ type Props = {
 
   onNewConversation: () => void;
 
+  onDeleteConversation?: (conversationId: string) => void;
+
   onBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
 
   goalActions: GoalActions;
@@ -41,13 +51,7 @@ type Props = {
 
 
 function filterProjectGoals(goals: Goal[], filter: string): Goal[] {
-
-  if (filter === "all") return goals;
-
-  if (filter === "rework") return goals.filter((g) => g.effectStatus === "rework");
-
-  return goals.filter((g) => g.status === filter);
-
+  return goals.filter((g) => goalMatchesDisplayFilter(g, filter));
 }
 
 
@@ -63,6 +67,8 @@ export function ProjectPage({
   onOpenConversation,
 
   onNewConversation,
+
+  onDeleteConversation,
 
   onBatchAction,
 
@@ -172,8 +178,6 @@ export function ProjectPage({
 
       </div>
 
-
-
       <div className="project-layout">
 
         <section className="project-board">
@@ -274,30 +278,28 @@ export function ProjectPage({
 
                 return (
 
-                  <li key={conv.id}>
-
+                  <li key={conv.id} className="dashboard-conv-item">
                     <button
-
                       type="button"
-
                       className="dashboard-conv-row"
-
                       onClick={() => onOpenConversation(conv.id)}
-
                     >
-
                       <span className="dashboard-conv-title">{conv.title}</span>
-
                       <span className="dashboard-conv-meta">
-
                         {convGoals.length} 任务
-
                         {active > 0 ? ` · ${active} 活跃` : ""}
-
                       </span>
-
                     </button>
-
+                    {onDeleteConversation && !isSystemConversationId(conv.id) ? (
+                      <RowDeleteButton
+                        label={`删除对话 ${conv.title}`}
+                        title="删除对话及关联任务"
+                        onClick={(e: MouseEvent) => {
+                          e.stopPropagation();
+                          onDeleteConversation(conv.id);
+                        }}
+                      />
+                    ) : null}
                   </li>
 
                 );
@@ -309,6 +311,8 @@ export function ProjectPage({
           )}
 
         </section>
+
+        <ProjectBriefTemplatePanel project={project} />
 
       </div>
 

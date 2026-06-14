@@ -16,6 +16,7 @@ import {
 import { narrateGoalChange } from "./narration.js";
 import { endGoalRun, emitGoalRunEvent } from "./run-service.js";
 import { broadcast } from "./sse.js";
+import { checkGoalCompleteGate } from "./goal-completion-gate.js";
 
 export type LifecycleError = {
   ok: false;
@@ -89,8 +90,14 @@ export function markGoalComplete(
   const transitionErr = requireTransition(goal, "awaiting_review");
   if (transitionErr) return transitionErr;
 
+  const gate = checkGoalCompleteGate(goalId);
+  if (!gate.ok) {
+    return fail(409, gate.error);
+  }
+
   endGoalRun(goalId, "completed", resultSummary);
   goal.status = "awaiting_review";
+  goal.effectStatus = undefined;
   goal.progress = 100;
   goal.resultSummary = resultSummary;
   goal.deliverables =
@@ -100,39 +107,6 @@ export function markGoalComplete(
   saveExecutionSummary(goalId, resultSummary, goal.executorId);
   broadcast({ type: "goal.updated", goal });
   narrateGoalChange(goal, "review");
-  return { ok: true, goal };
-}
-
-/**
- * 父目标合成验收打回：将已 done 的子任务重新打开（特权转换 done → running）。
- * 保留历史 resultSummary / execution_summaries，并附带累积审查上下文。
- */
-export function reopenChildGoalForParentRework(
-  childId: string,
-  feedback: string,
-): LifecycleResult {
-  const goalOrErr = requireGoal(childId);
-  if (isLifecycleError(goalOrErr)) return goalOrErr;
-  const goal = goalOrErr;
-
-  if (goal.status !== "done") {
-    return fail(409, `Child goal is not done (${goal.status})`);
-  }
-
-  if (goal.resultSummary?.trim()) {
-    saveExecutionSummary(childId, goal.resultSummary, goal.executorId);
-  }
-
-  goal.status = "running";
-  goal.effectStatus = "rework";
-  goal.reworkReason = feedback;
-  goal.progress = 0;
-  goal.iterationCount = (goal.iterationCount ?? 0) + 1;
-  goal.updatedAt = new Date().toISOString();
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  narrateGoalChange(goal, "rework");
-  appendLog(childId, "warn", `父目标合成验收打回：${feedback.slice(0, 240)}`);
   return { ok: true, goal };
 }
 

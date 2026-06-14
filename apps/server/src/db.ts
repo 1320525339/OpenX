@@ -2,12 +2,14 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
+  CoachClarifyMessage,
   CoachExecutionMeta,
   CoachExecutionMessage,
   CoachMessageRecord,
   CoachRefinedMessage,
   CoachTextMessage,
   CoachToolResultMessage,
+  CoachToolResultPayload,
   Conversation,
   Goal,
   GoalPriority,
@@ -16,17 +18,25 @@ import type {
   Project,
   RunStreamEvent,
   SseEvent,
-  WorkOrderToolResult,
 } from "@openx/shared";
 import {
+  CoachClarifyPayloadSchema,
   CoachExecutionMetaSchema,
+  CoachToolResultPayloadSchema,
+  CLARIFY_TOOL_NAME,
   DispatchContextSchema,
   GoalDeliverableSchema,
+  CONNECT_ANY_EXECUTOR_ID,
   GOAL_PRIORITY_WEIGHT,
   RefinedGoalSchema,
-  WorkOrderToolResultSchema,
-  CONNECT_ANY_EXECUTOR_ID,
+  WORK_ORDER_TOOL_NAME,
+  OperatorActionMetaSchema,
+  findPendingClarifyRecordIds,
+  CrewExchangeDirectionSchema,
+  type CrewExchangeDirection,
+  type CrewExchangeRecord,
 } from "@openx/shared";
+import type { CoachClarifyStatus } from "@openx/shared";
 import { getDbPath } from "./paths.js";
 
 export const MAX_SSE_CATCHUP = 500;
@@ -70,7 +80,12 @@ function ensureColumn(
 ) {
   const cols = database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (!cols.some((c) => c.name === column)) {
-    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    try {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/duplicate column name/i.test(message)) throw err;
+    }
   }
 }
 
@@ -155,6 +170,29 @@ function migrate(database: Database.Database) {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id);
+
+    CREATE TABLE IF NOT EXISTS island_seen (
+      island_id TEXT PRIMARY KEY,
+      seen_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_island_seen_at ON island_seen(seen_at);
+
+    CREATE TABLE IF NOT EXISTS coach_thread_checkpoints (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      up_to_message_id INTEGER NOT NULL,
+      summary_text TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_coach_checkpoints_conv
+      ON coach_thread_checkpoints(conversation_id, id DESC);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+      project_id UNINDEXED,
+      scope UNINDEXED,
+      content,
+      tokenize = 'unicode61'
+    );
   `);
 
   ensureColumn(database, "goals", "parent_goal_id", "TEXT");
@@ -166,15 +204,34 @@ function migrate(database: Database.Database) {
   ensureColumn(database, "goals", "conversation_id", "TEXT");
   ensureColumn(database, "goals", "deliverables_json", "TEXT");
   ensureColumn(database, "goals", "dispatch_context_json", "TEXT");
+  ensureColumn(database, "goals", "waived", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "goals", "foreman_thread_id", "TEXT");
+  ensureColumn(database, "goals", "crew_session_id", "TEXT");
+  ensureColumn(database, "goals", "crew_status", "TEXT");
+  ensureColumn(database, "goals", "order_no", "INTEGER");
+  backfillGoalOrderNumbers(database);
   ensureColumn(database, "coach_messages", "conversation_id", "TEXT");
   ensureColumn(database, "coach_messages", "kind", "TEXT NOT NULL DEFAULT 'text'");
   ensureColumn(database, "coach_messages", "meta_json", "TEXT");
+  ensureColumn(database, "projects", "llm_context_json", "TEXT");
   database.exec(
     "CREATE INDEX IF NOT EXISTS idx_goals_conversation ON goals(conversation_id)",
   );
   database.exec(
     "CREATE INDEX IF NOT EXISTS idx_coach_messages_conversation ON coach_messages(conversation_id)",
   );
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS crew_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      payload_json TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_crew_messages_goal ON crew_messages(goal_id, id);
+  `);
 }
 
 type ProjectRow = {
@@ -182,6 +239,7 @@ type ProjectRow = {
   name: string;
   workspace_dir: string;
   created_at: string;
+  llm_context_json: string | null;
 };
 
 type ConversationRow = {
@@ -214,9 +272,41 @@ type GoalRow = {
   max_iterations: number | null;
   iteration_count: number;
   dispatch_context_json: string | null;
+  waived: number;
+  foreman_thread_id: string | null;
+  crew_session_id: string | null;
+  crew_status: string | null;
+  order_no: number | null;
   created_at: string;
   updated_at: string;
 };
+
+export function allocateWorkOrderNo(): number {
+  const row = getDb()
+    .prepare("SELECT COALESCE(MAX(order_no), 0) AS maxNo FROM goals")
+    .get() as { maxNo: number };
+  return row.maxNo + 1;
+}
+
+function backfillGoalOrderNumbers(database: Database.Database): void {
+  const rows = database
+    .prepare(
+      "SELECT id FROM goals WHERE order_no IS NULL OR order_no <= 0 ORDER BY created_at ASC, id ASC",
+    )
+    .all() as { id: string }[];
+  if (rows.length === 0) return;
+  let next =
+    (
+      database.prepare("SELECT COALESCE(MAX(order_no), 0) AS maxNo FROM goals").get() as {
+        maxNo: number;
+      }
+    ).maxNo + 1;
+  const stmt = database.prepare("UPDATE goals SET order_no = ? WHERE id = ?");
+  for (const row of rows) {
+    stmt.run(next, row.id);
+    next += 1;
+  }
+}
 
 function parseDispatchContextJson(raw: string | null | undefined) {
   if (!raw?.trim()) return undefined;
@@ -241,6 +331,7 @@ function parseDeliverablesJson(raw: string | null | undefined) {
 function rowToGoal(row: GoalRow): Goal {
   return {
     id: row.id,
+    orderNo: row.order_no && row.order_no > 0 ? row.order_no : 0,
     conversationId: row.conversation_id ?? "",
     title: row.title,
     acceptance: row.acceptance,
@@ -261,6 +352,10 @@ function rowToGoal(row: GoalRow): Goal {
     maxIterations: row.max_iterations ?? undefined,
     iterationCount: row.iteration_count ?? 0,
     dispatchContext: parseDispatchContextJson(row.dispatch_context_json),
+    waived: row.waived === 1 ? true : undefined,
+    foremanThreadId: row.foreman_thread_id ?? undefined,
+    crewSessionId: row.crew_session_id ?? undefined,
+    crewStatus: (row.crew_status as Goal["crewStatus"]) ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -317,7 +412,7 @@ export function areDependenciesMet(goal: Goal): boolean {
   if (!goal.dependsOn?.length) return true;
   return goal.dependsOn.every((depId) => {
     const dep = getGoalById(depId);
-    return dep?.status === "done";
+    return dep?.status === "done" || dep?.waived === true;
   });
 }
 
@@ -332,51 +427,85 @@ export function listRunnableDraftGoals(): Goal[] {
 }
 
 export function insertGoal(goal: Goal): Goal {
+  const orderNo = goal.orderNo > 0 ? goal.orderNo : allocateWorkOrderNo();
+  const record: Goal = { ...goal, orderNo };
   getDb()
     .prepare(
       `INSERT INTO goals (
-        id, conversation_id, title, acceptance, user_draft, execution_prompt, constraints_json,
+        id, order_no, conversation_id, title, acceptance, user_draft, execution_prompt, constraints_json,
         executor_id, status, progress, result_summary, deliverables_json, effect_status, rework_reason,
         parent_goal_id, depends_on_json, priority, auto_review, max_iterations,
-        iteration_count, dispatch_context_json, created_at, updated_at
+        iteration_count, dispatch_context_json, waived,
+        foreman_thread_id, crew_session_id, crew_status,
+        created_at, updated_at
       ) VALUES (
-        @id, @conversationId, @title, @acceptance, @userDraft, @executionPrompt, @constraintsJson,
+        @id, @orderNo, @conversationId, @title, @acceptance, @userDraft, @executionPrompt, @constraintsJson,
         @executorId, @status, @progress, @resultSummary, @deliverablesJson, @effectStatus, @reworkReason,
         @parentGoalId, @dependsOnJson, @priority, @autoReview, @maxIterations,
-        @iterationCount, @dispatchContextJson, @createdAt, @updatedAt
+        @iterationCount, @dispatchContextJson, @waived,
+        @foremanThreadId, @crewSessionId, @crewStatus,
+        @createdAt, @updatedAt
       )`,
     )
     .run({
-      id: goal.id,
-      conversationId: goal.conversationId,
-      title: goal.title,
-      acceptance: goal.acceptance,
-      userDraft: goal.userDraft ?? null,
-      executionPrompt: goal.executionPrompt,
-      constraintsJson: JSON.stringify(goal.constraints),
-      executorId: goal.executorId,
-      status: goal.status,
-      progress: goal.progress,
-      resultSummary: goal.resultSummary ?? null,
+      id: record.id,
+      orderNo: record.orderNo,
+      conversationId: record.conversationId,
+      title: record.title,
+      acceptance: record.acceptance,
+      userDraft: record.userDraft ?? null,
+      executionPrompt: record.executionPrompt,
+      constraintsJson: JSON.stringify(record.constraints),
+      executorId: record.executorId,
+      status: record.status,
+      progress: record.progress,
+      resultSummary: record.resultSummary ?? null,
       deliverablesJson:
-        goal.deliverables && goal.deliverables.length > 0
-          ? JSON.stringify(goal.deliverables)
+        record.deliverables && record.deliverables.length > 0
+          ? JSON.stringify(record.deliverables)
           : null,
-      effectStatus: goal.effectStatus ?? null,
-      reworkReason: goal.reworkReason ?? null,
-      parentGoalId: goal.parentGoalId ?? null,
-      dependsOnJson: JSON.stringify(goal.dependsOn ?? []),
-      priority: goal.priority ?? "medium",
-      autoReview: goal.autoReview ? 1 : 0,
-      maxIterations: goal.maxIterations ?? null,
-      iterationCount: goal.iterationCount ?? 0,
-      dispatchContextJson: goal.dispatchContext
-        ? JSON.stringify(goal.dispatchContext)
+      effectStatus: record.effectStatus ?? null,
+      reworkReason: record.reworkReason ?? null,
+      parentGoalId: record.parentGoalId ?? null,
+      dependsOnJson: JSON.stringify(record.dependsOn ?? []),
+      priority: record.priority ?? "medium",
+      autoReview: record.autoReview ? 1 : 0,
+      maxIterations: record.maxIterations ?? null,
+      iterationCount: record.iterationCount ?? 0,
+      dispatchContextJson: record.dispatchContext
+        ? JSON.stringify(record.dispatchContext)
         : null,
-      createdAt: goal.createdAt,
-      updatedAt: goal.updatedAt,
+      waived: record.waived ? 1 : 0,
+      foremanThreadId: record.foremanThreadId ?? null,
+      crewSessionId: record.crewSessionId ?? null,
+      crewStatus: record.crewStatus ?? null,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
     });
-  return goal;
+  return record;
+}
+
+export function updateGoalCrewBinding(
+  goalId: string,
+  patch: {
+    foremanThreadId?: string;
+    crewSessionId?: string;
+    crewStatus?: Goal["crewStatus"] | null;
+  },
+): Goal | undefined {
+  const goal = getGoalById(goalId);
+  if (!goal) return undefined;
+  if (patch.foremanThreadId !== undefined) {
+    goal.foremanThreadId = patch.foremanThreadId;
+  }
+  if (patch.crewSessionId !== undefined) {
+    goal.crewSessionId = patch.crewSessionId;
+  }
+  if (patch.crewStatus !== undefined) {
+    goal.crewStatus = patch.crewStatus ?? undefined;
+  }
+  goal.updatedAt = new Date().toISOString();
+  return updateGoal(goal);
 }
 
 export function updateGoal(goal: Goal): Goal {
@@ -392,6 +521,9 @@ export function updateGoal(goal: Goal): Goal {
         depends_on_json = @dependsOnJson, priority = @priority,
         auto_review = @autoReview, max_iterations = @maxIterations,
         iteration_count = @iterationCount, dispatch_context_json = @dispatchContextJson,
+        waived = @waived,
+        foreman_thread_id = @foremanThreadId, crew_session_id = @crewSessionId,
+        crew_status = @crewStatus,
         updated_at = @updatedAt
       WHERE id = @id`,
     )
@@ -421,6 +553,10 @@ export function updateGoal(goal: Goal): Goal {
       dispatchContextJson: goal.dispatchContext
         ? JSON.stringify(goal.dispatchContext)
         : null,
+      waived: goal.waived ? 1 : 0,
+      foremanThreadId: goal.foremanThreadId ?? null,
+      crewSessionId: goal.crewSessionId ?? null,
+      crewStatus: goal.crewStatus ?? null,
       updatedAt: goal.updatedAt,
     });
   return goal;
@@ -576,6 +712,8 @@ function rowToCoachMessage(row: CoachMessageRow): CoachMessageRecord {
   }
   if (row.kind === "refined" && row.meta_json) {
     const refined = RefinedGoalSchema.parse(JSON.parse(row.meta_json));
+    const linkedClarifyMessageId =
+      row.text && /^\d+$/.test(row.text) ? Number(row.text) : undefined;
     return {
       id: row.id,
       conversationId: row.conversationId,
@@ -583,16 +721,40 @@ function rowToCoachMessage(row: CoachMessageRow): CoachMessageRecord {
       timestamp: row.timestamp,
       refined,
       linkedGoalId: row.goal_id ?? undefined,
+      linkedClarifyMessageId,
+    };
+  }
+  if (row.kind === "clarify" && row.meta_json) {
+    const clarify = CoachClarifyPayloadSchema.parse(JSON.parse(row.meta_json));
+    const linkedRefinedMessageId =
+      row.text && /^\d+$/.test(row.text) ? Number(row.text) : undefined;
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      kind: "clarify",
+      timestamp: row.timestamp,
+      clarify,
+      linkedRefinedMessageId,
     };
   }
   if (row.kind === "tool_result" && row.meta_json) {
-    const toolResult = WorkOrderToolResultSchema.parse(JSON.parse(row.meta_json));
+    const toolResult = CoachToolResultPayloadSchema.parse(JSON.parse(row.meta_json));
     return {
       id: row.id,
       conversationId: row.conversationId,
       kind: "tool_result",
       timestamp: row.timestamp,
       toolResult,
+    };
+  }
+  if (row.kind === "operator_action" && row.meta_json) {
+    const operatorAction = OperatorActionMetaSchema.parse(JSON.parse(row.meta_json));
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      kind: "operator_action",
+      timestamp: row.timestamp,
+      operatorAction,
     };
   }
   return {
@@ -674,22 +836,48 @@ export function hasWorkOrderToolResult(
     .prepare(
       `SELECT id FROM coach_messages
        WHERE conversation_id = ? AND kind = 'tool_result'
+         AND json_extract(meta_json, '$.toolName') = ?
          AND json_extract(meta_json, '$.refinedMessageId') = ?
        LIMIT 1`,
     )
-    .get(conversationId, refinedMessageId) as { id: number } | undefined;
+    .get(conversationId, WORK_ORDER_TOOL_NAME, refinedMessageId) as
+    | { id: number }
+    | undefined;
+  return Boolean(row);
+}
+
+export function hasClarifyToolResult(
+  conversationId: string,
+  clarifyMessageId: number,
+): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM coach_messages
+       WHERE conversation_id = ? AND kind = 'tool_result'
+         AND json_extract(meta_json, '$.toolName') = ?
+         AND json_extract(meta_json, '$.clarifyMessageId') = ?
+       LIMIT 1`,
+    )
+    .get(conversationId, CLARIFY_TOOL_NAME, clarifyMessageId) as
+    | { id: number }
+    | undefined;
   return Boolean(row);
 }
 
 export function saveCoachToolResultMessage(
   conversationId: string,
-  toolResult: WorkOrderToolResult,
+  toolResult: CoachToolResultPayload,
 ): CoachToolResultMessage {
   const timestamp = new Date().toISOString();
+  const dismissed = toolResult.outcome === "dismissed";
   const metaJson = JSON.stringify({
     ...toolResult,
-    dismissed: toolResult.outcome === "dismissed",
+    dismissed,
   });
+  const goalId =
+    toolResult.toolName === WORK_ORDER_TOOL_NAME
+      ? (toolResult.goalId ?? null)
+      : null;
   const result = getDb()
     .prepare(
       `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
@@ -697,7 +885,7 @@ export function saveCoachToolResultMessage(
     )
     .run(
       conversationId,
-      toolResult.goalId ?? null,
+      goalId,
       metaJson,
       timestamp,
     );
@@ -711,18 +899,72 @@ export function saveCoachToolResultMessage(
   };
 }
 
-export function saveCoachRefinedMessage(
+export function saveCoachClarifyMessage(
   conversationId: string,
-  refined: CoachRefinedMessage["refined"],
-): CoachRefinedMessage {
+  clarify: CoachClarifyMessage["clarify"],
+): CoachClarifyMessage {
   const timestamp = new Date().toISOString();
-  const metaJson = JSON.stringify(refined);
+  const metaJson = JSON.stringify(clarify);
   const result = getDb()
     .prepare(
       `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
-       VALUES (?, NULL, 'coach', '', 'refined', ?, ?)`,
+       VALUES (?, NULL, 'coach', '', 'clarify', ?, ?)`,
     )
     .run(conversationId, metaJson, timestamp);
+  touchConversation(conversationId);
+  return {
+    id: Number(result.lastInsertRowid),
+    conversationId,
+    kind: "clarify",
+    timestamp,
+    clarify,
+  };
+}
+
+export function updateCoachClarifyStatus(
+  messageId: number,
+  status: CoachClarifyStatus,
+): void {
+  const row = getDb()
+    .prepare(`SELECT meta_json FROM coach_messages WHERE id = ? AND kind = 'clarify'`)
+    .get(messageId) as { meta_json: string } | undefined;
+  if (!row?.meta_json) return;
+  const clarify = CoachClarifyPayloadSchema.parse(JSON.parse(row.meta_json));
+  const metaJson = JSON.stringify({ ...clarify, status });
+  getDb()
+    .prepare(`UPDATE coach_messages SET meta_json = ? WHERE id = ?`)
+    .run(metaJson, messageId);
+}
+
+/** 澄清回答后关联生成的工单消息（存于 text 列，仅 clarify kind） */
+export function linkCoachClarifyToRefined(
+  clarifyMessageId: number,
+  refinedMessageId: number,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE coach_messages SET text = ? WHERE id = ? AND kind = 'clarify'`,
+    )
+    .run(String(refinedMessageId), clarifyMessageId);
+}
+
+export function saveCoachRefinedMessage(
+  conversationId: string,
+  refined: CoachRefinedMessage["refined"],
+  opts?: { linkedClarifyMessageId?: number },
+): CoachRefinedMessage {
+  const timestamp = new Date().toISOString();
+  const metaJson = JSON.stringify(refined);
+  const linkText =
+    opts?.linkedClarifyMessageId != null
+      ? String(opts.linkedClarifyMessageId)
+      : "";
+  const result = getDb()
+    .prepare(
+      `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
+       VALUES (?, NULL, 'coach', ?, 'refined', ?, ?)`,
+    )
+    .run(conversationId, linkText, metaJson, timestamp);
   touchConversation(conversationId);
   return {
     id: Number(result.lastInsertRowid),
@@ -730,6 +972,7 @@ export function saveCoachRefinedMessage(
     kind: "refined",
     timestamp,
     refined,
+    linkedClarifyMessageId: opts?.linkedClarifyMessageId,
   };
 }
 
@@ -772,12 +1015,140 @@ export function listCoachMessages(
   ).map(rowToCoachMessage);
 }
 
+export function listPendingClarifyIdsForConversation(
+  conversationId: string,
+): number[] {
+  const records = listCoachMessages(conversationId, 200);
+  return findPendingClarifyRecordIds(records);
+}
+
+export function hasLatestReviewPass(goalId: string): boolean {
+  const entries = listReviewRoundEntries(goalId, 5);
+  const latest = entries[entries.length - 1];
+  return latest?.verdict === "pass";
+}
+
+export type CoachThreadCheckpoint = {
+  id: number;
+  conversationId: string;
+  upToMessageId: number;
+  summaryText: string;
+  createdAt: string;
+};
+
+export function getLatestCoachThreadCheckpoint(
+  conversationId: string,
+): CoachThreadCheckpoint | undefined {
+  const row = getDb()
+    .prepare(
+      `SELECT id, conversation_id as conversationId, up_to_message_id as upToMessageId,
+              summary_text as summaryText, created_at as createdAt
+       FROM coach_thread_checkpoints
+       WHERE conversation_id = ?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(conversationId) as CoachThreadCheckpoint | undefined;
+  return row;
+}
+
+export function saveCoachThreadCheckpoint(input: {
+  conversationId: string;
+  upToMessageId: number;
+  summaryText: string;
+}): CoachThreadCheckpoint {
+  const createdAt = new Date().toISOString();
+  const result = getDb()
+    .prepare(
+      `INSERT INTO coach_thread_checkpoints
+       (conversation_id, up_to_message_id, summary_text, created_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(
+      input.conversationId,
+      input.upToMessageId,
+      input.summaryText,
+      createdAt,
+    );
+  return {
+    id: Number(result.lastInsertRowid),
+    conversationId: input.conversationId,
+    upToMessageId: input.upToMessageId,
+    summaryText: input.summaryText,
+    createdAt,
+  };
+}
+
+export type MemorySearchHit = {
+  projectId: string;
+  scope: string;
+  content: string;
+  rank: number;
+};
+
+export function indexMemoryChunk(
+  projectId: string,
+  scope: string,
+  content: string,
+): void {
+  getDb()
+    .prepare(
+      `INSERT INTO memory_fts (project_id, scope, content) VALUES (?, ?, ?)`,
+    )
+    .run(projectId, scope, content);
+}
+
+export function clearMemoryIndex(projectId: string, scope?: string): void {
+  if (scope) {
+    getDb()
+      .prepare(`DELETE FROM memory_fts WHERE project_id = ? AND scope = ?`)
+      .run(projectId, scope);
+    return;
+  }
+  getDb()
+    .prepare(`DELETE FROM memory_fts WHERE project_id = ?`)
+    .run(projectId);
+}
+
+export function searchMemoryFts(
+  projectId: string,
+  query: string,
+  limit = 5,
+): MemorySearchHit[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const terms = trimmed
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
+    .join(" OR ");
+  if (!terms) return [];
+  return getDb()
+    .prepare(
+      `SELECT project_id as projectId, scope, content,
+              bm25(memory_fts) as rank
+       FROM memory_fts
+       WHERE project_id = ? AND memory_fts MATCH ?
+       ORDER BY rank
+       LIMIT ?`,
+    )
+    .all(projectId, terms, limit) as MemorySearchHit[];
+}
+
 function rowToProject(row: ProjectRow): Project {
+  let llmContext: Project["llmContext"];
+  if (row.llm_context_json) {
+    try {
+      llmContext = JSON.parse(row.llm_context_json) as Project["llmContext"];
+    } catch {
+      llmContext = undefined;
+    }
+  }
   return {
     id: row.id,
     name: row.name,
     workspaceDir: row.workspace_dir,
     createdAt: row.created_at,
+    llmContext,
   };
 }
 
@@ -808,16 +1179,29 @@ export function getProjectById(id: string): Project | undefined {
 export function insertProject(project: Project): Project {
   getDb()
     .prepare(
-      "INSERT INTO projects (id, name, workspace_dir, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO projects (id, name, workspace_dir, created_at, llm_context_json) VALUES (?, ?, ?, ?, ?)",
     )
-    .run(project.id, project.name, project.workspaceDir, project.createdAt);
+    .run(
+      project.id,
+      project.name,
+      project.workspaceDir,
+      project.createdAt,
+      project.llmContext ? JSON.stringify(project.llmContext) : null,
+    );
   return project;
 }
 
 export function updateProject(project: Project): Project {
   getDb()
-    .prepare("UPDATE projects SET name = ?, workspace_dir = ? WHERE id = ?")
-    .run(project.name, project.workspaceDir, project.id);
+    .prepare(
+      "UPDATE projects SET name = ?, workspace_dir = ?, llm_context_json = ? WHERE id = ?",
+    )
+    .run(
+      project.name,
+      project.workspaceDir,
+      project.llmContext ? JSON.stringify(project.llmContext) : null,
+      project.id,
+    );
   return project;
 }
 
@@ -978,16 +1362,23 @@ export function listReviewRoundEntries(
           verifyResults?: ReviewVerifySnapshot[];
         };
         const round = data.round ?? 0;
-        return {
+        const entry: ReviewRoundEntry = {
           round,
           roundLabel: `第 ${round + 1} 轮`,
           verdict: data.verdict ?? "fail",
           reason: data.reason ?? "",
-          reworkInstruction: data.reworkInstruction,
-          reworkTargets: data.reworkTargets,
-          verifyResults: data.verifyResults,
           timestamp: l.timestamp,
-        } satisfies ReviewRoundEntry;
+        };
+        if (data.reworkInstruction !== undefined) {
+          entry.reworkInstruction = data.reworkInstruction;
+        }
+        if (data.reworkTargets !== undefined) {
+          entry.reworkTargets = data.reworkTargets;
+        }
+        if (data.verifyResults !== undefined) {
+          entry.verifyResults = data.verifyResults;
+        }
+        return entry;
       } catch {
         return null;
       }
@@ -1163,4 +1554,127 @@ export function listRunEventRecords(goalId: string, limit = 200): RunStreamEvent
     )
     .all(goalId, limit)
     .map((row) => JSON.parse((row as { payloadJson: string }).payloadJson) as RunStreamEvent);
+}
+
+const MAX_ISLAND_SEEN = 500;
+
+function pruneIslandSeen(maxCount: number): void {
+  getDb()
+    .prepare(
+      `DELETE FROM island_seen WHERE island_id NOT IN (
+        SELECT island_id FROM island_seen ORDER BY seen_at DESC LIMIT ?
+      )`,
+    )
+    .run(maxCount);
+}
+
+export function listIslandSeenIds(limit = MAX_ISLAND_SEEN): string[] {
+  const capped = Math.max(1, Math.min(limit, MAX_ISLAND_SEEN));
+  return getDb()
+    .prepare(
+      `SELECT island_id as islandId FROM island_seen ORDER BY seen_at DESC LIMIT ?`,
+    )
+    .all(capped)
+    .map((row) => (row as { islandId: string }).islandId);
+}
+
+export function isIslandSeenInDb(islandId: string): boolean {
+  const row = getDb()
+    .prepare("SELECT 1 as ok FROM island_seen WHERE island_id = ?")
+    .get(islandId) as { ok: number } | undefined;
+  return row != null;
+}
+
+export function bulkMarkIslandSeen(ids: string[]): number {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const insert = getDb().prepare(
+    "INSERT OR IGNORE INTO island_seen (island_id, seen_at) VALUES (?, ?)",
+  );
+  const mark = getDb().transaction((idList: string[]) => {
+    let marked = 0;
+    for (const id of idList) {
+      const info = insert.run(id, now);
+      if (info.changes > 0) marked += 1;
+    }
+    pruneIslandSeen(MAX_ISLAND_SEEN);
+    return marked;
+  });
+
+  return mark(unique);
+}
+
+type CrewMessageRow = {
+  id: number;
+  goal_id: string;
+  conversation_id: string;
+  direction: string;
+  summary: string;
+  payload_json: string | null;
+  created_at: string;
+};
+
+function rowToCrewExchange(row: CrewMessageRow): CrewExchangeRecord {
+  let payload: unknown;
+  if (row.payload_json?.trim()) {
+    try {
+      payload = JSON.parse(row.payload_json);
+    } catch {
+      payload = undefined;
+    }
+  }
+  const direction = CrewExchangeDirectionSchema.parse(row.direction);
+  return {
+    id: row.id,
+    goalId: row.goal_id,
+    conversationId: row.conversation_id,
+    direction,
+    summary: row.summary,
+    payload,
+    createdAt: row.created_at,
+  };
+}
+
+export function appendCrewExchange(input: {
+  goalId: string;
+  conversationId: string;
+  direction: CrewExchangeDirection;
+  summary: string;
+  payload?: unknown;
+}): CrewExchangeRecord {
+  const createdAt = new Date().toISOString();
+  const result = getDb()
+    .prepare(
+      `INSERT INTO crew_messages (goal_id, conversation_id, direction, summary, payload_json, created_at)
+       VALUES (@goalId, @conversationId, @direction, @summary, @payloadJson, @createdAt)`,
+    )
+    .run({
+      goalId: input.goalId,
+      conversationId: input.conversationId,
+      direction: input.direction,
+      summary: input.summary,
+      payloadJson: input.payload != null ? JSON.stringify(input.payload) : null,
+      createdAt,
+    });
+  return rowToCrewExchange({
+    id: Number(result.lastInsertRowid),
+    goal_id: input.goalId,
+    conversation_id: input.conversationId,
+    direction: input.direction,
+    summary: input.summary,
+    payload_json: input.payload != null ? JSON.stringify(input.payload) : null,
+    created_at: createdAt,
+  });
+}
+
+export function listCrewExchanges(goalId: string, limit = 40): CrewExchangeRecord[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM crew_messages WHERE goal_id = ? ORDER BY id DESC LIMIT ?`,
+    )
+    .all(goalId, limit)
+    .map((row) => rowToCrewExchange(row as CrewMessageRow))
+    .reverse();
 }

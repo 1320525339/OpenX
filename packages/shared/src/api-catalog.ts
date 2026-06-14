@@ -1,4 +1,6 @@
-/** OpenX REST API 机器可读目录 — Agent / MCP 自举用 */
+/** OpenX REST API 机器可读目录 — Agent / MCP / Operator 自举用 */
+
+import { tierSatisfies, type OperatorTier } from "./operator-tier.js";
 
 export type ApiHttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -15,6 +17,10 @@ export type ApiEndpointDef = {
   bodyHint?: string;
   /** SSE 等非常规 HTTP 交互 */
   transport?: "http" | "sse";
+  /** 工头 operator 调用所需最低权限 */
+  minTier?: OperatorTier;
+  /** admin 写操作是否须 UI 确认 */
+  confirmRequired?: boolean;
 };
 
 export const OPENX_API_VERSION = "0.1.0";
@@ -36,9 +42,51 @@ export const OPENX_API_CATEGORIES = [
   "connect",
   "internal",
   "catalog",
+  "system",
+  "operator",
 ] as const;
 
 export type OpenxApiCategory = (typeof OPENX_API_CATEGORIES)[number];
+
+const ADMIN_WRITE_PATHS = [
+  "/api/settings",
+  "/api/mcp",
+  "/api/agents/",
+  "/api/model/providers",
+  "/api/cli/profiles",
+  "/api/skills/bindings",
+];
+
+function inferMinTier(endpoint: ApiEndpointDef): OperatorTier {
+  if (endpoint.minTier) return endpoint.minTier;
+  if (endpoint.auth === "internal") return "operator";
+  if (endpoint.method === "GET") return "read";
+  if (ADMIN_WRITE_PATHS.some((p) => endpoint.path.startsWith(p) || endpoint.path.includes(p))) {
+    return "admin";
+  }
+  return "operator";
+}
+
+function inferConfirmRequired(endpoint: ApiEndpointDef, minTier: OperatorTier): boolean {
+  if (endpoint.confirmRequired !== undefined) return endpoint.confirmRequired;
+  if (minTier !== "admin") return false;
+  return endpoint.method !== "GET";
+}
+
+export function enrichApiEndpoint(endpoint: ApiEndpointDef): ApiEndpointDef & {
+  minTier: OperatorTier;
+  confirmRequired: boolean;
+} {
+  const minTier = inferMinTier(endpoint);
+  const confirmRequired = inferConfirmRequired(endpoint, minTier);
+  return { ...endpoint, minTier, confirmRequired };
+}
+
+export function enrichApiCatalog(
+  endpoints: readonly ApiEndpointDef[],
+): Array<ApiEndpointDef & { minTier: OperatorTier; confirmRequired: boolean }> {
+  return endpoints.map(enrichApiEndpoint);
+}
 
 export const OPENX_API_CATALOG: readonly ApiEndpointDef[] = [
   { id: "health", method: "GET", path: "/api/health", category: "health", summary: "健康检查", auth: "none" },
@@ -51,28 +99,179 @@ export const OPENX_API_CATALOG: readonly ApiEndpointDef[] = [
     auth: "none",
     transport: "sse",
     query: { "Last-Event-ID": "断线重连时上次事件 ID" },
+    minTier: "read",
   },
   { id: "settings_get", method: "GET", path: "/api/settings", category: "settings", summary: "读取全局设置", auth: "none" },
-  { id: "settings_put", method: "PUT", path: "/api/settings", category: "settings", summary: "更新全局设置", auth: "none", bodyHint: "Settings JSON" },
-  { id: "workspace_pick", method: "POST", path: "/api/workspace/pick", category: "workspace", summary: "弹出文件夹选择器", auth: "none" },
-  { id: "workspace_open_ide", method: "POST", path: "/api/workspace/open-in-ide", category: "workspace", summary: "在 IDE 中打开路径", auth: "none", bodyHint: "{ path: string }" },
+  {
+    id: "settings_put",
+    method: "PUT",
+    path: "/api/settings",
+    category: "settings",
+    summary: "更新全局设置（与磁盘 merge，不抹掉未提交的渠道）",
+    auth: "none",
+    bodyHint: "Settings JSON",
+    minTier: "admin",
+    confirmRequired: true,
+  },
+  {
+    id: "settings_patch",
+    method: "PATCH",
+    path: "/api/settings",
+    category: "settings",
+    summary: "局部更新设置（model/providers/acpCli 等按 key merge）",
+    auth: "none",
+    bodyHint: "Partial Settings JSON",
+    minTier: "operator",
+  },
+  { id: "workspace_pick", method: "POST", path: "/api/workspace/pick", category: "workspace", summary: "弹出文件夹选择器", auth: "none", minTier: "operator" },
+  {
+    id: "workspace_open_ide",
+    method: "POST",
+    path: "/api/workspace/open-in-ide",
+    category: "workspace",
+    summary: "在 IDE 中打开路径",
+    auth: "none",
+    bodyHint: "{ path: string }",
+    minTier: "operator",
+  },
+  {
+    id: "workspace_file_preview",
+    method: "GET",
+    path: "/api/workspace/file-preview",
+    category: "workspace",
+    summary: "工作区文件预览",
+    auth: "none",
+    query: { path: "相对或绝对路径" },
+  },
   { id: "mcp_get", method: "GET", path: "/api/mcp", category: "mcp", summary: "MCP Server 配置与目录", auth: "none" },
-  { id: "bootstrap_get", method: "GET", path: "/api/bootstrap", category: "system", summary: "应用启动快照（设置+项目树+调度台+Persona）", auth: "none" },
+  {
+    id: "bootstrap_get",
+    method: "GET",
+    path: "/api/bootstrap",
+    category: "system",
+    summary: "应用启动快照（设置+项目树+调度台+Persona）",
+    auth: "none",
+  },
+  {
+    id: "system_console",
+    method: "GET",
+    path: "/api/system/console",
+    category: "system",
+    summary: "调度台快照（连接、统计、跨项目待审）",
+    auth: "none",
+  },
+  {
+    id: "island_seen_get",
+    method: "GET",
+    path: "/api/island/seen",
+    category: "system",
+    summary: "灵动岛已读 id 列表（跨会话同步）",
+    auth: "none",
+    query: { limit: "最多返回条数，默认 500" },
+  },
+  {
+    id: "island_seen_post",
+    method: "POST",
+    path: "/api/island/seen",
+    category: "system",
+    summary: "批量标记灵动岛消息已读",
+    auth: "none",
+  },
+  {
+    id: "island_push",
+    method: "POST",
+    path: "/api/system/island/push",
+    category: "system",
+    summary: "推送灵动岛卡片（内外统一协议）",
+    auth: "none",
+  },
   { id: "agents_get", method: "GET", path: "/api/agents", category: "coach", summary: "对话 Agent 目录（AGENT.md）", auth: "none" },
-  { id: "agents_get_one", method: "GET", path: "/api/agents/:id", category: "coach", summary: "读取单个 Persona AGENT.md", auth: "none" },
-  { id: "agents_put", method: "PUT", path: "/api/agents/:id", category: "coach", summary: "写入 Persona AGENT.md", auth: "none" },
-  { id: "connect_claim", method: "POST", path: "/api/connect/:connectionId/claim", category: "connect", summary: "原子认领任务池 connect:any 目标", auth: "none" },
-  { id: "mcp_put", method: "PUT", path: "/api/mcp", category: "mcp", summary: "更新 MCP Server 配置", auth: "none", bodyHint: "{ servers: McpServerConfig[] }" },
+  { id: "agents_get_one", method: "GET", path: "/api/agents/:id", category: "coach", summary: "读取单个 Persona AGENT.md", auth: "none", pathParams: ["id"] },
+  {
+    id: "agents_put",
+    method: "PUT",
+    path: "/api/agents/:id",
+    category: "coach",
+    summary: "写入 Persona AGENT.md",
+    auth: "none",
+    minTier: "admin",
+    confirmRequired: true,
+  },
+  {
+    id: "managed_agents",
+    method: "GET",
+    path: "/api/managed-agents",
+    category: "executors",
+    summary: "带在线状态的托管 Agent 列表",
+    auth: "none",
+  },
+  { id: "connect_claim", method: "POST", path: "/api/connect/:connectionId/claim", category: "connect", summary: "原子认领任务池 connect:any 目标", auth: "none", pathParams: ["connectionId"] },
+  {
+    id: "mcp_put",
+    method: "PUT",
+    path: "/api/mcp",
+    category: "mcp",
+    summary: "更新 MCP Server 配置",
+    auth: "none",
+    bodyHint: "{ servers: McpServerConfig[] }",
+    minTier: "admin",
+    confirmRequired: true,
+  },
   { id: "executors_list", method: "GET", path: "/api/executors", category: "executors", summary: "探测可用执行器", auth: "none" },
   { id: "skills_get", method: "GET", path: "/api/skills", category: "skills", summary: "Skill 目录、绑定与 Agent 列表", auth: "none" },
-  { id: "skills_bindings_put", method: "PUT", path: "/api/skills/bindings", category: "skills", summary: "更新 Skill 绑定", auth: "none", bodyHint: "SkillBindingsMap" },
-  { id: "skills_sync", method: "POST", path: "/api/skills/sync", category: "skills", summary: "同步内置 Skills", auth: "none" },
+  {
+    id: "skills_bindings_put",
+    method: "PUT",
+    path: "/api/skills/bindings",
+    category: "skills",
+    summary: "更新 Skill 绑定",
+    auth: "none",
+    bodyHint: "SkillBindingsMap",
+    minTier: "admin",
+    confirmRequired: true,
+  },
+  { id: "skills_sync", method: "POST", path: "/api/skills/sync", category: "skills", summary: "同步内置 Skills", auth: "none", minTier: "operator" },
   { id: "catalog_get", method: "GET", path: "/api/catalog", category: "catalog", summary: "本 API 目录（机器可读）", auth: "none" },
+  { id: "operator_playbook", method: "GET", path: "/api/operator/playbook", category: "operator", summary: "OpenX 端到端用法 Playbook", auth: "none", minTier: "read" },
+  { id: "operator_workflows", method: "GET", path: "/api/operator/workflows", category: "operator", summary: "可执行 Workflow 列表", auth: "none", minTier: "read" },
+  { id: "operator_workflow_run", method: "POST", path: "/api/operator/workflows/:id/run", category: "operator", summary: "运行内置 Workflow", auth: "none", pathParams: ["id"], bodyHint: "{ vars?, stopOnError? }", minTier: "read" },
+  { id: "operator_actions_list", method: "GET", path: "/api/operator/actions", category: "operator", summary: "待确认 operator 写操作", auth: "none", minTier: "read" },
+  {
+    id: "operator_action_confirm",
+    method: "POST",
+    path: "/api/operator/actions/:id/confirm",
+    category: "operator",
+    summary: "确认并执行待审 operator 写操作",
+    auth: "none",
+    pathParams: ["id"],
+    minTier: "admin",
+  },
+  {
+    id: "operator_action_dismiss",
+    method: "POST",
+    path: "/api/operator/actions/:id/dismiss",
+    category: "operator",
+    summary: "取消待审 operator 写操作",
+    auth: "none",
+    pathParams: ["id"],
+    minTier: "admin",
+  },
+  {
+    id: "operator_self_test",
+    method: "POST",
+    path: "/api/operator/self-test",
+    category: "operator",
+    summary: "运行确定性自举 E2E 断言链",
+    auth: "none",
+    minTier: "operator",
+  },
   { id: "projects_list", method: "GET", path: "/api/projects", category: "projects", summary: "项目与对话列表", auth: "none" },
   { id: "projects_create", method: "POST", path: "/api/projects", category: "projects", summary: "创建项目", auth: "none", bodyHint: "CreateProjectInput" },
   { id: "projects_get", method: "GET", path: "/api/projects/:id", category: "projects", summary: "项目详情", auth: "none", pathParams: ["id"] },
   { id: "projects_patch", method: "PATCH", path: "/api/projects/:id", category: "projects", summary: "更新项目", auth: "none", pathParams: ["id"], bodyHint: "UpdateProjectInput" },
   { id: "projects_delete", method: "DELETE", path: "/api/projects/:id", category: "projects", summary: "删除项目", auth: "none", pathParams: ["id"] },
+  { id: "projects_memory", method: "GET", path: "/api/projects/:id/memory", category: "projects", summary: "读取项目 MEMORY.md", auth: "none", pathParams: ["id"] },
+  { id: "projects_memory_distill", method: "POST", path: "/api/projects/:id/memory/distill", category: "projects", summary: "蒸馏项目经验到 MEMORY", auth: "none", pathParams: ["id"] },
   { id: "conversations_create", method: "POST", path: "/api/projects/:id/conversations", category: "conversations", summary: "创建对话", auth: "none", pathParams: ["id"], bodyHint: "{ title?: string }" },
   { id: "conversations_get", method: "GET", path: "/api/conversations/:id", category: "conversations", summary: "对话详情", auth: "none", pathParams: ["id"] },
   { id: "conversations_patch", method: "PATCH", path: "/api/conversations/:id", category: "conversations", summary: "更新对话标题", auth: "none", pathParams: ["id"], bodyHint: "{ title: string }" },
@@ -83,11 +282,31 @@ export const OPENX_API_CATALOG: readonly ApiEndpointDef[] = [
   { id: "goals_get", method: "GET", path: "/api/goals/:id", category: "goals", summary: "目标详情、日志与运行态", auth: "none", pathParams: ["id"] },
   { id: "goals_run", method: "GET", path: "/api/goals/:id/run", category: "goals", summary: "目标运行态", auth: "none", pathParams: ["id"] },
   { id: "goals_children", method: "GET", path: "/api/goals/:id/children", category: "goals", summary: "子目标列表", auth: "none", pathParams: ["id"] },
+  {
+    id: "goals_review_rounds",
+    method: "GET",
+    path: "/api/goals/:id/review-rounds",
+    category: "goals",
+    summary: "审查轮次历史",
+    auth: "none",
+    pathParams: ["id"],
+  },
+  {
+    id: "goals_trigger_review",
+    method: "POST",
+    path: "/api/goals/:id/trigger-review",
+    category: "goals",
+    summary: "手动触发审查",
+    auth: "none",
+    pathParams: ["id"],
+  },
   { id: "goals_patch", method: "PATCH", path: "/api/goals/:id", category: "goals", summary: "更新目标", auth: "none", pathParams: ["id"], bodyHint: "UpdateGoalInput" },
   { id: "goals_refine", method: "POST", path: "/api/goals/:id/refine", category: "goals", summary: "Coach 重新整理目标", auth: "none", pathParams: ["id"] },
   { id: "goals_start", method: "POST", path: "/api/goals/:id/start", category: "goals", summary: "启动执行", auth: "none", pathParams: ["id"] },
   { id: "goals_retry", method: "POST", path: "/api/goals/:id/retry", category: "goals", summary: "失败重试", auth: "none", pathParams: ["id"] },
   { id: "goals_approve", method: "POST", path: "/api/goals/:id/approve", category: "goals", summary: "验收通过", auth: "none", pathParams: ["id"] },
+  { id: "goals_approval_gate", method: "GET", path: "/api/goals/:id/approval-gate", category: "goals", summary: "查询完成门禁状态", auth: "none", pathParams: ["id"] },
+  { id: "goals_waive", method: "POST", path: "/api/goals/:id/waive", category: "goals", summary: "豁免子任务", auth: "none", pathParams: ["id"] },
   { id: "goals_rework", method: "POST", path: "/api/goals/:id/rework", category: "goals", summary: "返工", auth: "none", pathParams: ["id"], bodyHint: "{ reason?: string }" },
   { id: "goals_cancel", method: "POST", path: "/api/goals/:id/cancel", category: "goals", summary: "取消", auth: "none", pathParams: ["id"] },
   { id: "goals_delete", method: "DELETE", path: "/api/goals/:id", category: "goals", summary: "删除目标", auth: "none", pathParams: ["id"] },
@@ -95,25 +314,123 @@ export const OPENX_API_CATALOG: readonly ApiEndpointDef[] = [
   { id: "goals_batch", method: "POST", path: "/api/goals/batch", category: "goals", summary: "批量 start/cancel/approve/delete", auth: "none", bodyHint: "{ action, ids }" },
   { id: "coach_providers", method: "GET", path: "/api/coach/providers", category: "coach", summary: "Coach LLM 模板列表", auth: "none" },
   { id: "coach_status", method: "GET", path: "/api/coach/status", category: "coach", summary: "Coach 运行时状态", auth: "none" },
-  { id: "coach_test", method: "POST", path: "/api/coach/test", category: "coach", summary: "测试 Coach 连接", auth: "none" },
+  { id: "coach_test", method: "POST", path: "/api/coach/test", category: "coach", summary: "测试 Coach 连接", auth: "none", minTier: "operator" },
   { id: "coach_refine", method: "POST", path: "/api/coach/refine", category: "coach", summary: "整理用户草稿为结构化目标", auth: "none", bodyHint: "RefineInput" },
   { id: "coach_messages", method: "GET", path: "/api/coach/messages", category: "coach", summary: "对话历史", auth: "none", query: { conversationId: "对话 ID" } },
   { id: "coach_chat", method: "POST", path: "/api/coach/chat", category: "coach", summary: "Coach 对话", auth: "none", bodyHint: "CoachChatInput（含 mcpIds/agentId/skillIds）" },
+  {
+    id: "coach_refined_respond",
+    method: "POST",
+    path: "/api/coach/refined/:messageId/respond",
+    category: "coach",
+    summary: "任务单确认/取消",
+    auth: "none",
+    pathParams: ["messageId"],
+    bodyHint: "RefinedWorkOrderRespond",
+  },
+  {
+    id: "coach_clarify_respond",
+    method: "POST",
+    path: "/api/coach/clarify/:messageId/respond",
+    category: "coach",
+    summary: "澄清卡作答/跳过",
+    auth: "none",
+    pathParams: ["messageId"],
+    bodyHint: "CoachClarifyRespond",
+  },
   { id: "model_templates", method: "GET", path: "/api/model/templates", category: "model", summary: "LLM 渠道模板", auth: "none" },
   { id: "model_providers_get", method: "GET", path: "/api/model/providers", category: "model", summary: "已配置渠道", auth: "none" },
-  { id: "model_providers_create", method: "POST", path: "/api/model/providers", category: "model", summary: "新增渠道", auth: "none", bodyHint: "{ slug, config }" },
-  { id: "model_providers_update", method: "PUT", path: "/api/model/providers/:slug", category: "model", summary: "更新渠道", auth: "none", pathParams: ["slug"], bodyHint: "ProviderConfig" },
-  { id: "model_providers_delete", method: "DELETE", path: "/api/model/providers/:slug", category: "model", summary: "删除渠道", auth: "none", pathParams: ["slug"] },
+  {
+    id: "model_providers_create",
+    method: "POST",
+    path: "/api/model/providers",
+    category: "model",
+    summary: "新增渠道",
+    auth: "none",
+    bodyHint: "{ slug, config }",
+    minTier: "admin",
+    confirmRequired: true,
+  },
+  {
+    id: "model_providers_update",
+    method: "PUT",
+    path: "/api/model/providers/:slug",
+    category: "model",
+    summary: "更新渠道",
+    auth: "none",
+    pathParams: ["slug"],
+    bodyHint: "ProviderConfig",
+    minTier: "admin",
+    confirmRequired: true,
+  },
+  {
+    id: "model_providers_delete",
+    method: "DELETE",
+    path: "/api/model/providers/:slug",
+    category: "model",
+    summary: "删除渠道",
+    auth: "none",
+    pathParams: ["slug"],
+    minTier: "admin",
+    confirmRequired: true,
+  },
   { id: "model_status", method: "GET", path: "/api/model/status", category: "model", summary: "Coach/Pi 模型运行时", auth: "none" },
-  { id: "model_fetch_models", method: "POST", path: "/api/model/fetch-models", category: "model", summary: "拉取远程模型列表", auth: "none", bodyHint: "{ slug? | config? }" },
-  { id: "model_test", method: "POST", path: "/api/model/test", category: "model", summary: "测试模型连接", auth: "none", bodyHint: "{ ref?, role?, slug?, config? }" },
+  { id: "model_fetch_models", method: "POST", path: "/api/model/fetch-models", category: "model", summary: "拉取远程模型列表", auth: "none", bodyHint: "{ slug? | config? }", minTier: "operator" },
+  { id: "model_test", method: "POST", path: "/api/model/test", category: "model", summary: "测试模型连接", auth: "none", bodyHint: "{ ref?, role?, slug?, config? }", minTier: "operator" },
   { id: "cli_acp_config_get", method: "GET", path: "/api/cli/acp-config/:executorId", category: "cli", summary: "读取 ACP CLI 配置快照", auth: "none", pathParams: ["executorId"] },
-  { id: "cli_acp_config_put", method: "PUT", path: "/api/cli/acp-config/:executorId", category: "cli", summary: "同步 ACP CLI 模型配置", auth: "none", pathParams: ["executorId"], bodyHint: "{ modelRef }" },
+  {
+    id: "cli_acp_config_put",
+    method: "PUT",
+    path: "/api/cli/acp-config/:executorId",
+    category: "cli",
+    summary: "同步 ACP CLI 模型配置",
+    auth: "none",
+    pathParams: ["executorId"],
+    bodyHint: "{ modelRef }",
+    minTier: "admin",
+    confirmRequired: true,
+  },
   { id: "cli_templates", method: "GET", path: "/api/cli/templates", category: "cli", summary: "CLI 接入模板", auth: "none" },
-  { id: "cli_profiles_create", method: "POST", path: "/api/cli/profiles", category: "cli", summary: "添加 CLI/Connect 配置", auth: "none", bodyHint: "CliProfile" },
-  { id: "cli_profiles_delete", method: "DELETE", path: "/api/cli/profiles/:executorId", category: "cli", summary: "删除 CLI 配置", auth: "none", pathParams: ["executorId"] },
+  {
+    id: "cli_profiles_create",
+    method: "POST",
+    path: "/api/cli/profiles",
+    category: "cli",
+    summary: "添加 CLI/Connect 配置",
+    auth: "none",
+    bodyHint: "CliProfile",
+    minTier: "admin",
+    confirmRequired: true,
+  },
+  {
+    id: "cli_profiles_delete",
+    method: "DELETE",
+    path: "/api/cli/profiles/:executorId",
+    category: "cli",
+    summary: "删除 CLI 配置",
+    auth: "none",
+    pathParams: ["executorId"],
+    minTier: "admin",
+    confirmRequired: true,
+  },
   { id: "cli_bootstrap_get", method: "GET", path: "/api/cli/profiles/:executorId/bootstrap", category: "cli", summary: "获取 Connect 自举命令", auth: "none", pathParams: ["executorId"] },
-  { id: "cli_bootstrap_post", method: "POST", path: "/api/cli/profiles/:executorId/bootstrap", category: "cli", summary: "一键自举 Connect Agent", auth: "none", pathParams: ["executorId"] },
+  { id: "cli_bootstrap_post", method: "POST", path: "/api/cli/profiles/:executorId/bootstrap", category: "cli", summary: "一键自举 Connect Agent", auth: "none", pathParams: ["executorId"], minTier: "operator" },
+  {
+    id: "cli_system_conversation",
+    method: "GET",
+    path: "/api/cli/system-conversation",
+    category: "cli",
+    summary: "CLI 集成系统对话",
+    auth: "none",
+  },
+  {
+    id: "cli_bootstrap_status",
+    method: "GET",
+    path: "/api/cli/bootstrap-status",
+    category: "cli",
+    summary: "Connect 自举进程状态",
+    auth: "none",
+  },
   { id: "connect_register", method: "POST", path: "/api/connect", category: "connect", summary: "注册 Connect Agent（返回 internalToken 与回调 URL）", auth: "none", bodyHint: "ConnectInput" },
   { id: "connect_heartbeat", method: "POST", path: "/api/connect/:connectionId/heartbeat", category: "connect", summary: "心跳并拉取待办目标", auth: "none", pathParams: ["connectionId"], bodyHint: "HeartbeatInput" },
   { id: "connect_disconnect", method: "DELETE", path: "/api/connect/:connectionId", category: "connect", summary: "断开连接", auth: "none", pathParams: ["connectionId"] },
@@ -125,10 +442,33 @@ export const OPENX_API_CATALOG: readonly ApiEndpointDef[] = [
   { id: "internal_log", method: "POST", path: "/internal/goals/:id/log", category: "internal", summary: "写入执行日志", auth: "internal", pathParams: ["id"], bodyHint: "{ level?, message }" },
 ] as const;
 
-export function listApiCatalog(opts?: { category?: string }): ApiEndpointDef[] {
-  const all = [...OPENX_API_CATALOG];
-  if (!opts?.category) return all;
-  return all.filter((e) => e.category === opts.category);
+export function listApiCatalog(opts?: {
+  category?: string;
+  tier?: OperatorTier;
+}): Array<ApiEndpointDef & { minTier: OperatorTier; confirmRequired: boolean }> {
+  let all = enrichApiCatalog(OPENX_API_CATALOG);
+  if (opts?.category) {
+    all = all.filter((e) => e.category === opts.category);
+  }
+  if (opts?.tier && opts.tier !== "off") {
+    all = all.filter((e) => tierSatisfies(opts.tier!, e.minTier));
+  }
+  return all;
+}
+
+export function findCatalogEndpoint(
+  method: string,
+  path: string,
+): (ApiEndpointDef & { minTier: OperatorTier; confirmRequired: boolean }) | undefined {
+  const normalizedPath = path.split("?")[0] ?? path;
+  const m = method.toUpperCase();
+  for (const ep of enrichApiCatalog(OPENX_API_CATALOG)) {
+    if (ep.method !== m) continue;
+    const pattern = ep.path.replace(/:[^/]+/g, "[^/]+");
+    const re = new RegExp(`^${pattern}$`);
+    if (re.test(normalizedPath)) return ep;
+  }
+  return undefined;
 }
 
 export function getApiCatalogMeta() {
@@ -142,6 +482,8 @@ export function getApiCatalogMeta() {
       public: "GET 与无 Origin 的 POST/PUT/PATCH/DELETE 可直接调用",
       internal: "需请求头 x-openx-internal-token（见 POST /api/connect 或 ~/.openx/internal.token）",
       sse: "/api/events 为 SSE 长连接，不可用普通 JSON 请求模拟",
+      operator:
+        "operatorTier: off|read|operator|admin；admin 写操作 confirmRequired 须 UI 确认",
     },
   };
 }

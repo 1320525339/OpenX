@@ -3,7 +3,13 @@
  */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
-import { upgradeToModelConfig, type ModelSettingsSlice } from "@openx/shared";
+import {
+  appendReviewPlaybookToSystem,
+  buildRoleSystemPrompt,
+  upgradeToModelConfig,
+  type LlmContextSettings,
+  type ModelSettingsSlice,
+} from "@openx/shared";
 import { resolveLlmCredentials, type LlmEnv } from "./llm.js";
 import { formatCoachLlmError } from "./llm-errors.js";
 
@@ -17,16 +23,6 @@ export type ParentRollupInput = {
   parentAcceptance?: string;
   children: ParentRollupChild[];
 };
-
-const ROLLUP_SYSTEM = [
-  "你是 OpenX 工头层的汇总员。父目标的多个子任务已全部完成，你需要将各子任务结果整合为一份连贯的父目标验收摘要。",
-  "要求：",
-  "1. 用中文 Markdown，结构清晰（可用小标题或列表）。",
-  "2. 保留关键事实：文件路径、API、数据、命令输出等可验证信息，不要臆造。",
-  "3. 指出子任务之间的衔接关系与整体完成度。",
-  "4. 控制在 800 字以内。",
-  "5. 仅输出摘要正文，不要 JSON 或多余解释。",
-].join("\n");
 
 function buildRollupPrompt(input: ParentRollupInput): string {
   const parts = [`## 父目标\n${input.parentTitle}`];
@@ -49,6 +45,7 @@ export async function synthesizeParentRollupSummary(
   input: ParentRollupInput,
   settings: ModelSettingsSlice,
   env?: LlmEnv,
+  llmContextSettings?: Partial<LlmContextSettings>,
 ): Promise<{ summary: string | null; llmError?: string }> {
   const upgraded = upgradeToModelConfig(settings);
   const creds = resolveLlmCredentials(upgraded, "coach", env);
@@ -65,7 +62,10 @@ export async function synthesizeParentRollupSummary(
   try {
     const { text } = await generateText({
       model: provider(creds.model),
-      system: ROLLUP_SYSTEM,
+      system: appendReviewPlaybookToSystem(
+        buildRoleSystemPrompt("rollup", llmContextSettings),
+        "rollup",
+      ),
       prompt: buildRollupPrompt(input),
       maxOutputTokens: 1200,
       temperature: 0.2,

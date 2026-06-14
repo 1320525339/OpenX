@@ -17,6 +17,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { DEFAULT_PI_MAX_TOOL_CALLS, type PiExecutorSettings } from "@openx/shared";
+import {
+  CREW_FOREMAN_PROMPT_APPENDIX,
+  buildPiCrewSessionId,
+} from "@openx/shared";
 
 import {
   buildExecutionPrompt,
@@ -38,6 +42,7 @@ import { describePiModelRef, mergePiSettingsFromModel } from "./pi-bridge.js";
 import { createOpenxResourceLoader } from "./pi-resource-loader.js";
 
 import { summarizePiRun } from "./summary.js";
+import { runPiCrewDialogueLoop } from "./crew-loop.js";
 
 
 
@@ -375,6 +380,7 @@ async function runSessionTurn(
 
 ): Promise<{
   summary: string;
+  assistantText: string;
   park: boolean;
   toolBudgetExceeded: boolean;
   deliverables: GoalDeliverable[];
@@ -476,6 +482,7 @@ async function runSessionTurn(
 
   return {
     summary,
+    assistantText: state.assistantText,
     park: !timedOut && !state.toolBudgetExceeded,
     toolBudgetExceeded: state.toolBudgetExceeded,
     deliverables: state.deliverables,
@@ -518,7 +525,7 @@ export const piExecutor: ExecutorAdapter = {
 
   id: "pi",
 
-  displayName: "Pi（内嵌底座）",
+  displayName: "Pi 施工队（工头班底）",
 
   executionModel: "push",
 
@@ -625,13 +632,22 @@ export const piExecutor: ExecutorAdapter = {
 
     const pi = resolvePiSettings(ctx);
 
-    const promptText = buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
-      isRework: ctx.isRework,
-      priorSummaries: ctx.priorSummaries,
-      priorReviewRounds: ctx.priorReviewRounds,
-      agentRole: ctx.agentRole,
-      workspaceRoot: ctx.workspaceRoot,
-    });
+    const promptText = [
+      buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
+        isRework: ctx.isRework,
+        priorSummaries: ctx.priorSummaries,
+        priorReviewRounds: ctx.priorReviewRounds,
+        agentRole: ctx.agentRole,
+        workspaceRoot: ctx.workspaceRoot,
+        llmContext: ctx.llmContext,
+      }),
+      CREW_FOREMAN_PROMPT_APPENDIX,
+    ].join("\n\n");
+
+    const crewSessionId = buildPiCrewSessionId(goal.id);
+    if (callbacks.onCrewSession) {
+      await callbacks.onCrewSession(crewSessionId);
+    }
 
 
 
@@ -723,11 +739,23 @@ export const piExecutor: ExecutorAdapter = {
 
       await callbacks.onProgress(18, "Pi 已接受任务");
 
-      const { summary, park, toolBudgetExceeded, deliverables } = await runSessionTurn(
+      const crewResult = await runPiCrewDialogueLoop(
         session,
         promptText,
         ctx,
+        async (s, p, c, opts) => {
+          const turn = await runSessionTurn(s, p, c, opts);
+          return {
+            summary: turn.summary,
+            assistantText: turn.assistantText,
+            park: turn.park,
+            toolBudgetExceeded: turn.toolBudgetExceeded,
+            deliverables: turn.deliverables,
+          };
+        },
       );
+
+      const { summary, park, toolBudgetExceeded, deliverables } = crewResult;
 
       if (toolBudgetExceeded) {
         await callbacks.onProgress(100, "Pi 已中止（工具上限）");
@@ -774,18 +802,27 @@ export const piExecutor: ExecutorAdapter = {
 
     const { callbacks } = ctx;
 
-    const promptText = buildExecutionPrompt(
-      ctx.goal,
-      ctx.priorLogs ?? [],
-      ctx.enabledSkills,
-      {
-        isRework: true,
-        priorSummaries: ctx.priorSummaries,
-      priorReviewRounds: ctx.priorReviewRounds,
-        agentRole: ctx.agentRole,
-        workspaceRoot: ctx.workspaceRoot,
-      },
-    );
+    const promptText = [
+      buildExecutionPrompt(
+        ctx.goal,
+        ctx.priorLogs ?? [],
+        ctx.enabledSkills,
+        {
+          isRework: true,
+          priorSummaries: ctx.priorSummaries,
+          priorReviewRounds: ctx.priorReviewRounds,
+          agentRole: ctx.agentRole,
+          workspaceRoot: ctx.workspaceRoot,
+          llmContext: ctx.llmContext,
+        },
+      ),
+      CREW_FOREMAN_PROMPT_APPENDIX,
+    ].join("\n\n");
+
+    const crewSessionId = buildPiCrewSessionId(ctx.goal.id);
+    if (callbacks.onCrewSession) {
+      await callbacks.onCrewSession(crewSessionId);
+    }
 
     parkedRuns.delete(ctx.goal.id);
 
@@ -799,12 +836,24 @@ export const piExecutor: ExecutorAdapter = {
 
     try {
 
-      const { summary, park, toolBudgetExceeded, deliverables } = await runSessionTurn(
+      const crewResult = await runPiCrewDialogueLoop(
         parked.session,
         promptText,
         ctx,
-        { steer: true },
+        async (s, p, c, turnOpts) => {
+          const turn = await runSessionTurn(s, p, c, turnOpts);
+          return {
+            summary: turn.summary,
+            assistantText: turn.assistantText,
+            park: turn.park,
+            toolBudgetExceeded: turn.toolBudgetExceeded,
+            deliverables: turn.deliverables,
+          };
+        },
+        { initialSteer: true },
       );
+
+      const { summary, park, toolBudgetExceeded, deliverables } = crewResult;
 
       if (toolBudgetExceeded) {
         await callbacks.onProgress(100, "Pi 返工已中止（工具上限）");

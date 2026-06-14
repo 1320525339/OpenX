@@ -13,6 +13,7 @@
 import { synthesizeParentRollupSummary } from "@openx/coach";
 
 import { canTransition, type Goal } from "@openx/shared";
+import { isChildGoalComplete } from "@openx/shared";
 
 import {
 
@@ -33,6 +34,7 @@ import { cancelRunning } from "./orchestrator.js";
 import { broadcast } from "./sse.js";
 
 import { loadSettings } from "./settings-store.js";
+import { resolveMergedLlmContext } from "./llm-context-resolve.js";
 
 
 
@@ -76,7 +78,7 @@ function mergeRollupSummary(
 
 function childrenBlockingRollup(children: Goal[]): Goal[] {
 
-  return children.filter((c) => c.status !== "done");
+  return children.filter((c) => !isChildGoalComplete(c));
 
 }
 
@@ -117,6 +119,8 @@ export async function resolveParentRollupSummary(
       settings,
 
       process.env,
+
+      resolveMergedLlmContext({ goalId: parent.id }),
 
     );
 

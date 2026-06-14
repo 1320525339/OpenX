@@ -64,6 +64,13 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
     [onDividerPointerMove],
   );
 
+  const onDividerPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      beginDrag(e, containerRef.current);
+    },
+    [beginDrag],
+  );
+
   const leftFr = Math.max(1, Math.round(ratio * 1000));
   const rightFr = Math.max(1, Math.round((1 - ratio) * 1000));
 
@@ -86,7 +93,7 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
         ariaValueNow={Math.round(ratio * 100)}
         ariaValueMin={Math.round(MIN_RATIO * 100)}
         ariaValueMax={Math.round(MAX_RATIO * 100)}
-        onPointerDown={beginDrag}
+        onPointerDown={onDividerPointerDown}
         onPointerMove={onDividerPointerMoveWrapped}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}

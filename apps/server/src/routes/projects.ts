@@ -25,6 +25,9 @@ import {
   isSystemConversationId,
   isSystemProjectId,
 } from "../system-workspace.js";
+import { distillProjectMemory } from "../dream-job.js";
+import { readProjectMemory } from "../memory-store.js";
+import { resolveWorkspaceRoot } from "../workspace-path.js";
 
 export const projectsRoutes = new Hono();
 
@@ -69,6 +72,9 @@ projectsRoutes.patch("/:id", async (c) => {
     project.workspaceDir = normalizeWorkspaceRootForStorage(patch.workspaceDir);
     ensureWorkspaceSkillsLink(project.workspaceDir);
   }
+  if (patch.llmContext !== undefined) {
+    project.llmContext = patch.llmContext;
+  }
   updateProject(project);
   return c.json({ project });
 });
@@ -81,6 +87,22 @@ projectsRoutes.delete("/:id", (c) => {
   const ok = deleteProject(id);
   if (!ok) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
+});
+
+projectsRoutes.get("/:id/memory", (c) => {
+  const project = getProjectById(c.req.param("id"));
+  if (!project) return c.json({ error: "Not found" }, 404);
+  const workspaceRoot = resolveWorkspaceRoot(project.workspaceDir);
+  const memory = readProjectMemory(workspaceRoot, project.id);
+  return c.json({ projectId: project.id, memory: memory ?? "" });
+});
+
+projectsRoutes.post("/:id/memory/distill", (c) => {
+  const result = distillProjectMemory(c.req.param("id"));
+  if (!result.ok && result.detail === "项目不存在") {
+    return c.json({ error: result.detail }, 404);
+  }
+  return c.json(result);
 });
 
 projectsRoutes.post("/:id/conversations", async (c) => {

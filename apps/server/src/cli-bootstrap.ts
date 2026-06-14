@@ -7,10 +7,12 @@ import {
   buildConnectClientArgv,
   type CliProfile,
   type ConnectBootstrapStatus,
+  type Settings,
 } from "@openx/shared";
 import { getOpenxSkillsDir } from "@openx/shared/skills-path";
 import { getConnectionByExecutorId } from "./connect-store.js";
 import { resolveNodeForMcp } from "./mcp-openx-bootstrap.js";
+import { getServerBaseUrl } from "./server-base-url.js";
 
 const BOOTSTRAP_WAIT_MS = Number(process.env.OPENX_BOOTSTRAP_WAIT_MS ?? 45_000);
 const BOOTSTRAP_POLL_MS = 500;
@@ -106,6 +108,7 @@ export type BootstrapConnectResult = {
   pid?: number;
   status: ConnectBootstrapStatus;
   online?: boolean;
+  error?: string;
 };
 
 export function bootstrapConnectProfile(
@@ -251,7 +254,66 @@ export async function bootstrapConnectProfileAndWait(
   }
 
   const status = syncBootstrapOnlineStatus(profile.executorId);
-  return { ...result, status, online: status.online };
+  const timedOut = !status.online && status.phase !== "exited";
+  if (timedOut) {
+    setStatus(profile.executorId, {
+      lastError:
+        status.lastError ??
+        `等待 Agent 注册超时（${waitMs}ms）；进程可能仍在启动，可在工具页重试 bootstrap`,
+    });
+  }
+  return {
+    ...result,
+    status: syncBootstrapOnlineStatus(profile.executorId),
+    online: status.online,
+    error: timedOut
+      ? syncBootstrapOnlineStatus(profile.executorId).lastError
+      : undefined,
+  };
+}
+
+export function formatBootstrapFailureHint(
+  result: BootstrapConnectResult & { error?: string },
+): string {
+  if (result.online) return "";
+  if (result.error?.trim()) return result.error.trim();
+  const s = result.status;
+  if (s.lastError?.trim()) return s.lastError.trim();
+  if (s.phase === "exited") {
+    return `connect-client 已退出（code=${s.exitCode ?? "?"}）`;
+  }
+  if (s.phase === "running" || s.phase === "spawning") {
+    return `自举进程已启动（pid=${s.pid ?? "?"}），Agent 尚未注册；请稍后在工具页查看或手动执行启动命令`;
+  }
+  return "等待 Agent 上线超时";
+}
+
+/** 服务启动后为离线 Connect Profile 重新自举（内存态 bootstrap 记录重启后丢失） */
+export function rebootstrapOfflineConnectProfiles(settings: Settings): void {
+  if (!settings.autoBootstrapConnect) return;
+  const baseUrl = getServerBaseUrl();
+  for (const profile of settings.cliProfiles ?? []) {
+    if (profile.kind !== "connect") continue;
+    if (getConnectionByExecutorId(profile.executorId)) continue;
+    try {
+      bootstrapConnectProfile(profile, baseUrl);
+      console.log(`[connect-bootstrap] 启动离线 Agent：${profile.executorId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[connect-bootstrap] 启动 ${profile.executorId} 失败：${message}`);
+    }
+  }
+}
+
+export function warnIfConnectClientMissing(): void {
+  try {
+    resolveConnectClientScript();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[connect-bootstrap] ${message}。Connect 自举不可用，请执行：pnpm --filter @openx/connect-client build`,
+    );
+  }
 }
 
 /** 测试用 */

@@ -3,13 +3,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   ACP_CLI_CONFIG_TARGETS,
+  CODEX_OPENX_MODEL_PROVIDER,
   type AcpCliConfigSnapshot,
   type AcpCliConfigTarget,
   type AcpCliResolvedCredentials,
   buildClaudeAcpEnv,
+  describeAcpClaudeIneligibleReason,
+  isAcpClaudeEligibleProvider,
   isAcpCliConfigTarget,
   normalizeClaudeAnthropicBaseUrl,
   parseModelRef,
+  resolveAnthropicMessagesBaseUrl,
+  resolveCodexProxySurface,
   resolveModelCredentials,
   resolveProviderConfig,
   type Settings,
@@ -88,7 +93,7 @@ function stripMisplacedOpenxKeys(content: string): string {
     const sectionMatch = line.match(/^\s*\[([^\]]+)\]\s*$/);
     if (sectionMatch) {
       inSection = true;
-      inOpenxProvider = sectionMatch[1] === "model_providers.openx";
+      inOpenxProvider = sectionMatch[1] === `model_providers.${CODEX_OPENX_MODEL_PROVIDER}`;
       out.push(line);
       continue;
     }
@@ -107,14 +112,14 @@ function upsertOpenxCodexManagedBlock(
 ): string {
   const block = `${OPENX_CODEX_MANAGED}
 forced_login_method = "api"
-model_provider = "openx"
+model_provider = "${CODEX_OPENX_MODEL_PROVIDER}"
 
-[model_providers.openx]
-name = "OpenX"
+[model_providers.${CODEX_OPENX_MODEL_PROVIDER}]
+name = "OpenX Codex Responses Proxy"
 base_url = "${creds.baseUrl}"
-env_key = "OPENAI_API_KEY"
 wire_api = "responses"
-requires_openai_auth = false
+requires_openai_auth = true
+request_max_retries = 1
 `;
   const cleaned = stripMisplacedOpenxKeys(content);
   return `${cleaned.trimEnd()}\n\n${block}`;
@@ -182,7 +187,6 @@ function writeCodexAuthApiKey(authPath: string, apiKey: string): void {
       {
         auth_mode: "api",
         OPENAI_API_KEY: apiKey,
-        openai_api_key: apiKey,
       },
       null,
       2,
@@ -233,12 +237,26 @@ export function applyAcpCliCredentials(
 export function resolveAcpCliCredentialsFromRef(
   settings: Settings,
   modelRef: string,
+  executorId?: AcpCliConfigTarget,
 ): AcpCliResolvedCredentials | null {
+  if (executorId === "acp:codex") {
+    const upstream = resolveModelCredentials(settings, modelRef);
+    if (!upstream?.apiKey) return null;
+    return resolveCodexProxySurface(modelRef, settings);
+  }
+  const parsed = parseModelRef(modelRef);
+  const provider = parsed ? resolveProviderConfig(settings, parsed.slug) : null;
+  if (provider && !isAcpClaudeEligibleProvider(provider)) {
+    throw new Error(describeAcpClaudeIneligibleReason(provider));
+  }
   const creds = resolveModelCredentials(settings, modelRef);
   if (!creds) return null;
   return {
     apiKey: creds.apiKey,
-    baseUrl: creds.baseUrl,
+    baseUrl: resolveAnthropicMessagesBaseUrl(
+      creds.baseUrl,
+      provider?.source?.template,
+    ),
     model: creds.model,
   };
 }
@@ -280,7 +298,9 @@ export function readAcpCliConfig(
   const local = readLocalCliState(executorId);
   const modelRef = settings?.acpCli?.[executorId];
   const resolved =
-    modelRef && settings ? resolveAcpCliCredentialsFromRef(settings, modelRef) : null;
+    modelRef && settings
+      ? resolveAcpCliCredentialsFromRef(settings, modelRef, executorId)
+      : null;
   const labels =
     modelRef && settings ? labelForModelRef(settings, modelRef) : { providerName: undefined, modelLabel: undefined };
 
@@ -309,7 +329,7 @@ export function syncAcpCliFromModelRef(
   if (!isAcpCliConfigTarget(executorId)) {
     throw new Error("该 CLI 不支持 API 配置");
   }
-  const creds = resolveAcpCliCredentialsFromRef(settings, modelRef);
+  const creds = resolveAcpCliCredentialsFromRef(settings, modelRef, executorId);
   if (!creds) {
     throw new Error("所选渠道/模型不可用，请先在「模型」页配置 API Key");
   }

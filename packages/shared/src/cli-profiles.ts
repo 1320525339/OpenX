@@ -182,7 +182,7 @@ export function buildCliIntegrationGoal(input: CliIntegrationInput): CliIntegrat
 
   if (execId) {
     return {
-      userDraft: `请完成 Connect Agent「${input.cliName}」（executorId=${execId}）的启动与上线。教程：${tutorial}${notesBlock}`,
+      userDraft: `请完成 Connect Agent「${input.cliName}」（executorId=${execId}）的启动与上线。${notesBlock}`,
       title: `接入 Connect Agent：${input.cliName}`,
       acceptance: [
         `executorId=${execId} 在 OpenX 工具页显示为在线（● 可用）`,
@@ -191,11 +191,12 @@ export function buildCliIntegrationGoal(input: CliIntegrationInput): CliIntegrat
       ].join("；"),
       executionPrompt: [
         `你是 OpenX 的 Pi 执行器。Connect Agent「${input.cliName}」的 CliProfile 已写入 settings（executorId=${execId}）。`,
-        `1. 阅读接入教程：${tutorial}`,
-        `2. 调用 OpenX API 一键自举：POST ${base}/api/cli/profiles/${execId}/bootstrap（无需向用户索要 executorId）`,
+        "禁止根据教程链接安装第三方 CLI、爬取网页或执行 obscura/curl 安装脚本；本任务只需启动已内置的 connect-client。",
+        `1. 调用 OpenX API 一键自举：POST ${base}/api/cli/profiles/${execId}/bootstrap，body: {"wait":true}`,
+        `2. 若返回 online=false，执行 GET ${base}/api/cli/profiles/${execId}/bootstrap 获取 command，在本机终端运行`,
         `3. 轮询 GET ${base}/api/executors，直到 ${execId} 显示 available=true`,
-        "4. 若 bootstrap 失败，用 GET 同路径 /bootstrap 复制启动命令在本机终端执行，并排查 connect-client 是否已 build",
-        "5. 在任务日志中记录 bootstrap 结果、pid（若有）与 executors 检测截图式摘要",
+        "4. 若报错「未找到 connect-client」，在仓库根目录执行：pnpm --filter @openx/connect-client build，然后重试 bootstrap",
+        "5. 在任务日志中记录 bootstrap 响应（online/pid/error）与 executors 检测结果",
         "优先使用 openx MCP（openx_call_api）调用上述 API；不要修改 OpenX 源码。",
         notesBlock,
       ]

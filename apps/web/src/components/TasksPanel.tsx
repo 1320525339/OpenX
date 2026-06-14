@@ -1,22 +1,29 @@
 import { useEffect, useRef, useState } from "react";
+import { useHorizontalPanScroll } from "../lib/use-horizontal-pan-scroll";
 import type { BatchGoalsAction, Goal } from "@openx/shared";
+import {
+  canMutateGoal,
+  formatWorkOrderId,
+  goalDisplayHint,
+  goalDisplayLabel,
+  goalDisplayOutcome,
+  goalMatchesDisplayFilter,
+  type GoalAccessActor,
+} from "@openx/shared";
 import { EXECUTOR_AUTO, CONNECT_ANY_EXECUTOR_ID } from "@openx/shared";
 import { connectClaimStatus, executorDisplayLabel } from "../lib/executors";
 import { goalsEligibleForAction } from "../lib/goal-batch";
-import { buildGoalContext, formatDispatchSummary, goalStatusText, truncate } from "../lib/goal-detail";
+import { buildGoalContext, formatDispatchSummary, truncate } from "../lib/goal-detail";
 import { buildGoalTreeList } from "../lib/goal-list";
 import { GoalTaskExpandBody, goalResultTeaser } from "./GoalTaskExpandBody";
 import { GoalTaskActions, goalHasTaskActions } from "./GoalTaskActions";
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "全部" },
-  { key: "draft", label: "先放着" },
-  { key: "running", label: "正在推进" },
-  { key: "awaiting_review", label: "等你确认" },
+  { key: "incomplete", label: "未完成" },
+  { key: "failed", label: "失败" },
   { key: "done", label: "已完成" },
-  { key: "failed", label: "卡住了" },
-  { key: "rework", label: "需要返工" },
-  { key: "cancelled", label: "已取消" },
+  { key: "rework", label: "返工中" },
 ];
 
 type Props = {
@@ -44,12 +51,16 @@ type Props = {
   showConnectClaimStatus?: boolean;
   /** 项目看板：按对话标注任务来源 */
   conversationTitles?: Record<string, string>;
+  /** 项目看板：按项目标注（调度台） */
+  projectTitles?: Record<string, string>;
+  /** 对话 → 项目 id（配合 projectTitles 展示所属项目） */
+  conversationProjectIds?: Record<string, string>;
+  /** 当前操作者权限（调度台可改全部；对话内仅本对话可改） */
+  goalAccess?: GoalAccessActor;
 };
 
 function countForFilter(goals: Goal[], key: string): number {
-  if (key === "all") return goals.length;
-  if (key === "rework") return goals.filter((g) => g.effectStatus === "rework").length;
-  return goals.filter((g) => g.status === key).length;
+  return goals.filter((g) => goalMatchesDisplayFilter(g, key)).length;
 }
 
 function executorLabel(executorId: Goal["executorId"]): string {
@@ -80,10 +91,17 @@ export function TasksPanel({
   locateRequest,
   showConnectClaimStatus = false,
   conversationTitles,
+  projectTitles,
+  conversationProjectIds,
+  goalAccess = { type: "console" },
 }: Props) {
   const [batchBusy, setBatchBusy] = useState(false);
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const { ref: filterTabsRef, panning: filterTabsPanning } =
+    useHorizontalPanScroll<HTMLDivElement>();
+
+  const canEditGoal = (goal: Goal) => canMutateGoal(goalAccess, goal);
 
   useEffect(() => {
     if (!locateRequest) return;
@@ -98,13 +116,16 @@ export function TasksPanel({
     return () => clearTimeout(timer);
   }, [locateRequest]);
 
-  const selectedGoals = allGoals.filter((g) => selectedIds.has(g.id));
+  const selectedGoals = allGoals.filter(
+    (g) => selectedIds.has(g.id) && canEditGoal(g),
+  );
   const startN = goalsEligibleForAction(selectedGoals, "start").length;
   const cancelN = goalsEligibleForAction(selectedGoals, "cancel").length;
   const approveN = goalsEligibleForAction(selectedGoals, "approve").length;
   const deleteN = selectedIds.size;
   const allVisibleSelected =
-    goals.length > 0 && goals.every((g) => selectedIds.has(g.id));
+    goals.length > 0 &&
+    goals.filter(canEditGoal).every((g) => selectedIds.has(g.id));
 
   const runBatch = async (action: BatchGoalsAction) => {
     if (selectedIds.size === 0 || batchBusy) return;
@@ -114,11 +135,6 @@ export function TasksPanel({
       const ok = window.confirm(
         `确定彻底删除 ${ids.length} 个目标？\n将同时移除子目标，且不可恢复。`,
       );
-      if (!ok) return;
-    } else if (action === "approve") {
-      const eligible = goalsEligibleForAction(selectedGoals, "approve");
-      if (eligible.length === 0) return;
-      const ok = window.confirm(`确认将 ${eligible.length} 个目标标记为已完成？`);
       if (!ok) return;
     }
 
@@ -150,7 +166,12 @@ export function TasksPanel({
     <section className={`mech-panel tasks-panel${editMode ? " tasks-panel-editing" : ""}`}>
       <div className="mech-panel-body panel-stack">
         <div className="tasks-toolbar">
-          <div className="filter-row filter-tabs" role="tablist" aria-label="目标筛选">
+          <div
+            ref={filterTabsRef}
+            className={`filter-row filter-tabs${filterTabsPanning ? " is-panning" : ""}`}
+            role="tablist"
+            aria-label="目标筛选"
+          >
             {FILTERS.map(({ key, label }) => {
               const n = countForFilter(allGoals, key);
               return (
@@ -194,19 +215,25 @@ export function TasksPanel({
           {treeGoals.map(({ goal: g, depth }) => {
             const selected = editMode ? selectedIds.has(g.id) : selectedId === g.id;
             const expanded = !editMode && expandedGoalId === g.id;
+            const editable = canEditGoal(g);
             const { parent, dependencies } = buildGoalContext(allGoals, g);
             const resultTeaser = goalResultTeaser(g);
-            const actionHandlers = {
-              onStart,
-              onApprove,
-              onRework,
-              onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
-            };
+            const actionHandlers = editable
+              ? {
+                  onStart,
+                  onApprove,
+                  onRework,
+                  onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
+                }
+              : {
+                  onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
+                };
             const showCollapsedActions =
               !editMode && !expanded && goalHasTaskActions(g, actionHandlers);
 
             const handleCardClick = () => {
               if (editMode) {
+                if (!editable) return;
                 onToggleSelect(g.id);
                 return;
               }
@@ -220,7 +247,7 @@ export function TasksPanel({
                 data-goal-id={g.id}
                 role="button"
                 tabIndex={0}
-                className={`goal-card${selected ? " selected" : ""}${expanded ? " expanded" : ""}${g.status === "awaiting_review" ? " awaiting_review" : ""}${editMode ? " edit-mode" : ""}${depth > 0 ? " goal-card-child" : ""}`}
+                className={`goal-card${selected ? " selected" : ""}${expanded ? " expanded" : ""}${g.status === "awaiting_review" ? " awaiting_review" : ""}${editMode ? " edit-mode" : ""}${depth > 0 ? " goal-card-child" : ""}${!editable ? " goal-card-readonly" : ""}`}
                 style={depth > 0 ? { marginLeft: `${depth * 0.75}rem` } : undefined}
                 onClick={handleCardClick}
                 onKeyDown={(e) => {
@@ -236,6 +263,7 @@ export function TasksPanel({
                     >
                       <input
                         type="checkbox"
+                        disabled={!editable}
                         checked={selectedIds.has(g.id)}
                         onChange={() => onToggleSelect(g.id)}
                       />
@@ -250,18 +278,34 @@ export function TasksPanel({
                   )}
                   <div className="goal-card-body">
                     <div className="goal-card-title-row">
+                      {g.orderNo > 0 ? (
+                        <span className="goal-card-order-id" title="任务单号">
+                          {formatWorkOrderId(g.orderNo)}
+                        </span>
+                      ) : null}
                       <strong className="goal-card-title">{g.title}</strong>
                       {conversationTitles?.[g.conversationId] ? (
                         <span className="goal-card-conv" title="所属对话">
                           {conversationTitles[g.conversationId]}
                         </span>
                       ) : null}
-                      <span className={`status-pill ${g.status}`}>
-                        {goalStatusText(g)}
+                      {conversationProjectIds &&
+                      projectTitles?.[conversationProjectIds[g.conversationId]] ? (
+                        <span className="goal-card-project" title="所属项目">
+                          {projectTitles[conversationProjectIds[g.conversationId]]}
+                        </span>
+                      ) : null}
+                      {!editable ? (
+                        <span className="goal-card-readonly-tag">只读</span>
+                      ) : null}
+                      <span
+                        className={`status-pill outcome-${goalDisplayOutcome(g)}${g.status === "awaiting_review" ? " awaiting_review" : ""}`}
+                      >
+                        {goalDisplayLabel(g)}
                       </span>
-                      {g.effectStatus === "rework" && (
-                        <span className="status-pill rework-tag">再改一下</span>
-                      )}
+                      {goalDisplayHint(g) ? (
+                        <span className="status-hint">{goalDisplayHint(g)}</span>
+                      ) : null}
                       <span className="executor-tag">{executorLabel(g.executorId)}</span>
                       {!editMode && (
                         <span
@@ -344,9 +388,15 @@ export function TasksPanel({
                 type="button"
                 className="btn btn-ghost btn-sm"
                 disabled={goals.length === 0}
-                onClick={() => (allVisibleSelected ? onClearSelection() : onSelectAllVisible())}
+                onClick={() =>
+                  allVisibleSelected
+                    ? onClearSelection()
+                    : onSelectAllVisible()
+                }
               >
-                {allVisibleSelected ? "取消全选" : `全选当前列表 (${goals.length})`}
+                {allVisibleSelected
+                  ? "取消全选"
+                  : `全选可编辑 (${goals.filter(canEditGoal).length})`}
               </button>
             </div>
             <div className="tasks-batch-actions">

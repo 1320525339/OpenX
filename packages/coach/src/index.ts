@@ -5,6 +5,8 @@ export {
   refineGoalLlm,
   coachAgentReplyLlm,
   coachChatReplyLlm,
+  generateStructuredObject,
+  generateCoachText,
   resolveLlmCredentials,
   testLlmConnection,
   type LlmEnv,
@@ -13,6 +15,7 @@ export {
   refineGoal,
   coachChatReply,
   coachContinueAfterWorkOrderTool,
+  coachContinueAfterClarifyTool,
   getCoachRuntime,
   getPiRuntime,
   testCoachConnection,
@@ -21,6 +24,20 @@ export {
   type LlmRole,
 } from "./service.js";
 export { buildNextStepsUserMessage, type NextStepsTrigger } from "./next-steps.js";
+export { formatFeedbackNotes } from "./prompts.js";
+export {
+  buildCoachThreadBlock,
+  buildCoachThreadPrefixFromRecords,
+  COACH_THREAD_HISTORY_HEADING,
+  DEFAULT_COACH_THREAD_CHAR_BUDGET,
+  type BuildCoachThreadPrefixOptions,
+} from "./coach-thread-prompt.js";
+export {
+  compactCoachThreadTurns,
+  detectCoachThreadPressure,
+  buildDeterministicCoachCheckpoint,
+  type CoachThreadPressure,
+} from "./coach-thread-compaction.js";
 export {
   reviewGoalCompletion,
   reviewParentGoalCompletion,
@@ -38,7 +55,24 @@ export {
   type ParentRollupInput,
   type ParentRollupChild,
 } from "./rollup.js";
-export { formatFeedbackNotes } from "./prompts.js";
+export { coachOperatorChatReply } from "./operator-chat.js";
+export {
+  resolveForemanDirectiveViaCoach,
+  buildForemanCrewUserPrompt,
+  type ForemanCrewInput,
+  type ForemanCrewGoalContext,
+  type ForemanCrewOptions,
+} from "./foreman-crew.js";
+export {
+  buildConfiguredSystemPrompt,
+  buildRefineSystemPrompt,
+  renderCoachDynamicContext,
+} from "./render-llm-prompt.js";
+export type {
+  OperatorToolGateway,
+  OperatorToolCallResult,
+  OperatorActionProposal,
+} from "./operator-tools.js";
 export {
   formatCoachLlmError,
   classifyCoachLlmError,

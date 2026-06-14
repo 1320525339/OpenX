@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 
 import type { Settings } from "@openx/shared";
+import { OPERATOR_TIER_LABELS, OperatorTierSchema, type Goal } from "@openx/shared";
 
 import type { ExecutorInfo } from "../api";
 
 import { ModelProviderSettings } from "./ModelProviderSettings";
+import { BriefTemplateSettings } from "./BriefTemplateSettings";
+import { OperatorWorkflowPanel } from "./OperatorWorkflowPanel";
 import { WorkspacePicker } from "./WorkspacePicker";
 import { ThemePreferenceControl } from "./ThemePreferenceControl";
 import { useTheme } from "../lib/use-theme";
@@ -27,6 +30,10 @@ type Props = {
 
   onReloadSettings: () => Promise<void>;
 
+  projectId?: string | null;
+
+  goals?: Goal[];
+
 };
 
 
@@ -46,6 +53,10 @@ export function SettingsPanel({
   onRefreshExecutors: _onRefreshExecutors,
 
   onReloadSettings,
+
+  projectId,
+
+  goals,
 
 }: Props) {
 
@@ -194,6 +205,53 @@ export function SettingsPanel({
             ) : null}
 
           </section>
+
+          <BriefTemplateSettings settings={local} onChange={setLocal} />
+
+          <section className="settings-section">
+            <h4 className="settings-section-title">施工队</h4>
+            <p className="settings-hint settings-hint-tight">
+              派单时工头自动推荐施工队。Pi 为工头班底；Codex / Claude / Gemini 为外部 CLI 施工队（在「工具」页检测在线状态）。
+              模型与 API 密钥请在上方渠道配置。
+            </p>
+          </section>
+
+          <section className="settings-section">
+            <h4 className="settings-section-title">工头自控权限</h4>
+            <p className="settings-hint settings-hint-tight">
+              控制 Coach 是否可通过 Tool Calling 调用 OpenX API；admin 级敏感写操作仍需在对话中确认。
+            </p>
+            <div className="settings-operator-tiers">
+              {OperatorTierSchema.options.map((tier) => {
+                const meta = OPERATOR_TIER_LABELS[tier];
+                return (
+                  <label key={tier} className="settings-operator-tier">
+                    <input
+                      type="radio"
+                      name="operatorTier"
+                      value={tier}
+                      checked={(local.operatorTier ?? "off") === tier}
+                      onChange={() => setLocal({ ...local, operatorTier: tier })}
+                    />
+                    <span className="settings-operator-tier-label">{meta.label}</span>
+                    <span className="settings-operator-tier-desc">{meta.description}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {(local.operatorTier ?? "off") === "admin" ? (
+              <p className="settings-hint settings-hint-warn">
+                admin 权限可修改模型、CLI、MCP 与全局设置，请仅在信任环境下启用。
+              </p>
+            ) : null}
+          </section>
+
+          <OperatorWorkflowPanel
+            savedSettings={settings}
+            draftSettings={local}
+            projectId={projectId}
+            goals={goals}
+          />
 
         </div>
 

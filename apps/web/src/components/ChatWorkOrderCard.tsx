@@ -1,4 +1,5 @@
 import type { RefinedGoal, RefinedSubGoal } from "@openx/shared";
+import { DISPATCH_PERMISSION_LABELS } from "@openx/shared";
 import type { ExecutorInfo } from "../api";
 import { buildExecutorOptions, executorDisplayLabel } from "../lib/executors";
 
@@ -10,6 +11,9 @@ type Props = {
   recommendReason?: string;
   onChange: (next: RefinedGoal) => void;
   onExecutorChange: (id: string) => void;
+  /** 由澄清卡生成的工单：展示来源并可跳转到澄清记录 */
+  sourceClarifyTitle?: string;
+  onViewSourceClarify?: () => void;
 };
 
 function SubGoalRow({ sub, index }: { sub: RefinedSubGoal; index: number }) {
@@ -21,6 +25,11 @@ function SubGoalRow({ sub, index }: { sub: RefinedSubGoal; index: number }) {
         <p>{sub.acceptance}</p>
         {sub.executorId ? (
           <span className="chat-workorder-tag">{executorDisplayLabel(sub.executorId)}</span>
+        ) : null}
+        {sub.permissionMode ? (
+          <span className="chat-workorder-tag">
+            {DISPATCH_PERMISSION_LABELS[sub.permissionMode]?.label ?? sub.permissionMode}
+          </span>
         ) : null}
       </div>
     </div>
@@ -36,6 +45,8 @@ export function ChatWorkOrderCard({
   recommendReason,
   onChange,
   onExecutorChange,
+  sourceClarifyTitle,
+  onViewSourceClarify,
 }: Props) {
   const subCount = refined.subGoals?.length ?? 0;
   const hasSubGoals = subCount > 0;
@@ -75,6 +86,16 @@ export function ChatWorkOrderCard({
           </select>
         </label>
       </header>
+
+      {sourceClarifyTitle && onViewSourceClarify ? (
+        <button
+          type="button"
+          className="btn link chat-workorder-source-clarify"
+          onClick={onViewSourceClarify}
+        >
+          来自澄清「{sourceClarifyTitle}」
+        </button>
+      ) : null}
 
       {recommendedId && recommendedId !== executorId && recommendReason ? (
         <p className="chat-workorder-hint">

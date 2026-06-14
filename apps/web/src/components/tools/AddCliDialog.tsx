@@ -136,8 +136,23 @@ export function AddCliDialog({
           onClose();
           return;
         }
-        if (autoBootstrapConnect && bootstrap?.error) {
-          setError(`自动自举未完成：${bootstrap.error}。将创建 Pi 接入任务继续排查。`);
+        if (autoBootstrapConnect && bootstrap) {
+          const phase = bootstrap.status?.phase;
+          const hint =
+            bootstrap.error?.trim() ||
+            bootstrap.status?.lastError?.trim() ||
+            (phase === "exited"
+              ? `connect-client 已退出（code=${bootstrap.status?.exitCode ?? "?"}）`
+              : phase === "running" || phase === "spawning"
+                ? `自举进程已启动（pid=${bootstrap.pid ?? bootstrap.status?.pid ?? "?"}），Agent 注册中…`
+                : "等待 Agent 上线超时");
+          if (phase === "running" || phase === "spawning") {
+            onConnectReady?.(trimmedExecutorId);
+            setError(`${hint} 可在「工具 → CLI」查看状态；无需创建 Pi 接入任务。`);
+            onClose();
+            return;
+          }
+          setError(`自动自举未完成：${hint}。将创建 Pi 接入任务继续排查。`);
         }
       }
 

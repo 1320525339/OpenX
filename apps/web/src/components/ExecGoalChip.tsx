@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Goal, GoalRunState } from "@openx/shared";
 import { RunConsole } from "./RunConsole";
+import { CrewDialogueSummary } from "./CrewDialogueSummary";
 import { executorDisplayLabel } from "../lib/executors";
 import {
   buildGoalContext,
@@ -104,6 +105,8 @@ export function ExecGoalChip({
           {(run.active || run.events.length > 0 || run.liveText) && (
             <RunConsole run={run} />
           )}
+
+          <CrewDialogueSummary goalId={goal.id} crewStatus={goal.crewStatus} />
 
           <details className="exec-goal-brief">
             <summary>任务 brief</summary>

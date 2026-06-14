@@ -181,12 +181,18 @@
 
 .app-minimal .provider-current,
 .app-minimal .provider-chip,
+.app-minimal .provider-list-item,
+.app-minimal .provider-editor,
+.app-minimal .provider-model-list,
 .app-minimal .tools-cli-card,
 .app-minimal .tools-card,
-.app-minimal .tools-skill-card {
+.app-minimal .tools-skill-card,
+.app-minimal .tools-mcp-row,
+.app-minimal .tools-template-card {
   background: transparent;
   box-shadow: none;
   border-radius: var(--radius-md);
+  color: var(--text);
 }
 
 .app-minimal .provider-chip {
@@ -194,8 +200,12 @@
 }
 
 .app-minimal .provider-chip.active {
-  border-color: var(--text);
-  background: rgba(0, 0, 0, 0.03);
+  border-color: var(--accent);
+  background: var(--btn-tab-active-bg);
+}
+
+.app-minimal .provider-model-list {
+  background: var(--surface-inset);
 }
 
 .app-minimal .tools-tabs {
@@ -296,21 +306,317 @@
   padding: 0.25rem var(--space-page-x) 0.35rem;
 }
 
-/* ── 播报条 ── */
+/* ── 灵动岛（Apple 风格：深色胶囊 → 圆角卡片） ── */
 
-.app-minimal .dynamic-island.dynamic-island-toast {
-  border-radius: 6px;
-  background: rgba(22, 22, 24, 0.94);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+.dynamic-island-portal.app-minimal {
+  /* 收起：约 3.4:1 胶囊（对标 iPhone 126×37pt） */
+  --island-collapsed-h: 2.3125rem;
+  --island-collapsed-min-w: 7.875rem;
+  --island-collapsed-max-w: 17.5rem;
+  /* 展开：固定宽 + 黄金比例区间高度 */
+  --island-expanded-w: 22.5rem;
+  --island-expanded-min-h: 9.5rem;
+  --island-expanded-max-h: min(58vh, 20rem);
+  --island-pill-radius: 999px;
+  --island-expanded-radius: 1.375rem;
+  --island-surface: rgba(28, 28, 30, 0.94);
+  --island-fg: rgba(255, 255, 255, 0.96);
+  --island-fg-dim: rgba(255, 255, 255, 0.62);
+  --island-fg-muted: rgba(255, 255, 255, 0.42);
+  --island-separator: rgba(255, 255, 255, 0.1);
+  --island-inset: rgba(255, 255, 255, 0.06);
+  --island-accent: #0a84ff;
+  --island-danger: #ff453a;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast {
+  width: fit-content;
+  max-width: var(--island-collapsed-max-w);
+  min-width: var(--island-collapsed-min-w);
+  min-height: var(--island-collapsed-h);
+  border-radius: var(--island-pill-radius);
+  background: var(--island-surface);
+  color: var(--island-fg);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 10px 38px rgba(0, 0, 0, 0.28),
+    0 0 0 0.5px rgba(255, 255, 255, 0.06) inset;
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  font-size: var(--type-meta);
+  padding: 0;
+  overflow: hidden;
+  transition:
+    width 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    min-height 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    max-width 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.32s ease;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.collapsed {
+  width: fit-content;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.collapsed.can-expand {
+  cursor: pointer;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded {
+  width: min(var(--island-expanded-w), 92vw);
+  max-width: min(var(--island-expanded-w), 92vw);
+  min-width: min(var(--island-expanded-w), 92vw);
+  min-height: var(--island-expanded-min-h);
+  border-radius: var(--island-expanded-radius);
+  aspect-ratio: auto;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: var(--island-collapsed-h);
+  padding: 0 0.65rem 0 0.75rem;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded .dynamic-island-head {
+  align-items: flex-start;
+  min-height: 0;
+  padding: 0.55rem 0.5rem 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--island-separator);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-compact {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded .dynamic-island-compact {
+  align-items: flex-start;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded {
+  padding: 0.5rem 0.65rem 0.6rem;
+  max-height: var(--island-expanded-max-h);
+  gap: 0.45rem;
+  overflow-y: auto;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-title {
   font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--island-fg);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.app-minimal .dynamic-island.dynamic-island-toast:not(.expanded) {
-  padding: 0.4rem 0.65rem;
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded .dynamic-island-title {
+  white-space: normal;
+  font-size: 0.78rem;
 }
 
-.app-minimal .dynamic-island-expanded {
-  max-height: min(45vh, 14rem);
+.dynamic-island-portal.app-minimal .dynamic-island-text {
+  color: var(--island-fg-dim);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-text-collapsed {
+  display: none;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded .dynamic-island-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 0.12rem;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-section strong {
+  color: var(--island-fg-muted);
+  font-weight: 500;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-preview,
+.dynamic-island-portal.app-minimal .dynamic-island-feedback {
+  border-radius: 0.5rem;
+  border: none;
+  background: var(--island-inset);
+  color: var(--island-fg-dim);
+  font-size: 0.66rem;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-actions {
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+  margin-top: 0.15rem;
+  border-top: 1px solid var(--island-separator);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn {
+  padding: 0.32rem 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--island-fg-dim);
+  border-radius: 999px;
+  box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn:hover:not(:disabled) {
+  background: var(--island-inset);
+  color: var(--island-fg);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn.primary {
+  background: var(--island-accent);
+  color: #fff;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn.primary:hover:not(:disabled) {
+  background: #409cff;
+  color: #fff;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn.danger {
+  color: var(--island-danger);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 69, 58, 0.14);
+  color: var(--island-danger);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-btn.ghost {
+  color: var(--island-fg-muted);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact {
+  border-top-color: var(--island-separator);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-hint,
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-round {
+  color: var(--island-fg-muted);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-list li {
+  background: var(--island-inset);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-reason {
+  color: var(--island-fg-dim);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-actions .btn,
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-head .btn-text {
+  border: none;
+  box-shadow: none;
+  color: var(--island-fg-dim);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-actions .btn {
+  padding: 0.32rem 0.65rem;
+  font-size: 0.68rem;
+  border-radius: 999px;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-actions .btn.primary {
+  background: var(--island-accent);
+  color: #fff;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-actions .btn.warn {
+  background: transparent;
+  color: var(--island-danger);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-expanded .review-timeline-compact-feedback {
+  border: none;
+  border-radius: 0.5rem;
+  background: var(--island-inset);
+  color: var(--island-fg);
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 0;
+  flex-shrink: 0;
+  box-shadow: none;
+  animation: island-pulse-subtle 2.4s ease-in-out infinite;
+}
+
+@keyframes island-pulse-subtle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(0.92);
+  }
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dot.success {
+  background: #30d158;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dot.warning {
+  background: #ff9f0a;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dot.error {
+  background: #ff453a;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dot.info {
+  background: #64d2ff;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dismiss {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  padding: 0.15rem 0.35rem;
+  border: none;
+  background: transparent;
+  color: var(--island-fg-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: 999px;
+  opacity: 0.55;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.dynamic-island-portal.app-minimal .dynamic-island-dismiss:hover {
+  opacity: 1;
+  color: var(--island-fg-dim);
+  background: var(--island-inset);
+}
+
+.dynamic-island-portal.app-minimal .delivery-chip.file {
+  border-color: var(--island-separator);
+  background: var(--island-inset);
+  color: var(--island-fg-dim);
+}
+
+.dynamic-island-portal.app-minimal .delivery-preview {
+  border-color: var(--island-separator);
+  background: var(--island-inset);
+}
+
+.dynamic-island-portal.app-minimal .delivery-preview-code {
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .app-minimal .delivery-chip.file {
@@ -349,22 +655,10 @@
   color: var(--text);
 }
 
-.app-minimal .dynamic-island-dot {
-  width: 6px;
-  height: 6px;
-  box-shadow: none;
-  animation: none;
-}
-
-.app-minimal .dynamic-island-hint {
-  opacity: 0.65;
-  font-size: 0.65rem;
-}
-
 /* ── 弹窗 ── */
 
 .app-minimal .modal-overlay {
-  background: rgba(250, 250, 250, 0.75);
+  background: var(--overlay-bg);
   backdrop-filter: blur(8px);
 }
 
@@ -493,6 +787,66 @@
   font-size: 0.75rem;
   text-align: left;
   cursor: pointer;
+}
+
+.app-minimal .sidebar-tree-conv-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  border-radius: var(--radius-sm);
+}
+
+.app-minimal .sidebar-tree-conv-row.active {
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.app-minimal .sidebar-tree-conv-row .sidebar-tree-conv {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-minimal .sidebar-tree-conv-row:hover .sidebar-row-delete,
+.app-minimal .sidebar-tree-row:hover .sidebar-row-delete,
+.app-minimal .dashboard-conv-item:hover .sidebar-row-delete {
+  opacity: 1;
+}
+
+.app-minimal .sidebar-row-delete {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.app-minimal .sidebar-row-delete svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.app-minimal .sidebar-row-delete:hover {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.app-minimal .dashboard-conv-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.app-minimal .dashboard-conv-item .dashboard-conv-row {
+  flex: 1;
+  min-width: 0;
 }
 
 .app-minimal .sidebar-tree-conv {

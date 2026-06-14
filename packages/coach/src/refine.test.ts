@@ -25,7 +25,7 @@ describe("refineGoalRules", () => {
 
     expect(r.acceptance).toBeTruthy();
 
-    expect(r.executionPrompt).toContain("【任务】");
+    expect(r.executionPrompt).toContain("【用户期望】");
 
   });
 

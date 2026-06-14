@@ -6,14 +6,24 @@ import { startConnectWatchdog, stopConnectWatchdog } from "./connect-watchdog.js
 import { startAcpWatchdog, stopAcpWatchdog } from "./acp-watchdog.js";
 import { startPiWatchdog, stopPiWatchdog } from "./pi-watchdog.js";
 import { getDb, resetDb } from "./db.js";
+import {
+  rebootstrapOfflineConnectProfiles,
+  warnIfConnectClientMissing,
+} from "./cli-bootstrap.js";
+import { loadOpenxDotEnv } from "./openx-dotenv.js";
+import { loadSettings, runSettingsMigrations } from "./settings-store.js";
 
 const port = Number(process.env.PORT ?? 3921);
 const host = process.env.HOST ?? "127.0.0.1";
 
 console.log(`OpenX server http://${host}:${port}`);
 
+loadOpenxDotEnv();
+runSettingsMigrations();
 ensureBuiltinSkillsOnStartup();
 ensureBuiltinAgentsOnStartup();
+warnIfConnectClientMissing();
+rebootstrapOfflineConnectProfiles(loadSettings());
 if (!process.env.OPENX_PI_WORKER && process.env.OPENX_MOCK_PI !== "1") {
   process.env.OPENX_PI_WORKER = "1";
 }

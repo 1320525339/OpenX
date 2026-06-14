@@ -3,6 +3,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Settings } from "@openx/shared";
+import {
+  CODEX_RESPONSES_PROXY_LOCAL_API_KEY,
+  resolveCodexProxyBaseUrl,
+} from "@openx/shared";
 import { readAcpCliConfig, syncAcpCliFromModelRef } from "./acp-cli-config.js";
 
 function makeSettings(): Settings {
@@ -20,9 +24,10 @@ function makeSettings(): Settings {
       },
       claude: {
         name: "Claude Proxy",
-        api: { type: "openai-compatible", baseUrl: "https://proxy.example" },
+        api: { type: "openai-compatible", baseUrl: "https://proxy.example/anthropic" },
         auth: { apiKey: "sk-ant-test" },
         models: { sonnet: { name: "Sonnet" } },
+        source: { template: "anthropic" },
       },
     },
     executors: { pi: {} },
@@ -61,7 +66,14 @@ describe("acp-cli-config", () => {
     expect(next.acpCli?.["acp:codex"]).toBe("zen/big-pickle");
     expect(snapshot.modelReady).toBe(true);
     expect(snapshot.synced).toBe(true);
-    expect(snapshot.baseUrl).toBe("https://proxy.example/v1");
+    expect(snapshot.baseUrl).toBe(resolveCodexProxyBaseUrl());
+    const auth = JSON.parse(readFileSync(join(process.env.CODEX_HOME!, "auth.json"), "utf8")) as {
+      OPENAI_API_KEY: string;
+    };
+    expect(auth.OPENAI_API_KEY).toBe(CODEX_RESPONSES_PROXY_LOCAL_API_KEY);
+    const toml = readFileSync(join(process.env.CODEX_HOME!, "config.toml"), "utf8");
+    expect(toml).toContain('wire_api = "responses"');
+    expect(toml).toContain("requires_openai_auth = true");
   });
 
   it("syncs claude from project modelRef with gateway model aliases", () => {
@@ -69,7 +81,8 @@ describe("acp-cli-config", () => {
     const { snapshot } = syncAcpCliFromModelRef(settings, "acp:claude", "claude/sonnet");
 
     expect(snapshot.apiKeySet).toBe(true);
-    expect(snapshot.baseUrl).toBe("https://proxy.example");
+    expect(snapshot.baseUrl).toBe("https://proxy.example/anthropic");
+    expect(snapshot.baseUrl).not.toBe(resolveCodexProxyBaseUrl());
     expect(readAcpCliConfig("acp:claude", {
       ...settings,
       acpCli: { "acp:claude": "claude/sonnet" },
@@ -97,5 +110,36 @@ describe("acp-cli-config", () => {
 
   it("returns null for unsupported executor", () => {
     expect(readAcpCliConfig("acp:gemini")).toBeNull();
+  });
+
+  it("rejects openai-only provider for claude", () => {
+    const settings = makeSettings();
+    settings.providers!.openaiOnly = {
+      name: "OpenAI",
+      api: { type: "openai-compatible", baseUrl: "https://api.openai.com/v1" },
+      auth: { apiKey: "sk-test" },
+      models: { gpt: { name: "GPT" } },
+      source: { template: "openai" },
+    };
+    expect(() =>
+      syncAcpCliFromModelRef(settings, "acp:claude", "openaiOnly/gpt"),
+    ).toThrow(/Anthropic Messages/);
+  });
+
+  it("maps deepseek coach base to anthropic for claude sync", () => {
+    const settings = makeSettings();
+    settings.providers!.deepseek = {
+      name: "DeepSeek",
+      api: { type: "openai-compatible", baseUrl: "https://api.deepseek.com" },
+      auth: { env: "DEEPSEEK_API_KEY", apiKey: "ds-key" },
+      models: { "deepseek-v4-pro": { name: "V4 Pro" } },
+      source: { template: "deepseek" },
+    };
+    syncAcpCliFromModelRef(settings, "acp:claude", "deepseek/deepseek-v4-pro");
+    const settingsPath = join(process.env.CLAUDE_CONFIG_DIR!, "settings.json");
+    const written = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      env: Record<string, string>;
+    };
+    expect(written.env.ANTHROPIC_BASE_URL).toBe("https://api.deepseek.com/anthropic");
   });
 });

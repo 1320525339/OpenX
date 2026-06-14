@@ -69,6 +69,7 @@ describe("buildCliIntegrationGoal", () => {
     expect(goal.executionPrompt).toContain(
       "POST http://127.0.0.1:3921/api/cli/profiles/my-worker/bootstrap",
     );
+    expect(goal.executionPrompt).toContain("禁止根据教程链接安装第三方 CLI");
     expect(goal.executionPrompt).not.toContain("自行生成 executorId");
   });
 });

@@ -5,6 +5,7 @@ import {
   isWorkOrderDismissMessage,
   mayNeedGoalRefined,
   shouldUseCoachStreaming,
+  shouldTryLlmClarify,
   upgradeToModelConfig,
   type AgentChatResponse,
   type CoachChatContext,
@@ -14,12 +15,21 @@ import {
   type RefineInput,
   type RefinedGoal,
   type WorkOrderToolResult,
+  type ClarifyToolResult,
+  type CoachClarifyPayload,
+  formatClarifyAnswersForPrompt,
+  enforceBugTwoPhaseSubGoals,
+  resolveBriefTemplateSections,
 } from "@openx/shared";
 import {
   buildWorkspaceInspectRefined,
   isWorkspaceInspectIntent,
 } from "./prompts.js";
-import { refineGoalRules, coachChatReplyRules } from "./rules.js";
+import {
+  refineGoalRules,
+  coachChatReplyRules,
+  buildAmbiguousClarifyFallback,
+} from "./rules.js";
 import {
   coachAgentReplyLlm,
   coachChatStreamLlm,
@@ -31,12 +41,47 @@ import {
 } from "./llm.js";
 import { formatCoachLlmError, isCoachParseError, isCoachQuotaError, isCoachTimeoutError, formatCoachTimeoutError } from "./llm-errors.js";
 
+function finalizeRefinedGoal(
+  refined: RefinedGoal | undefined,
+  sourceText: string,
+  context?: CoachChatContext,
+): RefinedGoal | undefined {
+  if (!refined) return undefined;
+  const sections = resolveBriefTemplateSections(context?.llmContextSettings);
+  return enforceBugTwoPhaseSubGoals(refined, sourceText, sections);
+}
+
+function rulesRefinedFallbackForMessage(
+  message: string,
+  context: CoachChatContext,
+  defaultConstraints: string[],
+  force: boolean,
+): RefinedGoal | undefined {
+  if (isWorkOrderDismissMessage(message)) return undefined;
+  const intentHint = classifyCoachIntent(message);
+  const need =
+    force ||
+    intentHint === "task" ||
+    intentHint === "rework" ||
+    mayNeedGoalRefined(message);
+  if (!need) return undefined;
+  return finalizeRefinedGoal(
+    refineGoalRules(
+      { userDraft: message },
+      context.defaultConstraints ?? defaultConstraints,
+    ),
+    message,
+    context,
+  );
+}
+
 export type CoachRuntime = {
   ref?: string;
   model?: string;
   ready: boolean;
   slug?: string;
   baseUrl?: string;
+  error?: string;
 };
 
 export function getCoachRuntime(
@@ -96,16 +141,35 @@ export async function refineGoal(
   quotaExceeded?: boolean;
 }> {
   const upgraded = upgradeToModelConfig(settings);
+  const llmContext =
+    settings && typeof settings === "object" && "llmContext" in settings
+      ? (settings as { llmContext?: import("@openx/shared").LlmContextSettings }).llmContext
+      : undefined;
   if (resolveLlmCredentials(upgraded, "coach", env)) {
     try {
-      const refined = await refineGoalLlm(input, upgraded, defaultConstraints, env);
-      return { refined };
+      const refined = await refineGoalLlm(
+        input,
+        upgraded,
+        defaultConstraints,
+        env,
+        llmContext,
+      );
+      return {
+        refined:
+          finalizeRefinedGoal(refined, input.userDraft, {
+            llmContextSettings: llmContext,
+          }) ?? refined,
+      };
     } catch (err) {
       const hint = formatCoachLlmError(err);
       if (hint && isCoachQuotaError(err)) {
         console.warn("[coach] LLM refine quota:", hint);
         return {
-          refined: refineGoalRules(input, defaultConstraints),
+          refined: finalizeRefinedGoal(
+            refineGoalRules(input, defaultConstraints),
+            input.userDraft,
+            { llmContextSettings: llmContext },
+          )!,
           llmError: hint,
           quotaExceeded: true,
         };
@@ -113,7 +177,11 @@ export async function refineGoal(
       console.warn("[coach] LLM refine failed:", err);
       const parseFailed = isCoachParseError(err);
       return {
-        refined: refineGoalRules(input, defaultConstraints),
+        refined: finalizeRefinedGoal(
+          refineGoalRules(input, defaultConstraints),
+          input.userDraft,
+          { llmContextSettings: llmContext },
+        )!,
         llmError:
           hint ??
           (parseFailed
@@ -125,7 +193,11 @@ export async function refineGoal(
     }
   }
   return {
-    refined: refineGoalRules(input, defaultConstraints),
+    refined: finalizeRefinedGoal(
+      refineGoalRules(input, defaultConstraints),
+      input.userDraft,
+      { llmContextSettings: llmContext },
+    )!,
     llmError: "模型未配置：请在设置中添加渠道并选择模型，已使用规则模板",
   };
 }
@@ -151,12 +223,17 @@ function ensureWorkspaceInspectRefined(
 
 export type CoachChatReplyOptions = {
   onDelta?: (delta: string) => Promise<void>;
-  /** 用户已确认「整理成任务单」：必须产出 refined */
+  /**
+   * 用户已确认「整理成任务单」：必须产出 refined。
+   * 与 structured 澄清路径互斥：开启后跳过 tryStructuredLlm，不会出 clarify 卡。
+   */
   forceRefine?: boolean;
   /** 用户取消任务单：禁止产出 refined */
   skipRefine?: boolean;
   /** propose_work_order 的 tool_result 已回传，继续工头轮次 */
   toolContinuation?: boolean;
+  /** 澄清结果已回传，继续并产出 refined */
+  clarifyContinuation?: boolean;
 };
 
 export async function coachChatReply(
@@ -170,6 +247,7 @@ export async function coachChatReply(
 ): Promise<{
   message: string;
   refined?: RefinedGoal;
+  clarify?: CoachClarifyPayload;
   intent?: CoachIntent;
   suggestRefine?: boolean;
   llmError?: string;
@@ -181,18 +259,56 @@ export async function coachChatReply(
   const dismiss =
     !force &&
     (options?.skipRefine === true || isWorkOrderDismissMessage(message));
-  const ambiguous =
+  /** LLM 三选一（clarify / refined / message）；forceRefine 时强制关闭 */
+  const tryStructuredLlm =
     !force &&
     !dismiss &&
+    !options?.toolContinuation &&
+    !options?.clarifyContinuation &&
     !isWorkspaceInspectIntent(message) &&
-    isAmbiguousTaskMessage(message);
+    shouldTryLlmClarify(message, intentHint);
   const upgraded = upgradeToModelConfig(settings);
   if (resolveLlmCredentials(upgraded, "coach", env)) {
     try {
+      let structuredReply: AgentChatResponse | undefined;
+      if (tryStructuredLlm) {
+        try {
+          structuredReply = await coachAgentReplyLlm(
+            message,
+            { ...context, defaultConstraints },
+            upgraded,
+            env,
+            chatHistory,
+            { promptMode: "structured" },
+          );
+          if (structuredReply.clarify?.questions?.length) {
+            if (isAmbiguousTaskMessage(message)) {
+              return {
+                message: structuredReply.message,
+                clarify: structuredReply.clarify,
+                intent: structuredReply.intent ?? "consult",
+              };
+            }
+            structuredReply = { ...structuredReply, clarify: undefined };
+          }
+        } catch (structErr) {
+          console.warn("[coach] structured clarify/refine failed:", structErr);
+          if (isAmbiguousTaskMessage(message)) {
+            return {
+              message:
+                "信息还不够具体。请先回答下方澄清问题，我再整理成任务单。",
+              clarify: buildAmbiguousClarifyFallback(message),
+              intent: "consult",
+            };
+          }
+          // 明确任务：跳过 structured，走下方 agent / rules refined 兜底
+        }
+      }
+
       if (
         options?.onDelta &&
         !force &&
-        (dismiss || ambiguous || shouldUseCoachStreaming(message, intentHint))
+        (dismiss || shouldUseCoachStreaming(message, intentHint))
       ) {
         const streamed = await coachChatStreamLlm(
           message,
@@ -206,41 +322,51 @@ export async function coachChatReply(
           message:
             streamed ||
             coachChatReplyRules(message, { ...context, defaultConstraints }),
-          intent: dismiss || ambiguous ? "consult" : intentHint,
-          suggestRefine: !dismiss && ambiguous ? true : undefined,
+          intent: dismiss ? "consult" : intentHint,
+          suggestRefine:
+            !dismiss && isAmbiguousTaskMessage(message) ? true : undefined,
           streamed: true,
         };
       }
 
-      const reply = await coachAgentReplyLlm(
-        message,
-        { ...context, defaultConstraints },
-        upgraded,
-        env,
-        chatHistory,
-        options?.toolContinuation ? { promptMode: "tool_continuation" } : undefined,
-      );
+      const reply =
+        structuredReply ??
+        (await coachAgentReplyLlm(
+          message,
+          { ...context, defaultConstraints },
+          upgraded,
+          env,
+          chatHistory,
+          options?.toolContinuation
+            ? { promptMode: "tool_continuation" }
+            : options?.clarifyContinuation
+              ? { promptMode: "clarify_continuation" }
+              : undefined,
+        ));
       const merged = ensureWorkspaceInspectRefined(message, context, reply);
       const intent = merged.intent ?? intentHint;
       let refined = merged.refined;
       const needRefined =
         !dismiss &&
+        !merged.clarify &&
+        !refined &&
         (force ||
-          (!ambiguous &&
-            (intent === "task" ||
-              intent === "rework" ||
-              intentHint === "task" ||
-              intentHint === "rework" ||
-              mayNeedGoalRefined(message))));
+          intent === "task" ||
+          intent === "rework" ||
+          intentHint === "task" ||
+          intentHint === "rework" ||
+          mayNeedGoalRefined(message));
       if (!refined && needRefined) {
         refined = refineGoalRules(
           { userDraft: message },
           context.defaultConstraints ?? defaultConstraints,
         );
       }
+      refined = finalizeRefinedGoal(refined, message, context);
       let messageOut = merged.message;
       if (
         refined &&
+        !merged.clarify &&
         !dismiss &&
         !/创建并执行|创建目标|整理成|工单|任务单/.test(messageOut)
       ) {
@@ -248,9 +374,10 @@ export async function coachChatReply(
       }
       return {
         message: messageOut,
-        refined,
+        refined: merged.clarify ? undefined : refined,
+        clarify: merged.clarify,
         intent,
-        suggestRefine: !refined && ambiguous ? true : undefined,
+        suggestRefine: !refined && !merged.clarify && isAmbiguousTaskMessage(message) ? true : undefined,
       };
     } catch (err) {
       const hint = formatCoachLlmError(err);
@@ -260,8 +387,15 @@ export async function coachChatReply(
       if (isCoachTimeoutError(err)) {
         const timeoutMsg = formatCoachTimeoutError();
         console.warn("[coach] LLM chat timeout:", err);
+        const refined = rulesRefinedFallbackForMessage(
+          message,
+          context,
+          defaultConstraints,
+          force,
+        );
         return {
           message: coachChatReplyRules(message, context),
+          refined,
           llmError: timeoutMsg,
         };
       }
@@ -282,12 +416,12 @@ export async function coachChatReply(
       if (isCoachParseError(err)) {
         return {
           message: coachChatReplyRules(message, context),
-          refined: force
-            ? refineGoalRules(
-                { userDraft: message },
-                context.defaultConstraints ?? defaultConstraints,
-              )
-            : undefined,
+          refined: rulesRefinedFallbackForMessage(
+            message,
+            context,
+            defaultConstraints,
+            force,
+          ),
           llmError: hint ?? formatCoachLlmError(err) ?? undefined,
         };
       }
@@ -311,11 +445,24 @@ export async function coachChatReply(
   if (force) {
     return {
       message: "已按规则模板整理成任务单，请在预览卡片中确认。",
-      refined: refineGoalRules(
-        { userDraft: message },
-        context.defaultConstraints ?? defaultConstraints,
+      refined: finalizeRefinedGoal(
+        refineGoalRules(
+          { userDraft: message },
+          context.defaultConstraints ?? defaultConstraints,
+        ),
+        message,
+        context,
       ),
       llmError: "模型未配置：请在设置中添加渠道并选择模型，已使用规则模板",
+    };
+  }
+
+  if (shouldTryLlmClarify(message, intentHint)) {
+    return {
+      message: "请先回答下方澄清问题，我再整理成任务单。",
+      clarify: buildAmbiguousClarifyFallback(message),
+      intent: "consult",
+      llmError: "模型未配置：请在设置中添加渠道并选择模型",
     };
   }
 
@@ -326,6 +473,63 @@ export async function coachChatReply(
 }
 
 /** 任务单 UI 操作后，将 tool_result 回传工头继续对话（非用户消息） */
+export async function coachContinueAfterClarifyTool(
+  toolResult: ClarifyToolResult,
+  clarifyPayload: CoachClarifyPayload,
+  context: CoachChatContext,
+  settings: ModelSettingsSlice,
+  chatHistory: CoachChatTurn[] = [],
+  env?: LlmEnv,
+  options?: Pick<CoachChatReplyOptions, "onDelta">,
+): Promise<{
+  message: string;
+  refined?: RefinedGoal;
+  llmError?: string;
+  quotaExceeded?: boolean;
+  streamed?: boolean;
+}> {
+  const continuation =
+    toolResult.outcome === "dismissed"
+      ? "工具 propose_clarification 已返回：用户跳过澄清。"
+      : [
+          "工具 propose_clarification 已返回：用户已回答澄清问题。",
+          formatClarifyAnswersForPrompt(
+            clarifyPayload,
+            toolResult.answers ?? {},
+            toolResult.annotations,
+          ),
+        ].join("\n");
+
+  const reply = await coachChatReply(
+    continuation,
+    context,
+    settings,
+    context.defaultConstraints ?? [],
+    env,
+    chatHistory,
+    {
+      onDelta: options?.onDelta,
+      skipRefine: toolResult.outcome === "dismissed",
+      clarifyContinuation: toolResult.outcome === "answered",
+      forceRefine: toolResult.outcome === "answered",
+    },
+  );
+  let message = reply.message;
+  if (
+    toolResult.outcome === "dismissed" &&
+    !/整理成任务单|整理成工单/.test(message)
+  ) {
+    message = `${message.trim()}\n\n如需我继续整理成任务单，直接说「整理成任务单」即可。`;
+  }
+  return {
+    message,
+    refined: reply.refined,
+    llmError: reply.llmError,
+    quotaExceeded: reply.quotaExceeded,
+    streamed: reply.streamed,
+  };
+}
+
 export async function coachContinueAfterWorkOrderTool(
   toolResult: WorkOrderToolResult,
   context: CoachChatContext,

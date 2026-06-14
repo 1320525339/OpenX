@@ -12,6 +12,8 @@ describe("api-catalog", () => {
     expect(ids.has("connect_register")).toBe(true);
     expect(ids.has("internal_complete")).toBe(true);
     expect(ids.has("catalog_get")).toBe(true);
+    expect(ids.has("operator_playbook")).toBe(true);
+    expect(ids.has("workspace_file_preview")).toBe(true);
   });
 
   it("filters by category", () => {

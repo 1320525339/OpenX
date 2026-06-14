@@ -10,6 +10,7 @@ import {
   OPENCODE_ZEN_PUBLIC_API_KEY,
   type LlmProviderId,
 } from "./llm-providers.js";
+import { normalizeOpenAiCompatibleBaseUrl } from "./llm-endpoints.js";
 /** 模型配置相关 settings 切片（避免与 settings.ts 循环依赖） */
 export type ModelSettingsSlice = {
   model?: ModelSection;
@@ -77,6 +78,8 @@ export type FetchModelsProvider = z.infer<typeof FetchModelsProviderSchema>;
 export const ModelSectionSchema = z.object({
   coach: ModelRefSchema.default(DEFAULT_MODEL_REF),
   pi: ModelRefSchema.default(DEFAULT_MODEL_REF),
+  /** 审查员专用；未配置时回退 coach */
+  reviewer: ModelRefSchema.optional(),
   default: ModelRefSchema.default(DEFAULT_MODEL_REF),
 });
 export type ModelSection = z.infer<typeof ModelSectionSchema>;
@@ -201,11 +204,14 @@ export function resolveModelCredentials(
 
   if (!apiKey) return null;
 
-  const baseUrl =
+  const template = provider.source?.template;
+  const rawBaseUrl =
     provider.api.baseUrl.trim() ||
     env.baseUrl?.trim() ||
     process.env.OPENX_LLM_BASE_URL?.trim() ||
     "https://api.openai.com/v1";
+
+  const baseUrl = normalizeOpenAiCompatibleBaseUrl(rawBaseUrl, template);
 
   const model =
     upstreamModelId ||
@@ -275,6 +281,34 @@ function coachToProviderConfig(coach: CoachSettings): ProviderConfig {
   });
 }
 
+export function resolveReviewerModelRef(model?: ModelSection): string {
+  const section = model ?? createDefaultModelSection();
+  return section.reviewer?.trim() || section.coach || section.default || DEFAULT_MODEL_REF;
+}
+
+function hasResolvableModelRef(model: ModelSection, providers: ProvidersMap): boolean {
+  return [model.coach, model.pi, model.reviewer, model.default]
+    .filter((ref): ref is string => Boolean(ref?.trim()))
+    .some((ref) => {
+    const parsed = parseModelRef(ref);
+    if (!parsed) return false;
+    const provider = providers[parsed.slug];
+    if (!provider || provider.disabled) return false;
+    const entry = provider.models[parsed.modelId];
+    return Boolean(entry && !entry.disabled);
+  });
+}
+
+/** 是否为出厂默认工头/Pi 模型（OpenCode Zen） */
+export function isDefaultZenModelSection(model?: ModelSection): boolean {
+  if (!model) return true;
+  return (
+    model.coach === DEFAULT_MODEL_REF &&
+    model.pi === DEFAULT_MODEL_REF &&
+    model.default === DEFAULT_MODEL_REF
+  );
+}
+
 /** 将旧 coach 扁平配置迁移为 model + providers */
 export function upgradeToModelConfig<T extends ModelSettingsSlice>(settings: T): T {
   const providers = { ...(settings.providers ?? {}) };
@@ -295,6 +329,10 @@ export function upgradeToModelConfig<T extends ModelSettingsSlice>(settings: T):
 
   if (Object.keys(providers).length === 0) {
     Object.assign(providers, createDefaultProvidersMap());
+  }
+
+  // 仅当当前 model 引用无法解析到任何渠道时才回退 zen/big-pickle
+  if (!hasResolvableModelRef(model, providers)) {
     model = createDefaultModelSection();
   }
 
@@ -310,6 +348,14 @@ export function stripLegacyCoachForSave<T extends ModelSettingsSlice>(settings: 
   const upgraded = upgradeToModelConfig(settings);
   const { coach: _coach, ...rest } = upgraded;
   return rest;
+}
+
+/** config.json 落盘：渠道写入 ~/.openx/providers.json，核心配置不含 providers */
+export function stripProvidersForCoreConfigSave<T extends ModelSettingsSlice>(
+  settings: T,
+): Omit<T, "coach" | "providers"> {
+  const { coach: _coach, providers: _providers, ...rest } = settings;
+  return rest as Omit<T, "coach" | "providers">;
 }
 
 export function upsertProvider<T extends ModelSettingsSlice>(
@@ -381,6 +427,7 @@ export function deleteProvider<T extends ModelSettingsSlice>(settings: T, slug: 
     model: {
       coach: retargetRef(model.coach, slug, fallback),
       pi: retargetRef(model.pi, slug, fallback),
+      reviewer: model.reviewer ? retargetRef(model.reviewer, slug, fallback) : undefined,
       default: retargetRef(model.default, slug, fallback),
     },
   };
@@ -401,14 +448,16 @@ export type ModelRuntimeStatus = {
 
 export function getModelRuntimeStatus(
   settings: ModelSettingsSlice,
-  role: "coach" | "pi",
+  role: "coach" | "pi" | "reviewer",
   env?: LlmEnvOverride,
 ): ModelRuntimeStatus {
   const upgraded = upgradeToModelConfig(settings);
   const ref =
     role === "coach"
       ? upgraded.model?.coach ?? DEFAULT_MODEL_REF
-      : upgraded.model?.pi ?? DEFAULT_MODEL_REF;
+      : role === "reviewer"
+        ? resolveReviewerModelRef(upgraded.model)
+        : upgraded.model?.pi ?? DEFAULT_MODEL_REF;
   const creds = resolveModelCredentials(upgraded, ref, env);
   return {
     ref,

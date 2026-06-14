@@ -1,54 +1,47 @@
 import { useEffect, useRef, useState } from "react";
 import { useMcpCatalog } from "../lib/use-mcp-catalog";
 import {
-  COACH_AGENTS,
   COACH_SKILLS,
   countEnabled,
-  loadAgentSelection,
   loadMcpSelection,
+  loadPermissionSelection,
   loadSkillSelection,
-  saveAgentSelection,
+  permissionModeFromSelection,
   saveMcpSelection,
+  savePermissionSelection,
   saveSkillSelection,
-  type CoachAgent,
+  type ChatPermissionSelection,
   type CoachSkill,
 } from "../lib/coach-context";
+import { PERMISSION_PICKER_OPTIONS } from "../lib/workflow-ui";
 
-export type PickerTab = "skill" | "mcp" | "agent";
+export type PickerTab = "skill" | "mcp" | "permission";
 
 type Props = {
   skillCatalog?: CoachSkill[];
-  agentCatalog?: CoachAgent[];
   onContextChange?: (ctx: {
     skills: Record<string, boolean>;
     mcps: Record<string, boolean>;
-    agentId: string;
+    permission: ChatPermissionSelection;
+    permissionMode?: ReturnType<typeof permissionModeFromSelection>;
   }) => void;
 };
 
 export function ChatContextPicker({
   skillCatalog = COACH_SKILLS,
-  agentCatalog = COACH_AGENTS,
   onContextChange,
 }: Props) {
   const { mcps: mcpCatalog } = useMcpCatalog();
   const [openTab, setOpenTab] = useState<PickerTab | null>(null);
   const [skills, setSkills] = useState(() => loadSkillSelection(skillCatalog));
   const [mcps, setMcps] = useState(loadMcpSelection);
-  const [agentId, setAgentId] = useState(() => loadAgentSelection(agentCatalog));
+  const [permission, setPermission] = useState<ChatPermissionSelection>(() =>
+    loadPermissionSelection(),
+  );
 
   useEffect(() => {
     setSkills(loadSkillSelection(skillCatalog));
   }, [skillCatalog.map((s) => `${s.id}:${s.installed}`).join("|")]);
-
-  useEffect(() => {
-    setAgentId((prev) => {
-      if (agentCatalog.some((a) => a.id === prev)) return prev;
-      const next = loadAgentSelection(agentCatalog);
-      saveAgentSelection(next);
-      return next;
-    });
-  }, [agentCatalog.map((a) => a.id).join("|")]);
 
   const footerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -58,8 +51,13 @@ export function ChatContextPicker({
   onContextChangeRef.current = onContextChange;
 
   useEffect(() => {
-    onContextChangeRef.current?.({ skills, mcps, agentId });
-  }, [skills, mcps, agentId]);
+    onContextChangeRef.current?.({
+      skills,
+      mcps,
+      permission,
+      permissionMode: permissionModeFromSelection(permission),
+    });
+  }, [skills, mcps, permission]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -134,15 +132,17 @@ export function ChatContextPicker({
     saveMcpSelection(next);
   };
 
-  const selectAgent = (id: string) => {
-    setAgentId(id);
-    saveAgentSelection(id);
-    setOpenTab(null);
+  const selectPermission = (mode: ChatPermissionSelection) => {
+    setPermission(mode);
+    savePermissionSelection(mode);
   };
 
   const skillCount = countEnabled(skills);
   const mcpCount = countEnabled(mcps);
-  const activeAgent = agentCatalog.find((a) => a.id === agentId) ?? agentCatalog[0];
+  const permissionLabel =
+    permission === "default"
+      ? ""
+      : PERMISSION_PICKER_OPTIONS.find((o) => o.id === permission)?.label ?? "";
 
   return (
     <div className="chat-context-picker" ref={footerRef}>
@@ -165,12 +165,12 @@ export function ChatContextPicker({
         </button>
         <button
           type="button"
-          className={`chat-context-tab${openTab === "agent" ? " open" : ""}`}
-          aria-expanded={openTab === "agent"}
-          onClick={() => toggleTab("agent")}
+          className={`chat-context-tab chat-context-tab-permission${openTab === "permission" ? " open" : ""}${permission !== "default" ? " active-selection" : ""}`}
+          aria-expanded={openTab === "permission"}
+          onClick={() => toggleTab("permission")}
+          title="派单权限模式"
         >
-          Agent
-          <span className="chat-context-tab-label">{activeAgent?.name ?? "Agent"}</span>
+          权限{permissionLabel ? ` · ${permissionLabel}` : ""}
         </button>
       </div>
 
@@ -180,10 +180,10 @@ export function ChatContextPicker({
             <span className="chat-context-banner-title">
               {openTab === "skill" && "选择 Skills"}
               {openTab === "mcp" && "选择 MCP"}
-              {openTab === "agent" && "选择 Agent"}
+              {openTab === "permission" && "派单权限"}
             </span>
             <span className="chat-context-banner-hint">
-              {openTab === "agent" ? "单选" : "可多选"}
+              {openTab === "permission" ? "单选" : "可多选"}
             </span>
           </div>
           <div
@@ -226,9 +226,9 @@ export function ChatContextPicker({
                   </button>
                 );
               })}
-            {openTab === "agent" &&
-              agentCatalog.map((item) => {
-                const on = agentId === item.id;
+            {openTab === "permission" &&
+              PERMISSION_PICKER_OPTIONS.map((item) => {
+                const on = permission === item.id;
                 return (
                   <button
                     key={item.id}
@@ -236,10 +236,10 @@ export function ChatContextPicker({
                     role="option"
                     aria-selected={on}
                     className={`chat-context-option${on ? " active" : ""}`}
-                    onClick={() => selectAgent(item.id)}
+                    onClick={() => selectPermission(item.id)}
                   >
-                    <span className="chat-context-option-name">{item.name}</span>
-                    <span className="chat-context-option-desc">{item.desc}</span>
+                    <span className="chat-context-option-name">{item.label}</span>
+                    <span className="chat-context-option-desc">{item.description}</span>
                   </button>
                 );
               })}

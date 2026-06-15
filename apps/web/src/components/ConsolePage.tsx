@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CliProfile, Conversation, Goal, Project } from "@openx/shared";
+import type { BatchGoalsAction, CliProfile, CoachMessageRecord, Conversation, Goal, GoalRunState, Project } from "@openx/shared";
 import { goalMatchesDisplayFilter } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
-import { ChatPanel } from "./ChatPanel";
-import { SplitPaneStack } from "./SplitPaneStack";
-import { SplitWorkspace } from "./SplitWorkspace";
-import { TasksPanel } from "./TasksPanel";
-import type { CoachMessageRecord } from "@openx/shared";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
-import {
-  buildConsoleAgentRows,
-  consoleAgentKindBadge,
-  consoleAgentSummary,
-  type ConsoleConnection,
-} from "../lib/console-agents";
+import { buildConsoleAgentRows, type ConsoleConnection } from "../lib/console-agents";
+import { useDesktopLayout } from "../lib/use-desktop-layout";
+import type { CanvasWidgetId } from "../lib/flexible-desktop";
+import { ChatPanel } from "./ChatPanel";
+import { GoalsWorkspace } from "./GoalsWorkspace";
+import { PreviewRail } from "./PreviewRail";
+import { SmartCabinDesktop } from "./smart-cabin/SmartCabinDesktop";
+import { FlexibleCanvas } from "./smart-cabin/FlexibleCanvas";
+import { SmartStrip } from "./smart-cabin/SmartStrip";
+import { ForemanDock } from "./smart-cabin/ForemanDock";
+import { TaskIndexCard } from "./smart-cabin/TaskIndexCard";
+import { ConsoleFleetPanel } from "./smart-cabin/ConsoleFleetPanel";
+import { AwaitingReviewCompanion } from "./smart-cabin/ConsoleCompanionPanels";
 
 type ConsoleData = {
   project: Project;
@@ -59,10 +61,7 @@ type Props = {
   onToggleSelect: (id: string) => void;
   onSelectAllVisible: () => void;
   onClearSelection: () => void;
-  onBatchAction: (
-    action: import("@openx/shared").BatchGoalsAction,
-    ids: string[],
-  ) => Promise<void>;
+  onBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
   goalActions: {
     onApprove: (id: string) => Promise<void>;
     onRework: (id: string, reason?: string) => Promise<void>;
@@ -71,7 +70,7 @@ type Props = {
   };
   locateRequest: { goalId: string; tick: number } | null;
   selectedGoal?: Goal;
-  runs: Record<string, import("@openx/shared").GoalRunState>;
+  runs: Record<string, GoalRunState>;
   autoExecute: boolean;
   executors: ExecutorInfo[];
   cliProfiles: CliProfile[];
@@ -88,42 +87,46 @@ type Props = {
   conversationProjectIds?: Record<string, string>;
 };
 
-export function ConsolePage({
-  conversationId,
-  goals,
-  statusFilter,
-  onFilterChange,
-  selectedId,
-  onSelect,
-  onOpenDetail,
-  onNewGoal,
-  editMode,
-  onEditModeChange,
-  selectedIds,
-  onToggleSelect,
-  onSelectAllVisible,
-  onClearSelection,
-  onBatchAction,
-  goalActions,
-  locateRequest,
-  selectedGoal,
-  runs,
-  autoExecute,
-  executors,
-  cliProfiles,
-  defaultExecutorId,
-  onRefreshed,
-  onOpenGoalDetail,
-  onLocateGoal,
-  onNavigateToGoal,
-  coachReplyEvent,
-  coachStream,
-  coachMessageEvent,
-  conversationTitles,
-  projectTitles,
-  conversationProjectIds,
-}: Props) {
+export function ConsolePage(props: Props) {
+  const {
+    conversationId,
+    goals,
+    statusFilter,
+    onFilterChange,
+    selectedId,
+    onSelect,
+    onOpenDetail,
+    onNewGoal,
+    editMode,
+    onEditModeChange,
+    selectedIds,
+    onToggleSelect,
+    onSelectAllVisible,
+    onClearSelection,
+    onBatchAction,
+    goalActions,
+    locateRequest,
+    selectedGoal,
+    runs,
+    autoExecute,
+    executors,
+    cliProfiles,
+    defaultExecutorId,
+    onRefreshed,
+    onOpenGoalDetail,
+    onLocateGoal,
+    onNavigateToGoal,
+    coachReplyEvent,
+    coachStream,
+    coachMessageEvent,
+    conversationTitles,
+    projectTitles,
+    conversationProjectIds,
+  } = props;
+
   const [consoleData, setConsoleData] = useState<ConsoleData | null>(null);
+  const { scene, setScene, dockMode, setDockMode, sceneLabel } =
+    useDesktopLayout("dispatch");
 
   const loadConsole = useCallback(async () => {
     try {
@@ -160,145 +163,208 @@ export function ConsolePage({
     () => buildConsoleAgentRows(executors, cliProfiles, connections),
     [executors, cliProfiles, connections],
   );
-  const connectLinkedCount = connections.length;
+  const executorOnlineCount = agentRows.filter((r) => r.statusTone === "ok").length;
 
   const consoleChatGoals = useMemo(
     () => goals.filter((g) => g.conversationId === conversationId),
     [goals, conversationId],
   );
 
-  return (
-    <SplitWorkspace
-      className="main-view home-view cursor-workspace console-workspace"
-      left={
-        <SplitPaneStack
-          className="workspace-pane workspace-pane-tasks console-left"
-          storageKey="openx.consoleTopRatio"
-          defaultRatio={0.34}
-          minRatio={0.18}
-          maxRatio={0.62}
-          ariaLabel="调整执行器与任务池高度"
-          swappedStorageKey="openx.consoleStackSwapped"
-          swapAriaLabel="交换执行器与任务池位置"
-          top={
-            <>
-              <section className="console-section console-section-executors">
-                <div className="console-section-head">
-                  <h3 className="console-section-title">在线执行器</h3>
-                  <span className="console-section-meta">
-                    {consoleAgentSummary(agentRows, connectLinkedCount)}
-                  </span>
-                </div>
-                {agentRows.length === 0 ? (
-                  <p className="console-muted">
-                    尚未配置 CLI。请在设置 → 工具与 CLI 中添加或同步 Skills。
-                  </p>
-                ) : (
-                  <ul className="console-cli-list">
-                    {agentRows.map((row) => (
-                      <li
-                        key={row.id}
-                        className="console-cli-card"
-                        title={row.statusLabel}
-                      >
-                        <span
-                          className="console-cli-status-dot"
-                          data-tone={row.statusTone}
-                          aria-label={row.statusLabel}
-                        />
-                        <span className="console-cli-name">{row.label}</span>
-                        <span className={`console-cli-kind ${row.kind}`}>
-                          {consoleAgentKindBadge(row.kind)}
-                        </span>
-                        <span className="console-cli-id">{row.id}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+  const awaitingReviewGoals = useMemo(
+    () => allConsoleGoals.filter((g) => g.status === "awaiting_review"),
+    [allConsoleGoals],
+  );
 
-              {consoleData && consoleData.crossProjectReviewGoals.length > 0 ? (
-                <section className="console-section console-section-review">
-                  <div className="console-section-head">
-                    <h3 className="console-section-title">跨项目待确认</h3>
-                    <span className="console-section-meta">
-                      {consoleData.stats.crossProjectAwaitingReview} 项
-                    </span>
-                  </div>
-                  <ul className="console-review-list">
-                    {consoleData.crossProjectReviewGoals.map((goal) => (
-                      <li key={goal.id}>
-                        <button
-                          type="button"
-                          className="console-review-item"
-                          onClick={() => onNavigateToGoal(goal.id)}
-                        >
-                          <span className="console-review-title">{goal.title}</span>
-                          <span className="console-review-meta">等你确认 →</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-            </>
-          }
-          bottom={
-            <section className="console-section console-section-pool">
-              <div className="console-section-head">
-                <h3 className="console-section-title">全部任务单</h3>
-                <span className="console-section-meta">{allConsoleGoals.length} 项</span>
-              </div>
-              <TasksPanel
-                goals={allConsoleFiltered}
-                allGoals={allConsoleGoals}
-                filter={statusFilter}
-                onFilterChange={onFilterChange}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                onOpenDetail={onOpenDetail}
-                onNewGoal={onNewGoal}
-                hideFooterNewGoal
-                editMode={editMode}
-                onEditModeChange={onEditModeChange}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
-                onSelectAllVisible={onSelectAllVisible}
-                onClearSelection={onClearSelection}
-                onBatchAction={onBatchAction}
-                locateRequest={locateRequest}
-                showConnectClaimStatus
-                conversationTitles={conversationTitles}
-                projectTitles={projectTitles}
-                conversationProjectIds={conversationProjectIds}
-                goalAccess={{ type: "console" }}
-                {...goalActions}
-              />
-            </section>
-          }
-        />
-      }
-      right={
-        <div className="workspace-pane workspace-pane-assistant">
-          <ChatPanel
-            conversationId={conversationId}
-            goals={consoleChatGoals}
-            selectedGoal={selectedGoal}
-            runs={runs}
-            autoExecute={autoExecute}
-            executors={executors}
-            defaultExecutorId={defaultExecutorId}
-            onRefreshed={onRefreshed}
-            onOpenGoalDetail={onOpenGoalDetail}
-            onLocateGoal={onLocateGoal}
-            onStartGoal={goalActions.onStart}
-            onApproveGoal={goalActions.onApprove}
-            onReworkGoal={goalActions.onRework}
-            coachReplyEvent={coachReplyEvent}
-            coachStream={coachStream}
-            coachMessageEvent={coachMessageEvent}
+  const selectedRun = selectedGoal ? runs[selectedGoal.id] : undefined;
+
+  const artifactsEnabled = Boolean(
+    selectedGoal &&
+      (selectedGoal.status === "running" ||
+        selectedGoal.status === "awaiting_review" ||
+        selectedGoal.status === "done" ||
+        selectedRun?.active ||
+        (selectedRun?.events.length ?? 0) > 0),
+  );
+
+  const flexWidgets = useMemo((): Partial<Record<CanvasWidgetId, React.ReactNode>> => {
+    const chatPanelProps = {
+      conversationId,
+      goals: consoleChatGoals,
+      selectedGoal,
+      runs,
+      autoExecute,
+      executors,
+      defaultExecutorId,
+      onRefreshed,
+      onOpenGoalDetail,
+      onLocateGoal,
+      onStartGoal: goalActions.onStart,
+      onApproveGoal: goalActions.onApprove,
+      onReworkGoal: goalActions.onRework,
+      coachReplyEvent,
+      coachStream,
+      coachMessageEvent,
+    };
+
+    return {
+      chat: (
+        <div className="flexible-widget-fill workspace-pane workspace-pane-assistant">
+          <ChatPanel {...chatPanelProps} />
+        </div>
+      ),
+      tasks: (
+        <div className="flexible-widget-fill console-task-stage">
+          <GoalsWorkspace
+            goals={allConsoleFiltered}
+            allGoals={allConsoleGoals}
+            filter={statusFilter}
+            onFilterChange={onFilterChange}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onOpenDetail={onOpenDetail}
+            onNewGoal={onNewGoal}
+            hideFooterNewGoal
+            editMode={editMode}
+            onEditModeChange={onEditModeChange}
+            selectedIds={selectedIds}
+            onToggleSelect={onToggleSelect}
+            onSelectAllVisible={onSelectAllVisible}
+            onClearSelection={onClearSelection}
+            onBatchAction={onBatchAction}
+            locateRequest={locateRequest}
+            showConnectClaimStatus
+            conversationTitles={conversationTitles}
+            projectTitles={projectTitles}
+            conversationProjectIds={conversationProjectIds}
+            goalAccess={{ type: "console" }}
+            goalActions={goalActions}
+            defaultViewMode="kanban"
+            embedKanbanOnly
           />
         </div>
+      ),
+      artifacts: (
+        <div className="flexible-widget-fill workspace-pane workspace-pane-preview">
+          <PreviewRail
+            goal={selectedGoal}
+            run={selectedRun}
+            goals={consoleChatGoals}
+            onSelectGoal={onSelect}
+          />
+        </div>
+      ),
+      review: (
+        <div className="flexible-widget-fill">
+          <AwaitingReviewCompanion goals={awaitingReviewGoals} onSelect={onSelect} />
+        </div>
+      ),
+      fleet: (
+        <div className="flexible-widget-fill">
+          <ConsoleFleetPanel
+            executors={executors}
+            cliProfiles={cliProfiles}
+            connections={connections}
+            crossProjectReviewGoals={consoleData?.crossProjectReviewGoals ?? []}
+            crossProjectAwaitingReview={
+              consoleData?.stats.crossProjectAwaitingReview ?? 0
+            }
+            onNavigateToGoal={onNavigateToGoal}
+          />
+        </div>
+      ),
+    };
+  }, [
+    allConsoleFiltered,
+    allConsoleGoals,
+    autoExecute,
+    awaitingReviewGoals,
+    cliProfiles,
+    coachMessageEvent,
+    coachReplyEvent,
+    coachStream,
+    connections,
+    consoleChatGoals,
+    consoleData,
+    conversationId,
+    conversationProjectIds,
+    conversationTitles,
+    defaultExecutorId,
+    editMode,
+    executors,
+    goalActions,
+    locateRequest,
+    onBatchAction,
+    onClearSelection,
+    onEditModeChange,
+    onFilterChange,
+    onLocateGoal,
+    onNavigateToGoal,
+    onNewGoal,
+    onOpenDetail,
+    onOpenGoalDetail,
+    onRefreshed,
+    onSelect,
+    onSelectAllVisible,
+    onToggleSelect,
+    projectTitles,
+    runs,
+    selectedGoal,
+    selectedId,
+    selectedIds,
+    selectedRun,
+    statusFilter,
+  ]);
+
+  return (
+    <SmartCabinDesktop
+      className="cursor-workspace console-smart-cabin"
+      strip={
+        <SmartStrip
+          title="调度台"
+          subtitle={consoleData?.conversation.title ?? "系统对话"}
+          scene={scene}
+          sceneLabel={sceneLabel}
+          onSceneChange={setScene}
+          selectedGoal={selectedGoal}
+          awaitingReviewCount={awaitingReviewGoals.length}
+          executorOnlineCount={executorOnlineCount}
+          executorTotalCount={agentRows.length}
+          totalGoals={allConsoleGoals.length}
+        />
+      }
+      left={
+        <TaskIndexCard
+          goals={allConsoleGoals}
+          filter={statusFilter}
+          onFilterChange={onFilterChange}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          totalCount={allConsoleGoals.length}
+        />
+      }
+      canvas={
+        <FlexibleCanvas scope="console" dockMode={dockMode} widgets={flexWidgets} />
+      }
+      dock={
+        <ForemanDock
+          dockMode={dockMode}
+          onDockModeChange={setDockMode}
+          selectedGoal={selectedGoal}
+          taskCount={allConsoleGoals.length}
+          awaitingReviewCount={awaitingReviewGoals.length}
+          artifactsEnabled={artifactsEnabled}
+          approveEnabled={selectedGoal?.status === "awaiting_review"}
+          startEnabled={selectedGoal != null && selectedGoal.status === "draft"}
+          onApprove={
+            selectedGoal ? () => void goalActions.onApprove(selectedGoal.id) : undefined
+          }
+          onRework={
+            selectedGoal ? () => void goalActions.onRework(selectedGoal.id) : undefined
+          }
+          onStart={
+            selectedGoal ? () => void goalActions.onStart(selectedGoal.id) : undefined
+          }
+        />
       }
     />
   );

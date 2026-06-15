@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { Goal, GoalRunState } from "@openx/shared";
-import { formatWorkOrderId } from "@openx/shared";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 
 type LogEntry = {
   goalId: string;
@@ -47,7 +47,8 @@ export function GoalDetailPage({
         </button>
         {goal ? (
           <span className="goal-detail-page-subtitle">
-            {goal.orderNo > 0 ? `${formatWorkOrderId(goal.orderNo)} · ` : ""}
+            <WorkOrderIdBadge orderNo={goal.orderNo} className="goal-detail-order-id" />
+            {goal.orderNo > 0 ? " · " : ""}
             {goal.title}
           </span>
         ) : (

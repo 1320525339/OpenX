@@ -3,7 +3,6 @@ import { useHorizontalPanScroll } from "../lib/use-horizontal-pan-scroll";
 import type { BatchGoalsAction, Goal } from "@openx/shared";
 import {
   canMutateGoal,
-  formatWorkOrderId,
   goalDisplayHint,
   goalDisplayLabel,
   goalDisplayOutcome,
@@ -17,6 +16,7 @@ import { buildGoalContext, formatDispatchSummary, truncate } from "../lib/goal-d
 import { buildGoalTreeList } from "../lib/goal-list";
 import { GoalTaskExpandBody, goalResultTeaser } from "./GoalTaskExpandBody";
 import { GoalTaskActions, goalHasTaskActions } from "./GoalTaskActions";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "全部" },
@@ -255,6 +255,11 @@ export function TasksPanel({
                   handleCardClick();
                 }}
               >
+                {g.orderNo > 0 ? (
+                  <div className="goal-card-order-banner">
+                    <WorkOrderIdBadge orderNo={g.orderNo} />
+                  </div>
+                ) : null}
                 <div className="goal-card-head">
                   {editMode ? (
                     <label
@@ -278,11 +283,6 @@ export function TasksPanel({
                   )}
                   <div className="goal-card-body">
                     <div className="goal-card-title-row">
-                      {g.orderNo > 0 ? (
-                        <span className="goal-card-order-id" title="任务单号">
-                          {formatWorkOrderId(g.orderNo)}
-                        </span>
-                      ) : null}
                       <strong className="goal-card-title">{g.title}</strong>
                       {conversationTitles?.[g.conversationId] ? (
                         <span className="goal-card-conv" title="所属对话">

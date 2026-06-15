@@ -27,6 +27,7 @@ function seedGoal(): Goal {
   });
   const goal: Goal = {
     id: "g-review",
+    orderNo: 1,
     conversationId: "conv-review",
     title: "验收目标",
     acceptance: "ok",

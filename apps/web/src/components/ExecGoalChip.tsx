@@ -9,6 +9,7 @@ import {
   PRIORITY_LABELS,
   truncate,
 } from "../lib/goal-detail";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 
 type Props = {
   goal: Goal;
@@ -86,6 +87,7 @@ export function ExecGoalChip({
         <span className="exec-goal-chip-top">
           <span className="exec-goal-title">
             {isWorking && <span className="run-pulse-dot chip-dot" aria-hidden />}
+            <WorkOrderIdBadge orderNo={goal.orderNo} className="exec-goal-order-id" />
             {goal.title}
           </span>
           <span className={`status-pill compact ${goal.status}`}>{statusText}</span>
@@ -112,6 +114,14 @@ export function ExecGoalChip({
             <summary>任务 brief</summary>
             <div className="exec-goal-detail-section">
               <dl className="exec-detail-kv">
+                {goal.orderNo > 0 && (
+                  <div>
+                    <dt>任务单号</dt>
+                    <dd>
+                      <WorkOrderIdBadge orderNo={goal.orderNo} />
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt>状态</dt>
                   <dd>{statusText}</dd>

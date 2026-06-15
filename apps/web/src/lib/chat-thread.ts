@@ -137,6 +137,7 @@ export type ChatThreadItem =
       recordId: number;
       exchange: CrewExchangeDisplay;
       timestamp: string;
+      goalId?: string;
     }
   | { kind: "execution"; key: string; pin: ExecutionPin }
   | {
@@ -177,6 +178,8 @@ export function coachRecordsToThreadItems(
             recordId: record.id,
             exchange,
             timestamp: record.timestamp,
+            goalId:
+              record.kind === "text" ? record.linkedGoalId : undefined,
           });
           continue;
         }

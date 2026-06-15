@@ -232,6 +232,7 @@ function migrate(database: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_crew_messages_goal ON crew_messages(goal_id, id);
   `);
+  backfillCoachCrewGoalIds(database);
 }
 
 type ProjectRow = {
@@ -305,6 +306,34 @@ function backfillGoalOrderNumbers(database: Database.Database): void {
   for (const row of rows) {
     stmt.run(next, row.id);
     next += 1;
+  }
+}
+
+function backfillCoachCrewGoalIds(database: Database.Database): void {
+  const rows = database
+    .prepare(
+      `SELECT id, conversation_id AS conversationId, text
+       FROM coach_messages
+       WHERE goal_id IS NULL AND kind = 'text' AND role = 'coach'
+         AND text LIKE '[%] %'`,
+    )
+    .all() as { id: number; conversationId: string; text: string }[];
+  if (rows.length === 0) return;
+  const findGoal = database.prepare(
+    `SELECT goal_id AS goalId FROM crew_messages
+     WHERE conversation_id = ? AND summary = ?
+     ORDER BY id DESC LIMIT 1`,
+  );
+  const update = database.prepare(
+    "UPDATE coach_messages SET goal_id = ? WHERE id = ? AND goal_id IS NULL",
+  );
+  for (const row of rows) {
+    const summary = row.text.replace(/^\[[^\]]+\]\s*/, "").trim();
+    if (!summary) continue;
+    const match = findGoal.get(row.conversationId, summary) as
+      | { goalId: string }
+      | undefined;
+    if (match?.goalId) update.run(match.goalId, row.id);
   }
 }
 
@@ -764,6 +793,7 @@ function rowToCoachMessage(row: CoachMessageRow): CoachMessageRecord {
     role: row.role as "user" | "coach",
     text: row.text,
     timestamp: row.timestamp,
+    linkedGoalId: row.goal_id ?? undefined,
   };
 }
 
@@ -771,14 +801,15 @@ export function saveCoachMessage(
   conversationId: string,
   role: "user" | "coach",
   text: string,
+  goalId?: string | null,
 ): CoachTextMessage {
   const timestamp = new Date().toISOString();
   const result = getDb()
     .prepare(
       `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
-       VALUES (?, NULL, ?, ?, 'text', NULL, ?)`,
+       VALUES (?, ?, ?, ?, 'text', NULL, ?)`,
     )
-    .run(conversationId, role, text, timestamp);
+    .run(conversationId, goalId ?? null, role, text, timestamp);
   touchConversation(conversationId);
   return {
     id: Number(result.lastInsertRowid),
@@ -787,6 +818,7 @@ export function saveCoachMessage(
     role,
     text,
     timestamp,
+    linkedGoalId: goalId ?? undefined,
   };
 }
 

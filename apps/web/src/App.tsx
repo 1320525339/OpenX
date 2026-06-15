@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
-import { TasksPanel } from "./components/TasksPanel";
-import { ChatPanel } from "./components/ChatPanel";
+import { ConversationWorkspace } from "./components/ConversationWorkspace";
+import { GoalDetailPage } from "./components/GoalDetailPage";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { NewGoalModal } from "./components/NewGoalModal";
@@ -8,8 +8,6 @@ import { BroadcastTicker } from "./components/BroadcastTicker";
 import { LogStrip } from "./components/LogStrip";
 import { SideNav } from "./components/SideNav";
 import { TopBar } from "./components/TopBar";
-import { SplitWorkspace } from "./components/SplitWorkspace";
-import { GoalDetailPage } from "./components/GoalDetailPage";
 import { HomeDashboard } from "./components/HomeDashboard";
 import { ProjectPage } from "./components/ProjectPage";
 import { ConsolePage } from "./components/ConsolePage";
@@ -37,6 +35,7 @@ import "./styles/minimal.css";
 import "./styles/layout-shell.css";
 import "./styles/theme-overrides.css";
 import "./styles/typography.css";
+import "./styles/smart-cabin.css";
 
 function AppContent() {
   const {
@@ -469,64 +468,46 @@ function AppContent() {
               {!state.detailGoalId &&
                 state.view === "conversation" &&
                 state.selectedConversationId && (
-                  <SplitWorkspace
-                    className="main-view home-view cursor-workspace"
-                    left={
-                      <div className="workspace-pane workspace-pane-tasks">
-                        <TasksPanel
-                          goals={projectFilteredGoals}
-                          allGoals={projectGoals}
-                          filter={state.statusFilter}
-                          onFilterChange={(filter) =>
-                            dispatch({ type: "set_status_filter", filter })
-                          }
-                          selectedId={state.selectedId}
-                          onSelect={(id) => dispatch({ type: "set_selected", id })}
-                          onOpenDetail={openGoalDetail}
-                          onNewGoal={openNewGoal}
-                          hideFooterNewGoal
-                          editMode={state.tasksEditMode}
-                          onEditModeChange={(edit) =>
-                            dispatch({ type: "set_tasks_edit_mode", edit })
-                          }
-                          selectedIds={state.tasksSelectedIds}
-                          onToggleSelect={(id) =>
-                            dispatch({ type: "toggle_task_select", id })
-                          }
-                          onSelectAllVisible={selectEditableProjectGoals}
-                          onClearSelection={() =>
-                            dispatch({ type: "clear_tasks_selection" })
-                          }
-                          onBatchAction={handleTasksBatchAction}
-                          locateRequest={locateRequest}
-                          conversationTitles={conversationTitleMap}
-                          goalAccess={conversationGoalAccess}
-                          {...goalActions}
-                        />
-                      </div>
+                  <ConversationWorkspace
+                    conversationId={state.selectedConversationId}
+                    conversationTitle={
+                      conversationTitleMap[state.selectedConversationId]
                     }
-                    right={
-                      <div className="workspace-pane workspace-pane-assistant">
-                        <ChatPanel
-                          conversationId={state.selectedConversationId}
-                          goals={conversationGoals}
-                          selectedGoal={selected}
-                          runs={state.runs}
-                          autoExecute={settings.autoExecute}
-                          executors={state.executors}
-                          defaultExecutorId={settings.defaultExecutorId}
-                          onRefreshed={refreshGoals}
-                          onOpenGoalDetail={openGoalDetail}
-                          onLocateGoal={locateGoalInTasks}
-                          onStartGoal={goalActions.onStart}
-                          onApproveGoal={goalActions.onApprove}
-                          onReworkGoal={goalActions.onRework}
-                          coachReplyEvent={state.coachReplyEvent}
-                          coachStream={state.coachStream}
-                          coachMessageEvent={state.coachMessageEvent}
-                        />
-                      </div>
+                    goals={conversationGoals}
+                    selectedGoal={selected}
+                    selectedId={state.selectedId}
+                    runs={state.runs}
+                    statusFilter={state.statusFilter}
+                    onFilterChange={(filter) =>
+                      dispatch({ type: "set_status_filter", filter })
                     }
+                    onSelect={(id) => dispatch({ type: "set_selected", id })}
+                    onOpenDetail={openGoalDetail}
+                    onNewGoal={openNewGoal}
+                    editMode={state.tasksEditMode}
+                    onEditModeChange={(edit) =>
+                      dispatch({ type: "set_tasks_edit_mode", edit })
+                    }
+                    selectedIds={state.tasksSelectedIds}
+                    onToggleSelect={(id) =>
+                      dispatch({ type: "toggle_task_select", id })
+                    }
+                    onSelectAllVisible={selectEditableProjectGoals}
+                    onClearSelection={() =>
+                      dispatch({ type: "clear_tasks_selection" })
+                    }
+                    onBatchAction={handleTasksBatchAction}
+                    locateRequest={locateRequest}
+                    goalAccess={conversationGoalAccess}
+                    goalActions={goalActions}
+                    autoExecute={settings.autoExecute}
+                    executors={state.executors}
+                    defaultExecutorId={settings.defaultExecutorId}
+                    onRefreshed={refreshGoals}
+                    onLocateGoal={locateGoalInTasks}
+                    coachReplyEvent={state.coachReplyEvent}
+                    coachStream={state.coachStream}
+                    coachMessageEvent={state.coachMessageEvent}
                   />
                 )}
 

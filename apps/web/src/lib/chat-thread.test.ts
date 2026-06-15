@@ -203,6 +203,7 @@ describe("chat-thread", () => {
         role: "coach",
         text: "[施工队 → 工头] 请选择部署环境：staging 还是 prod？",
         timestamp: "2026-06-14T10:00:00.000Z",
+        linkedGoalId: "g-crew",
       },
     ];
     const items = coachRecordsToThreadItems(records);
@@ -211,6 +212,7 @@ describe("chat-thread", () => {
     if (items[0]?.kind === "crew_exchange") {
       expect(items[0].exchange.direction).toBe("crew_to_foreman");
       expect(items[0].exchange.summary).toContain("staging");
+      expect(items[0].goalId).toBe("g-crew");
     }
   });
 

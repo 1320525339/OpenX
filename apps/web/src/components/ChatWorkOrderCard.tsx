@@ -2,6 +2,8 @@ import type { RefinedGoal, RefinedSubGoal } from "@openx/shared";
 import { DISPATCH_PERMISSION_LABELS } from "@openx/shared";
 import type { ExecutorInfo } from "../api";
 import { buildExecutorOptions, executorDisplayLabel } from "../lib/executors";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
+import { CrewDialogueSummary } from "./CrewDialogueSummary";
 
 type Props = {
   refined: RefinedGoal;
@@ -11,6 +13,11 @@ type Props = {
   recommendReason?: string;
   onChange: (next: RefinedGoal) => void;
   onExecutorChange: (id: string) => void;
+  /** 已创建任务的全局序号 */
+  orderNo?: number;
+  /** 已关联的目标 id（展示工头↔施工队协作） */
+  linkedGoalId?: string;
+  crewStatus?: string;
   /** 由澄清卡生成的工单：展示来源并可跳转到澄清记录 */
   sourceClarifyTitle?: string;
   onViewSourceClarify?: () => void;
@@ -45,6 +52,9 @@ export function ChatWorkOrderCard({
   recommendReason,
   onChange,
   onExecutorChange,
+  orderNo,
+  linkedGoalId,
+  crewStatus,
   sourceClarifyTitle,
   onViewSourceClarify,
 }: Props) {
@@ -68,6 +78,23 @@ export function ChatWorkOrderCard({
 
   return (
     <article className="chat-workorder" aria-label="待确认任务单">
+      {orderNo && orderNo > 0 ? (
+        <div className="chat-workorder-order-banner">
+          <WorkOrderIdBadge orderNo={orderNo} />
+        </div>
+      ) : (
+        <div className="chat-workorder-order-banner chat-workorder-order-banner-pending">
+          <span className="chat-workorder-pending-id">待创建</span>
+        </div>
+      )}
+      {linkedGoalId ? (
+        <CrewDialogueSummary
+          goalId={linkedGoalId}
+          crewStatus={crewStatus}
+          embedded
+          className="chat-workorder-crew"
+        />
+      ) : null}
       <header className="chat-workorder-head">
         <span className="chat-workorder-label">任务单</span>
         <label className="chat-workorder-executor">

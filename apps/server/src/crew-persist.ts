@@ -21,6 +21,7 @@ export function persistCrewQuestion(goalId: string, question: CrewQuestion) {
     goal.conversationId,
     "coach",
     formatCrewExchangeCoachLine("crew_to_foreman", summary),
+    goalId,
   );
 }
 
@@ -38,6 +39,7 @@ export function persistForemanDirective(goalId: string, directive: CrewDirective
     goal.conversationId,
     "coach",
     formatCrewExchangeCoachLine("foreman_to_crew", directive.message.slice(0, 500)),
+    goalId,
   );
 }
 
@@ -55,6 +57,7 @@ export function persistForemanEscalation(goalId: string, escalation: CrewEscalat
     goal.conversationId,
     "coach",
     formatCrewExchangeCoachLine("foreman_escalation", escalation.prompt.slice(0, 500)),
+    goalId,
   );
 }
 
@@ -76,5 +79,6 @@ export function persistForemanReview(
     goal.conversationId,
     "coach",
     formatCrewExchangeCoachLine("foreman_review", summary.slice(0, 500)),
+    goalId,
   );
 }

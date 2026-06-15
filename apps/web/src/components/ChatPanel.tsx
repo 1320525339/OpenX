@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CoachMessageRecord, Goal, GoalRunState } from "@openx/shared";
-import { DEFAULT_EXECUTION_AGENT_ID } from "@openx/shared";
+import { DEFAULT_EXECUTION_AGENT_ID, formatWorkOrderId } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import { defaultExecutorChoice } from "../lib/executors";
 import { ChatWorkOrderCard } from "./ChatWorkOrderCard";
@@ -47,6 +47,14 @@ import type {
   CoachReplyEvent,
   CoachStreamState,
 } from "../lib/app-state";
+import {
+  chatSlashHelpText,
+  formatConversationStatusSummary,
+  formatConversationTasksList,
+  findGoalByLocateQuery,
+  parseChatSlash,
+  type ChatSlashCommand,
+} from "../lib/chat-slash";
 
 type Props = {
   conversationId: string;
@@ -437,9 +445,159 @@ export function ChatPanel({
     [conversationId],
   );
 
+  const runSlashCommand = useCallback(
+    async (cmd: ChatSlashCommand) => {
+      switch (cmd.type) {
+        case "help":
+          appendLocalCoach(chatSlashHelpText());
+          return;
+        case "status":
+          appendLocalCoach(formatConversationStatusSummary(conversationGoals));
+          return;
+        case "tasks":
+          appendLocalCoach(formatConversationTasksList(conversationGoals));
+          return;
+        case "locate": {
+          const found = findGoalByLocateQuery(conversationGoals, cmd.query);
+          if (!found) {
+            appendLocalCoach(`未找到「${cmd.query}」对应的任务单。`, true);
+            return;
+          }
+          onLocateGoal?.(found.id);
+          const wo =
+            found.orderNo > 0 ? formatWorkOrderId(found.orderNo) : found.id.slice(0, 8);
+          appendLocalCoach(`已定位 ${wo} · ${found.title}`);
+          return;
+        }
+        case "approve": {
+          if (!selectedGoal) {
+            appendLocalCoach("请先在任务区选择任务单。", true);
+            return;
+          }
+          if (selectedGoal.status !== "awaiting_review") {
+            appendLocalCoach("当前任务不在待验收状态。", true);
+            return;
+          }
+          if (!onApproveGoal) return;
+          try {
+            await onApproveGoal(selectedGoal.id);
+            onRefreshed();
+            const wo =
+              selectedGoal.orderNo > 0
+                ? formatWorkOrderId(selectedGoal.orderNo)
+                : selectedGoal.id.slice(0, 8);
+            appendLocalCoach(`已确认完成 ${wo} · ${selectedGoal.title}`);
+          } catch (e) {
+            const errText = e instanceof Error ? e.message : "验收失败";
+            appendLocalCoach(`验收失败：${errText}`, true);
+          }
+          return;
+        }
+        case "rework": {
+          if (!selectedGoal) {
+            appendLocalCoach("请先在任务区选择任务单。", true);
+            return;
+          }
+          if (!onReworkGoal) return;
+          try {
+            await onReworkGoal(selectedGoal.id, cmd.reason);
+            onRefreshed();
+            appendLocalCoach(
+              cmd.reason
+                ? `已提交返工：${cmd.reason}`
+                : `已提交返工「${selectedGoal.title}」。`,
+            );
+          } catch (e) {
+            const errText = e instanceof Error ? e.message : "返工失败";
+            appendLocalCoach(`返工失败：${errText}`, true);
+          }
+          return;
+        }
+        case "start": {
+          if (!selectedGoal) {
+            appendLocalCoach("请先在任务区选择任务单。", true);
+            return;
+          }
+          if (!onStartGoal) return;
+          try {
+            await onStartGoal(selectedGoal.id);
+            onRefreshed();
+            appendLocalCoach(`已开始推进「${selectedGoal.title}」。`);
+          } catch (e) {
+            const errText = e instanceof Error ? e.message : "启动失败";
+            appendLocalCoach(`启动失败：${errText}`, true);
+          }
+          return;
+        }
+        case "refine": {
+          setLastUserDraft(cmd.message);
+          setStructuringKind("refine");
+          setLoadingMode("structuring");
+          setLoading(true);
+          stickToBottomRef.current = true;
+          try {
+            const { meta } = await api.coachChat(cmd.message, {
+              conversationId,
+              goalId: selectedGoal?.id,
+              skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
+              mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
+              forceRefine: true,
+            });
+            await syncThread();
+            stickToBottomRef.current = true;
+            if (meta?.quotaExceeded || meta?.llmError) {
+              const { messages } = await api.getCoachMessages(conversationId);
+              const lastCoach = [...messages]
+                .reverse()
+                .find((r) => r.kind === "text" && r.role === "coach");
+              if (lastCoach?.kind === "text") {
+                setMessageWarnById((prev) => ({ ...prev, [lastCoach.id]: true }));
+              }
+            }
+          } catch (e) {
+            const errText = e instanceof Error ? e.message : "整理失败";
+            appendLocalCoach(`整理任务单失败：${errText}`, true);
+          } finally {
+            setLoading(false);
+          }
+          return;
+        }
+      }
+    },
+    [
+      appendLocalCoach,
+      chatMcpIds,
+      chatSkillIds,
+      conversationGoals,
+      conversationId,
+      onApproveGoal,
+      onLocateGoal,
+      onRefreshed,
+      onReworkGoal,
+      onStartGoal,
+      selectedGoal,
+      syncThread,
+    ],
+  );
+
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
+
+    if (text.startsWith("/")) {
+      const slash = parseChatSlash(text);
+      stickToBottomRef.current = true;
+      setThreadRecords((records) =>
+        appendCoachRecord(records, { role: "user", text }, conversationId),
+      );
+      setDraft("");
+      if (!slash) {
+        appendLocalCoach("命令格式不正确。输入 /help 查看可用命令。", true);
+        return;
+      }
+      await runSlashCommand(slash);
+      return;
+    }
     stickToBottomRef.current = true;
     setThreadRecords((records) =>
       appendCoachRecord(records, { role: "user", text }, conversationId),
@@ -820,6 +978,9 @@ export function ChatPanel({
         executors={executors}
         recommendedId={recommendedExecutor?.id}
         recommendReason={recommendedExecutor?.reason}
+        orderNo={selectedGoal?.orderNo}
+        linkedGoalId={selectedGoal?.id}
+        crewStatus={selectedGoal?.crewStatus}
         onChange={setRefinedPreview}
         onExecutorChange={setExecutorId}
         sourceClarifyTitle={
@@ -873,6 +1034,14 @@ export function ChatPanel({
     ? `${liveExecution.run.liveText.length}:${liveExecution.run.events.length}:${liveExecution.run.active}`
     : "";
 
+  /** 工头↔施工队消息已嵌入对应任务单，不在对话流单独展示 */
+  const crewEmbeddedGoalIds = useMemo(() => {
+    const ids = new Set<string>(chipGoalIds);
+    for (const g of goals) ids.add(g.id);
+    if (liveExecution?.goal.id) ids.add(liveExecution.goal.id);
+    return ids;
+  }, [chipGoalIds, goals, liveExecution?.goal.id]);
+
   useEffect(() => {
     if (!liveExecution || !stickToBottomRef.current) return;
     scrollToBottom("auto");
@@ -902,6 +1071,9 @@ export function ChatPanel({
               }
 
               if (item.kind === "crew_exchange") {
+                if (item.goalId && crewEmbeddedGoalIds.has(item.goalId)) {
+                  return null;
+                }
                 const { exchange } = item;
                 return (
                   <div
@@ -1253,6 +1425,9 @@ export function ChatPanel({
                 skillCatalog={catalogSkills}
                 onContextChange={handleContextChange}
               />
+              {draft.startsWith("/") ? (
+                <p className="chat-slash-hint">OpenX 斜杠命令 · /help 查看全部</p>
+              ) : null}
               <textarea
                 className="mech-textarea"
                 value={draft}
@@ -1263,7 +1438,7 @@ export function ChatPanel({
                     void send();
                   }
                 }}
-                placeholder="说你想推进的事、问进展、或描述一个新目标…"
+                placeholder="说你想推进的事… 或 /help 查看斜杠命令"
                 rows={2}
               />
               <div className="chat-composer-actions">

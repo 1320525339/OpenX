@@ -1,0 +1,675 @@
+/* Smart Cabin 三卡桌面 + 工头底栏 */
+
+.smart-cabin-desktop {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  gap: 0;
+}
+
+.smart-cabin-cards {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+  width: 100%;
+}
+
+.smart-cabin-card {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.smart-cabin-desktop .pane-divider {
+  align-self: stretch;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+}
+
+.smart-cabin-desktop .pane-divider::after {
+  background: var(--border);
+}
+
+.smart-cabin-desktop .pane-divider:hover::after,
+.smart-cabin-desktop .pane-divider:focus-visible::after,
+body.split-dragging .smart-cabin-desktop .pane-divider::after {
+  background: var(--border-strong, var(--border));
+}
+
+.smart-cabin-card {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.smart-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-raised, var(--bg));
+  border: 1px solid var(--border);
+}
+
+.smart-card-fill {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.smart-card-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.smart-card-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.smart-card-meta {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.smart-card-hint {
+  margin: 0;
+  padding: 0.65rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+/* ── Smart Strip ── */
+
+.smart-strip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem var(--workspace-grid-pad, 0.75rem);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised, var(--bg));
+}
+
+.smart-strip-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.smart-strip-titles {
+  min-width: 0;
+}
+
+.smart-strip-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.smart-strip-subtitle {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.smart-strip-scene {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.smart-strip-scene-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.smart-strip-scene-select {
+  font-size: 0.68rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.smart-strip-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.smart-strip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 220px;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.68rem;
+}
+
+.smart-strip-chip.muted {
+  color: var(--text-muted);
+}
+
+.smart-strip-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-strip-chip-meta {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.smart-strip-stat {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.smart-strip-stat strong {
+  color: var(--text);
+}
+
+/* ── Task Index ── */
+
+.task-index-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.task-index-filters {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  padding: 0 0.65rem 0.35rem;
+}
+
+.task-index-filter {
+  padding: 0.18rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.task-index-filter:hover {
+  color: var(--text);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+}
+
+.task-index-filter.active {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+}
+
+.task-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.35rem 0.5rem;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.task-index-item {
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  margin-bottom: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-index-item:hover {
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+}
+
+.task-index-item.selected {
+  border-color: var(--accent, #2563eb);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+}
+
+.task-index-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin-bottom: 0.15rem;
+}
+
+.task-index-id {
+  font-size: 0.64rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+}
+
+.task-index-title {
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.task-index-wo {
+  display: block;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+/* ── Foreman Dock ── */
+
+.foreman-dock {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem var(--workspace-grid-pad, 0.75rem);
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised, var(--bg));
+}
+
+.foreman-dock-modes {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.foreman-dock-btn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 3.2rem;
+  padding: 0.25rem 0.45rem;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.foreman-dock-btn.active {
+  color: var(--text);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+}
+
+.foreman-dock-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.foreman-dock-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.foreman-dock-label {
+  font-size: 0.62rem;
+}
+
+.foreman-dock-badge {
+  position: absolute;
+  top: 0.05rem;
+  right: 0.15rem;
+  min-width: 1rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font-size: 0.58rem;
+  line-height: 1.25;
+}
+
+.foreman-dock-context {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.foreman-dock-wo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  font-size: 0.72rem;
+}
+
+.foreman-dock-wo > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foreman-dock-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.foreman-dock-hint {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+/* ── Companion panels ── */
+
+.companion-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.companion-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.companion-chat .chat-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.companion-chat .chat-panel-body {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.console-task-stage {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.console-task-stage .goals-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.console-task-stage .goals-workspace-embedded .goals-workspace-kanban {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.console-smart-cabin .smart-cabin-card-left,
+.console-smart-cabin .smart-cabin-card-canvas {
+  background: var(--bg);
+}
+
+.console-smart-cabin .smart-cabin-card-left {
+  border-right: none;
+}
+
+.console-smart-cabin .smart-cabin-card-canvas {
+  border-left: none;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Flexible Canvas（柔性主屏） ── */
+
+.flexible-canvas {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.flexible-canvas-split {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.flexible-canvas-single {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.flexible-widget {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface-raised, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+}
+
+.flexible-canvas-split .flexible-widget {
+  border-radius: 0;
+  border-top: none;
+  border-bottom: none;
+}
+
+.flexible-canvas-split .flexible-widget:first-child {
+  border-left: none;
+}
+
+.flexible-canvas-split .flexible-widget:last-child {
+  border-right: none;
+}
+
+.flexible-canvas-single .flexible-widget {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.flexible-widget-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised, var(--bg));
+}
+
+.flexible-canvas-single .flexible-widget-head {
+  display: none;
+}
+
+.flexible-widget-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.flexible-widget-pin {
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.flexible-widget-pin.pinned {
+  color: var(--accent, #2563eb);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+.flexible-widget-body {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.flexible-widget-fill {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.flexible-canvas-unpinned-hint {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: var(--surface-raised, var(--bg));
+}
+
+.smart-cabin-no-companion .smart-cabin-card-canvas {
+  border-right: none;
+}
+
+.conversation-smart-cabin {
+  height: 100%;
+  min-height: 0;
+}
+
+.conversation-smart-cabin .conversation-strip {
+  flex-shrink: 0;
+}
+
+.companion-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+}
+
+.companion-review-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  font-size: 0.72rem;
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+}
+
+.companion-goal-detail {
+  padding: 0.55rem 0.65rem;
+  font-size: 0.74rem;
+}
+
+.companion-goal-meta,
+.companion-goal-acceptance {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.console-task-stage .goals-workspace {
+  height: 100%;
+}
+
+.console-task-stage .goals-workspace-toolbar {
+  padding-top: 0.35rem;
+}
+
+.fleet-panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.35rem 0.65rem;
+}
+
+/* ── Kanban responsive ── */
+
+.goal-kanban-wide {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  align-items: start;
+  min-height: 100%;
+  padding: 0.35rem 0.5rem 0.75rem;
+}
+
+.goal-kanban-tabbed {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 0.35rem 0.5rem 0.75rem;
+}
+
+.goal-kanban-tabs {
+  flex-shrink: 0;
+  margin-bottom: 0.35rem;
+}
+
+@media (max-width: 900px) {
+  .smart-strip {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .foreman-dock {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .foreman-dock-context {
+    justify-content: flex-start;
+  }
+}

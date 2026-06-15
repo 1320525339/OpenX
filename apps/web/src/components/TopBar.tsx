@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Conversation, Goal, Project } from "@openx/shared";
 import type { AppView } from "./SideNav";
 import { goalStatusText } from "../lib/goal-detail";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 
 const FILTER_LABELS: Record<string, string> = {
   all: "全部",
@@ -100,6 +101,9 @@ export function TopBar({
   return (
     <header className="app-topbar" aria-label="运行台顶栏">
       <div className="topbar-primary">
+        {detailGoal?.orderNo && detailGoal.orderNo > 0 ? (
+          <WorkOrderIdBadge orderNo={detailGoal.orderNo} className="topbar-order-id" />
+        ) : null}
         <span className="topbar-title">{primary}</span>
         {secondary ? <span className="topbar-meta">{secondary}</span> : null}
       </div>

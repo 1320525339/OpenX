@@ -48,6 +48,15 @@ body.split-dragging .cursor-workspace .pane-divider::after {
   padding-inline: var(--workspace-grid-pad);
 }
 
+.cursor-workspace .goals-workspace-toolbar {
+  padding-inline: var(--workspace-grid-pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.cursor-workspace .workspace-pane-preview {
+  padding-inline: var(--workspace-grid-pad);
+}
+
 .cursor-workspace .workspace-pane-assistant {
   padding-inline: var(--workspace-grid-pad);
 }

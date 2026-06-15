@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { Goal, GoalRunState } from "@openx/shared";
-import { formatWorkOrderId } from "@openx/shared";
 import { api } from "../api";
 import { executorDisplayLabel } from "../lib/executors";
 import { buildGoalContext, formatDispatchSummary, goalStatusText } from "../lib/goal-detail";
@@ -9,6 +8,7 @@ import { DeliveryChips } from "./DeliveryChips";
 import { ReviewTimelineCompact } from "./ReviewTimelineCompact";
 import { RunConsole } from "./RunConsole";
 import { TaskSelectionSummary } from "./TaskSelectionSummary";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 
 type LogEntry = {
   goalId: string;
@@ -82,9 +82,7 @@ export function TaskDetailPanel({
     <section className="mech-panel task-detail-panel">
       <div className="mech-panel-head">
         <h3>
-          {goal.orderNo > 0 ? (
-            <span className="goal-detail-order-id">{formatWorkOrderId(goal.orderNo)} </span>
-          ) : null}
+          <WorkOrderIdBadge orderNo={goal.orderNo} className="goal-detail-order-id" />
           {goal.title}
         </h3>
         <div className="detail-head-actions">

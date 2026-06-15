@@ -31,6 +31,8 @@ export const CoachTextMessageSchema = z.object({
   role: z.enum(["user", "coach"]),
   text: z.string(),
   timestamp: z.string(),
+  /** 工头↔施工队等任务内消息关联的目标 */
+  linkedGoalId: z.string().optional(),
 });
 export type CoachTextMessage = z.infer<typeof CoachTextMessageSchema>;
 

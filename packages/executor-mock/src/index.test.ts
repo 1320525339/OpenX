@@ -4,6 +4,7 @@ import type { Goal } from "@openx/shared";
 
 const baseGoal: Goal = {
   id: "g1",
+  orderNo: 1,
   conversationId: "c1",
   title: "测试",
   acceptance: "通过",

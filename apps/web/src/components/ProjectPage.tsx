@@ -10,7 +10,7 @@ import { goalMatchesDisplayFilter, isSystemConversationId } from "@openx/shared"
 
 import { api } from "../api";
 
-import { TasksPanel } from "./TasksPanel";
+import { GoalsWorkspace } from "./GoalsWorkspace";
 import { ProjectBriefTemplatePanel } from "./ProjectBriefTemplatePanel";
 import { RowDeleteButton } from "./RowDeleteButton";
 
@@ -182,7 +182,7 @@ export function ProjectPage({
 
         <section className="project-board">
 
-          <TasksPanel
+          <GoalsWorkspace
 
             goals={filteredGoals}
 
@@ -236,7 +236,7 @@ export function ProjectPage({
 
             conversationTitles={conversationTitles}
 
-            {...goalActions}
+            goalActions={goalActions}
 
           />
 

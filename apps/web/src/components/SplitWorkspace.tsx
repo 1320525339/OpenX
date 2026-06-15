@@ -8,44 +8,65 @@ import {
 import { PaneDivider } from "./PaneDivider";
 import { usePaneResize } from "../lib/use-pane-resize";
 
-const STORAGE_KEY = "openx.workspaceSplit";
-const SWAPPED_KEY = "openx.workspaceSwapped";
+const DEFAULT_STORAGE_KEY = "openx.workspaceSplit";
+const DEFAULT_SWAPPED_KEY = "openx.workspaceSwapped";
 const DEFAULT_RATIO = 0.54;
-const MIN_RATIO = 0.32;
-const MAX_RATIO = 0.78;
-
-function loadSwapped(): boolean {
-  try {
-    return localStorage.getItem(SWAPPED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
+const DEFAULT_MIN_RATIO = 0.32;
+const DEFAULT_MAX_RATIO = 0.78;
 
 type Props = {
   left: ReactNode;
   right: ReactNode;
   className?: string;
+  storageKey?: string;
+  swappedStorageKey?: string;
+  defaultRatio?: number;
+  minRatio?: number;
+  maxRatio?: number;
+  dividerAriaLabel?: string;
+  swapAriaLabel?: string;
 };
 
-export function SplitWorkspace({ left, right, className = "" }: Props) {
+function loadSwappedForKey(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function SplitWorkspace({
+  left,
+  right,
+  className = "",
+  storageKey = DEFAULT_STORAGE_KEY,
+  swappedStorageKey = DEFAULT_SWAPPED_KEY,
+  defaultRatio = DEFAULT_RATIO,
+  minRatio = DEFAULT_MIN_RATIO,
+  maxRatio = DEFAULT_MAX_RATIO,
+  dividerAriaLabel = "调整任务与对话宽度",
+  swapAriaLabel = "交换目标与助手位置",
+}: Props) {
   const { value: ratio, valueRef: ratioRef, setValue: setRatio, beginDrag, onDividerPointerMove, endDrag, nudgeRatio, persist } =
     usePaneResize({
-      storageKey: STORAGE_KEY,
-      defaultRatio: DEFAULT_RATIO,
-      minRatio: MIN_RATIO,
-      maxRatio: MAX_RATIO,
+      storageKey,
+      defaultRatio,
+      minRatio,
+      maxRatio,
     });
-  const [swapped, setSwapped] = useState(loadSwapped);
+  const [swapped, setSwapped] = useState(() => loadSwappedForKey(swappedStorageKey));
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const persistSwapped = useCallback((value: boolean) => {
-    try {
-      localStorage.setItem(SWAPPED_KEY, value ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const persistSwapped = useCallback(
+    (value: boolean) => {
+      try {
+        localStorage.setItem(swappedStorageKey, value ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+    },
+    [swappedStorageKey],
+  );
 
   const toggleSwap = useCallback(() => {
     const nextSwapped = !swapped;
@@ -89,10 +110,10 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
     >
       <div className="split-workspace-left">{firstPane}</div>
       <PaneDivider
-        ariaLabel="调整任务与对话宽度"
+        ariaLabel={dividerAriaLabel}
         ariaValueNow={Math.round(ratio * 100)}
-        ariaValueMin={Math.round(MIN_RATIO * 100)}
-        ariaValueMax={Math.round(MAX_RATIO * 100)}
+        ariaValueMin={Math.round(minRatio * 100)}
+        ariaValueMax={Math.round(maxRatio * 100)}
         onPointerDown={onDividerPointerDown}
         onPointerMove={onDividerPointerMoveWrapped}
         onPointerUp={endDrag}
@@ -106,8 +127,8 @@ export function SplitWorkspace({ left, right, className = "" }: Props) {
         <button
           type="button"
           className="split-workspace-swap"
-          aria-label="交换目标与助手位置"
-          title="交换目标与助手位置"
+          aria-label={swapAriaLabel}
+          title={swapAriaLabel}
           onClick={(e) => {
             e.stopPropagation();
             toggleSwap();

@@ -8,6 +8,8 @@ import {
   goalHasTaskActions,
   type GoalTaskActionHandlers,
 } from "./GoalTaskActions";
+import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
+import { CrewDialogueSummary } from "./CrewDialogueSummary";
 
 type Props = {
   goal?: Goal;
@@ -51,6 +53,11 @@ export function ChatTaskChip({
       <article
         className={`chat-task-card status-${status}${expanded ? " expanded" : ""}`}
       >
+        {goal?.orderNo && goal.orderNo > 0 ? (
+          <div className="chat-task-order-banner">
+            <WorkOrderIdBadge orderNo={goal.orderNo} />
+          </div>
+        ) : null}
         <button
           type="button"
           className="chat-task-card-head"
@@ -85,6 +92,19 @@ export function ChatTaskChip({
             )}
           </div>
         </button>
+
+        {goal ? (
+          <div
+            className="chat-task-crew-wrap"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CrewDialogueSummary
+              goalId={goal.id}
+              crewStatus={goal.crewStatus}
+              embedded
+            />
+          </div>
+        ) : null}
 
         {showCollapsedActions && (
           <div

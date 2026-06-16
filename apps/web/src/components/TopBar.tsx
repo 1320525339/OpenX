@@ -3,6 +3,7 @@ import type { Conversation, Goal, Project } from "@openx/shared";
 import type { AppView } from "./SideNav";
 import { goalStatusText } from "../lib/goal-detail";
 import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
+import { SidebarToggle } from "./SidebarToggle";
 
 const FILTER_LABELS: Record<string, string> = {
   all: "全部",
@@ -23,6 +24,8 @@ type Props = {
   sseStatus: "connected" | "reconnecting" | "disconnected";
   onUrgentClick?: (goalId: string) => void;
   onNewGoal?: () => void;
+  sidebarOpen?: boolean;
+  onSidebarToggle?: () => void;
 };
 
 function countByStatus(goals: Goal[], status: Goal["status"]) {
@@ -40,6 +43,8 @@ export function TopBar({
   sseStatus,
   onUrgentClick,
   onNewGoal,
+  sidebarOpen,
+  onSidebarToggle,
 }: Props) {
   const stats = useMemo(
     () => ({
@@ -100,12 +105,17 @@ export function TopBar({
 
   return (
     <header className="app-topbar" aria-label="运行台顶栏">
-      <div className="topbar-primary">
+      <div className="topbar-leading">
+        {onSidebarToggle != null && sidebarOpen != null ? (
+          <SidebarToggle open={sidebarOpen} onToggle={onSidebarToggle} />
+        ) : null}
+        <div className="topbar-primary">
         {detailGoal?.orderNo && detailGoal.orderNo > 0 ? (
           <WorkOrderIdBadge orderNo={detailGoal.orderNo} className="topbar-order-id" />
         ) : null}
         <span className="topbar-title">{primary}</span>
         {secondary ? <span className="topbar-meta">{secondary}</span> : null}
+        </div>
       </div>
 
       <div className="topbar-actions">

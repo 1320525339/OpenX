@@ -6,7 +6,7 @@ import {
   goalDisplayOutcome,
 } from "@openx/shared";
 import { buildKanbanColumns } from "../lib/goal-kanban-columns";
-import { useWideKanban } from "../lib/use-wide-kanban";
+import { useContainerWideKanban } from "../lib/use-container-wide-kanban";
 import { executorDisplayLabel } from "../lib/executors";
 import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 
@@ -88,7 +88,8 @@ export function GoalKanban({
   onOpenDetail,
   conversationTitles,
 }: Props) {
-  const wide = useWideKanban();
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const wide = useContainerWideKanban(rootEl);
   const columns = useMemo(() => buildKanbanColumns(goals), [goals]);
   const [activeTab, setActiveTab] = useState(columns[0]?.key ?? "incomplete");
 
@@ -100,7 +101,7 @@ export function GoalKanban({
 
   if (!wide) {
     return (
-      <div className="goal-kanban goal-kanban-tabbed">
+      <div ref={setRootEl} className="goal-kanban goal-kanban-tabbed">
         <div className="goal-kanban-tabs filter-tabs" role="tablist" aria-label="看板列">
           {columns.map((col) => (
             <button
@@ -130,7 +131,7 @@ export function GoalKanban({
   }
 
   return (
-    <div className="goal-kanban goal-kanban-wide">
+    <div ref={setRootEl} className="goal-kanban goal-kanban-wide">
       {columns.map((col) => (
         <KanbanColumnView
           key={col.key}

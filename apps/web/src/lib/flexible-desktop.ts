@@ -47,14 +47,14 @@ export const DOCK_FLEX_PRESETS: Record<DockMode, FlexiblePreset> = {
     minPrimaryRatio: 1,
     maxPrimaryRatio: 1,
   },
-  /** 施工桌面：对话 + 产物并排，可 resize */
+  /** 施工桌面：产物预览为主 + 对话辅栏，可 resize */
   artifacts: {
-    primary: "chat",
-    secondary: "artifacts",
-    defaultSplitRatio: 0.52,
+    primary: "artifacts",
+    secondary: "chat",
+    defaultSplitRatio: 0.58,
     defaultSecondaryPinned: true,
-    minPrimaryRatio: 0.35,
-    maxPrimaryRatio: 0.75,
+    minPrimaryRatio: 0.4,
+    maxPrimaryRatio: 0.78,
   },
   fleet: {
     primary: "fleet",

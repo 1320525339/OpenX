@@ -887,6 +887,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (event.type === "narration.append") {
           notifyIsland(event.message, { severity: "info" });
         }
+        if (event.type === "desktop.layout_changed") {
+          window.dispatchEvent(
+            new CustomEvent("openx-desktop-changed", { detail: event }),
+          );
+        }
       },
       onGap: () => {
         void refreshGoals();

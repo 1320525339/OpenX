@@ -3,6 +3,7 @@ import type { ThemePreference } from "../lib/theme";
 const OPTIONS: { id: ThemePreference; label: string }[] = [
   { id: "light", label: "浅色" },
   { id: "dark", label: "深色" },
+  { id: "geek", label: "极客" },
   { id: "system", label: "跟随系统" },
 ];
 

@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDefaultModelSection } from "@openx/shared";
 import { resetDb } from "./db.js";
 import { resetConnections } from "./connect-store.js";
 import { resetOrchestrator } from "./orchestrator.js";
 import { app } from "./routes.js";
 import { resetOperatorGatewayState } from "./operator-gateway.js";
 import { runOperatorSelfTest } from "./operator-self-test.js";
-import { loadSettings, saveSettings } from "./settings-store.js";
 import { setInProcessApiHandler } from "./operator-api-client.js";
 
 describe("operator self-test", () => {
@@ -39,11 +42,22 @@ describe("operator self-test", () => {
 });
 
 describe("operator routes", () => {
+  let tempDir = "";
+
   beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "openx-operator-route-test-"));
+    const configPath = join(tempDir, "config.json");
+    const providersPath = join(tempDir, "providers.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ revision: 0, model: createDefaultModelSection(), operatorTier: "admin" }),
+    );
+    writeFileSync(providersPath, JSON.stringify({}));
+    process.env.OPENX_CONFIG_PATH = configPath;
+    process.env.OPENX_PROVIDERS_PATH = providersPath;
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
     resetOperatorGatewayState();
-    saveSettings({ ...loadSettings(), operatorTier: "admin" });
     setInProcessApiHandler(async (input) => {
       const res = await app.request(input.path, {
         method: input.method,
@@ -75,8 +89,11 @@ describe("operator routes", () => {
   afterEach(() => {
     setInProcessApiHandler(undefined);
     delete process.env.OPENX_DB_PATH;
+    delete process.env.OPENX_CONFIG_PATH;
+    delete process.env.OPENX_PROVIDERS_PATH;
     resetOperatorGatewayState();
     resetDb();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("returns playbook for enabled tier", async () => {

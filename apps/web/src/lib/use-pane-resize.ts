@@ -74,6 +74,24 @@ export function usePaneResize(options: PaneResizeOptions) {
     valueRef.current = value;
   }, [value]);
 
+  useEffect(() => {
+    if (options.mode === "width") {
+      const next = loadWidth(options.storageKey, options.defaultWidth, min, max);
+      valueRef.current = next;
+      setValue(next);
+      return;
+    }
+    const next = loadRatio(options.storageKey, options.defaultRatio, min, max);
+    valueRef.current = next;
+    setValue(next);
+  }, [
+    options.mode,
+    options.storageKey,
+    options.mode === "width" ? options.defaultWidth : options.defaultRatio,
+    min,
+    max,
+  ]);
+
   const cleanupWindowDrag = useCallback(() => {
     windowCleanupRef.current?.();
     windowCleanupRef.current = null;

@@ -18,6 +18,7 @@ import { islandFromSimpleMessage } from "./lib/island-payload";
 import { completeIslandDisplay, requestIsland } from "./lib/island-queue";
 import { AppProvider, useAppState } from "./lib/app-state";
 import { usePaneResize } from "./lib/use-pane-resize";
+import { useSidebar } from "./lib/use-sidebar";
 import { resolveBootSettings } from "./lib/boot-settings";
 import { setGoalAccessContext } from "./lib/goal-access-context";
 import { getRunState } from "./lib/run-state";
@@ -36,6 +37,7 @@ import "./styles/layout-shell.css";
 import "./styles/theme-overrides.css";
 import "./styles/typography.css";
 import "./styles/smart-cabin.css";
+import "./styles/pin-desktop.css";
 
 function AppContent() {
   const {
@@ -76,6 +78,8 @@ function AppContent() {
     minWidth: 132,
     maxWidth: 300,
   });
+
+  const { sidebarOpen, toggleSidebar } = useSidebar();
 
   const onSidebarDividerMove = (e: PointerEvent<HTMLDivElement>) => {
     onDividerPointerMove(e, shellRef.current);
@@ -280,12 +284,17 @@ function AppContent() {
   return (
     <div
       ref={shellRef}
-      className="app-shell app-minimal app-shell-split"
+      className={`app-shell app-minimal app-shell-split${sidebarOpen ? " sidebar-open" : " sidebar-collapsed"}`}
       style={{
-        gridTemplateColumns: `${sidebarWidth}px var(--pane-divider-hit) minmax(0, 1fr)`,
+        gridTemplateColumns: sidebarOpen
+          ? `${sidebarWidth}px var(--pane-divider-hit) minmax(0, 1fr)`
+          : undefined,
       }}
     >
-      <SideNav
+      <div
+        className="app-sidebar-wrap"
+      >
+        <SideNav
         active={state.view}
         projects={state.projects}
         conversations={state.conversations}
@@ -319,6 +328,7 @@ function AppContent() {
         systemWorkspaceResolved={settings.systemWorkspaceResolved}
         onSystemWorkspaceSave={saveSystemWorkspace}
       />
+      </div>
 
       <PaneDivider
         className="app-shell-divider"
@@ -348,6 +358,8 @@ function AppContent() {
             sseStatus={state.sseStatus}
             onUrgentClick={navigateToGoal}
             onNewGoal={openNewGoal}
+            sidebarOpen={sidebarOpen}
+            onSidebarToggle={toggleSidebar}
           />
         )}
 

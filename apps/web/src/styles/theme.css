@@ -195,6 +195,148 @@ html[data-theme="dark"] {
   --crew-accent-review: var(--clarify-accent);
 }
 
+html[data-theme="geek"] {
+  color-scheme: dark;
+
+  /* 黑 / 白 / 绿 — 细线网格 */
+  --geek-green: #1a7f37;
+  --geek-green-bright: #2ea043;
+  --geek-green-dim: #145e2a;
+  --geek-line: #2d2d2d;
+  --geek-line-soft: #252525;
+  --geek-line-hover: #3a3a3a;
+  --geek-line-active: #1a7f37;
+  --geek-green-border: var(--geek-line);
+  --geek-green-border-strong: var(--geek-line-hover);
+  --geek-white: #a0a0a0;
+  --geek-white-dim: #888888;
+  --geek-white-muted: #666666;
+  --geek-text-shadow: none;
+  --geek-glow: none;
+  --geek-glow-strong: none;
+  --hyper-window-radius: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --geek-tint-04: rgba(26, 127, 55, 0.04);
+  --geek-tint-05: rgba(26, 127, 55, 0.05);
+  --geek-tint-06: rgba(26, 127, 55, 0.06);
+  --geek-tint-08: rgba(26, 127, 55, 0.08);
+  --geek-tint-10: rgba(26, 127, 55, 0.1);
+  --geek-tint-12: rgba(26, 127, 55, 0.12);
+  --geek-tint-14: rgba(26, 127, 55, 0.14);
+  --geek-tint-15: rgba(26, 127, 55, 0.15);
+  --geek-tint-18: rgba(26, 127, 55, 0.18);
+  --geek-tint-22: rgba(26, 127, 55, 0.22);
+  --geek-tint-25: rgba(26, 127, 55, 0.25);
+  --geek-tint-28: rgba(26, 127, 55, 0.28);
+  --geek-tint-30: rgba(26, 127, 55, 0.3);
+  --geek-tint-35: rgba(26, 127, 55, 0.35);
+  --geek-tint-45: rgba(26, 127, 55, 0.45);
+
+  --font-sans: var(--font-mono);
+
+  --bg: #121212;
+  --sidebar-bg: #121212;
+  --surface: #121212;
+  --surface-raised: #121212;
+  --surface-elevated: #121212;
+  --surface-inset: #1a1a1a;
+  --surface-hover: #1a1a1a;
+  --panel: transparent;
+  --panel-inset: #1a1a1a;
+
+  --text: var(--geek-green);
+  --text-dim: var(--geek-white);
+  --text-muted: var(--geek-white-dim);
+
+  --border: var(--geek-line);
+  --border-strong: var(--geek-line-hover);
+  --divider: var(--geek-line);
+  --divider-hover: var(--geek-line-active);
+
+  --hover-bg: #1a1a1a;
+  --active-bg: #1e1e1e;
+  --selected-bg: #1e1e1e;
+
+  --accent: var(--geek-green);
+  --teal: var(--geek-green);
+  --green: var(--geek-green);
+  --red: #c9342b;
+  --amber: var(--geek-white-dim);
+  --copper: var(--geek-white-dim);
+  --brass: var(--geek-green);
+  --brass-dim: var(--geek-green-dim);
+
+  --primary-bg: var(--geek-green);
+  --primary-fg: #ffffff;
+  --primary-hover: var(--geek-green-bright);
+
+  --bubble-coach-bg: #1a1a1a;
+  --bubble-user-bg: #1e1e1e;
+  --bubble-user-fg: var(--geek-white);
+
+  --input-bg: #121212;
+  --input-border: var(--geek-line);
+  --input-border-focus: var(--geek-line-active);
+
+  --shadow-dropdown: none;
+  --shadow-modal: none;
+  --shadow-toast: none;
+
+  --scrollbar-thumb-hover: rgba(26, 127, 55, 0.35);
+  --scrollbar-thumb-active: rgba(26, 127, 55, 0.52);
+
+  --progress-track: rgba(26, 127, 55, 0.14);
+  --code-bg: #1a1a1a;
+
+  --context-option-bg: #121212;
+  --context-option-border: var(--geek-line);
+  --context-option-hover-bg: var(--hover-bg);
+  --context-option-active-bg: var(--selected-bg);
+  --context-option-active-border: var(--geek-line-active);
+
+  --btn-bg: transparent;
+  --btn-border: var(--geek-line);
+  --btn-hover-bg: var(--hover-bg);
+  --btn-hover-border: var(--geek-line-hover);
+  --btn-danger-bg: rgba(201, 52, 43, 0.12);
+  --btn-danger-border: transparent;
+  --btn-danger-hover-bg: rgba(201, 52, 43, 0.2);
+  --btn-warn-bg: transparent;
+  --btn-warn-border: rgba(232, 232, 232, 0.28);
+  --btn-warn-hover-bg: rgba(232, 232, 232, 0.08);
+  --btn-tab-active-bg: var(--selected-bg);
+  --overlay-bg: rgba(0, 0, 0, 0.72);
+
+  --clarify-accent: var(--geek-green);
+  --clarify-accent-muted: var(--geek-white-dim);
+  --clarify-surface: #1a1a1a;
+  --clarify-surface-strong: #1e1e1e;
+  --clarify-border: var(--geek-line);
+  --clarify-border-strong: var(--geek-line-hover);
+  --clarify-tag-bg: #1a1a1a;
+  --clarify-preview-border: var(--geek-line);
+  --clarify-preview-surface: #121212;
+
+  --surface-2: var(--surface-inset);
+
+  --crew-exchange-bg: var(--panel-inset);
+  --crew-exchange-label: var(--text-dim);
+  --crew-exchange-body: var(--text);
+  --crew-accent-crew: var(--geek-white-dim);
+  --crew-accent-foreman: var(--green);
+  --crew-accent-escalation: var(--red);
+  --crew-accent-review: var(--clarify-accent);
+
+  --island-accent: var(--geek-green);
+  --island-surface: rgba(0, 0, 0, 0.94);
+  --island-fg: var(--geek-green);
+  --island-fg-dim: var(--geek-white);
+  --island-fg-muted: var(--geek-white-dim);
+}
+
 .theme-preference-row {
   display: flex;
   align-items: center;

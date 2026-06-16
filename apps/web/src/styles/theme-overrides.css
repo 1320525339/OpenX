@@ -104,3 +104,597 @@
 body.split-dragging .pane-divider::after {
   background: var(--divider-hover);
 }
+
+/* 极客模式 — 黑 / 白 / 绿 · 细线网格 */
+html[data-theme="geek"] body {
+  text-shadow: none;
+}
+
+html[data-theme="geek"] a {
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] a:hover {
+  color: var(--geek-green-bright);
+}
+
+html[data-theme="geek"] h1,
+html[data-theme="geek"] h2,
+html[data-theme="geek"] h3,
+html[data-theme="geek"] h4,
+html[data-theme="geek"] .mech-panel-head h3,
+html[data-theme="geek"] .settings-section-title {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .app-sidebar {
+  border-right: 1px solid var(--geek-line);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .sidebar-brand .brand-mark {
+  background: var(--geek-green);
+  color: #ffffff;
+}
+
+html[data-theme="geek"] .sidebar-item.active {
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .app-minimal .sidebar-tree-add-conv:hover {
+  color: var(--geek-green);
+  background: rgba(26, 127, 55, 0.1);
+}
+
+html[data-theme="geek"] .app-minimal .sidebar-tree-item.active,
+html[data-theme="geek"] .app-minimal .sidebar-tree-conv.active {
+  background: rgba(26, 127, 55, 0.14);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .modal-overlay .mech-panel.modal-panel,
+html[data-theme="geek"] .app-minimal .modal-panel {
+  background: var(--surface-inset) !important;
+  border: 1px solid var(--geek-line) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="geek"] .theme-segment {
+  border: 1px solid var(--geek-line);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .theme-segment-btn.active {
+  color: var(--geek-green);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .tools-link-ok,
+html[data-theme="geek"] .tools-exec-recommend,
+html[data-theme="geek"] .tools-skill-badge.subtle {
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .tools-skill-badge.subtle {
+  background: var(--surface-inset);
+  border: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .chat-markdown .chat-md-pre {
+  border: 1px solid var(--geek-line);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .btn.primary {
+  border: 1px solid var(--geek-line-active);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .cursor-workspace .chat-crew-exchange-card {
+  border: 1px solid var(--geek-line);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+html[data-theme="geek"] .console-cli-kind.connect {
+  border-color: rgba(26, 127, 55, 0.45);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .console-cli-kind.acp {
+  border-color: rgba(232, 232, 232, 0.35);
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .status-pill.outcome-incomplete {
+  background: rgba(232, 232, 232, 0.1);
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .dynamic-island-dot.info,
+html[data-theme="geek"] .dynamic-island-portal.app-minimal .dynamic-island-dot.info {
+  background: var(--geek-green);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .dynamic-island-portal.app-minimal .dynamic-island-btn.primary:hover:not(:disabled) {
+  background: var(--geek-green-bright);
+  color: #ffffff;
+}
+
+html[data-theme="geek"] input[type="checkbox"],
+html[data-theme="geek"] input[type="radio"] {
+  accent-color: var(--geek-green);
+}
+
+html[data-theme="geek"] .filter-tabs .filter-chip.active,
+html[data-theme="geek"] .cursor-workspace .filter-tabs .filter-chip.active {
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] ::selection {
+  background: rgba(26, 127, 55, 0.35);
+  color: #ffffff;
+}
+
+html[data-theme="geek"] .chat-file-path {
+  background: var(--surface-inset);
+  border: 1px solid var(--geek-line);
+  color: var(--geek-green);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .chat-file-path:hover {
+  background: var(--hover-bg);
+  border-color: var(--geek-line-hover);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .chat-file-path-icon,
+html[data-theme="geek"] .chat-file-path-dir {
+  color: var(--geek-white-dim);
+}
+
+html[data-theme="geek"] .chat-file-path-base {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .detail-pre,
+html[data-theme="geek"] .detail-log-list {
+  background: var(--surface-inset);
+  color: var(--geek-green);
+  border: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .detail-log-list li {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .foreman-dock-btn.active {
+  color: var(--geek-green);
+  background: var(--selected-bg);
+  box-shadow: inset 0 -1px 0 var(--geek-line-active);
+}
+
+html[data-theme="geek"] .foreman-dock-badge {
+  background: var(--geek-green);
+  color: #ffffff;
+}
+
+html[data-theme="geek"] .flexible-widget-wide.active,
+html[data-theme="geek"] .flexible-widget-pin.pinned {
+  color: var(--geek-green);
+  border-color: rgba(26, 127, 55, 0.45);
+  background: rgba(26, 127, 55, 0.1);
+}
+
+html[data-theme="geek"] .task-index-item.selected {
+  border-color: var(--geek-green);
+  background: rgba(26, 127, 55, 0.1);
+}
+
+/* 覆盖遗留硬编码蓝色 */
+html[data-theme="geek"] .sidebar-item:hover {
+  background: var(--geek-tint-06);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .sidebar-item.active {
+  background: var(--selected-bg);
+  color: var(--geek-green);
+  box-shadow: inset 2px 0 0 var(--geek-line-active);
+}
+
+html[data-theme="geek"] .sidebar-badge {
+  background: var(--geek-green);
+  color: #ffffff;
+}
+
+html[data-theme="geek"] .log-strip-chip.active {
+  border-color: var(--geek-tint-35);
+  background: var(--geek-tint-08);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .goal-card:hover {
+  border-color: var(--geek-tint-22);
+}
+
+html[data-theme="geek"] .goal-card.selected,
+html[data-theme="geek"] .goal-card.expanded.selected,
+html[data-theme="geek"] .tasks-panel-editing .goal-card.edit-mode.selected {
+  border-color: var(--geek-tint-35);
+  background: var(--geek-tint-04);
+}
+
+html[data-theme="geek"] .goal-card.expanded {
+  border-color: var(--geek-tint-25);
+}
+
+html[data-theme="geek"] .chat-markdown blockquote,
+html[data-theme="geek"] .chat-refined-snippet,
+html[data-theme="geek"] .chat-dock-hint,
+html[data-theme="geek"] .chat-execution-card {
+  border-color: var(--geek-tint-22);
+  background: var(--geek-tint-05);
+}
+
+html[data-theme="geek"] .chat-markdown blockquote {
+  border-left-color: var(--geek-tint-35);
+}
+
+html[data-theme="geek"] .chat-task-card:hover {
+  border-color: var(--geek-tint-35);
+}
+
+html[data-theme="geek"] .chat-task-card.expanded {
+  border-color: var(--geek-tint-22);
+}
+
+html[data-theme="geek"] .exec-goal-chip.active,
+html[data-theme="geek"] .exec-goal-chip.working {
+  border-color: var(--geek-line-active);
+  background: var(--selected-bg);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .exec-goal-chip.working.active {
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .run-console-live {
+  border-color: var(--geek-line-active);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .exec-goal-detail-pre.highlight {
+  background: var(--geek-tint-06);
+}
+
+html[data-theme="geek"] .pin-desktop-placeholder-inner,
+html[data-theme="geek"] .pin-desktop-drop-overlay {
+  border-color: var(--geek-tint-45);
+  background: var(--geek-tint-06);
+}
+
+html[data-theme="geek"] .pin-desktop-drop-zone.active {
+  background: var(--geek-tint-10);
+}
+
+html[data-theme="geek"] .split-workspace-swap:hover {
+  color: var(--geek-green);
+  border-color: var(--geek-tint-35);
+}
+
+html[data-theme="geek"] .workspace-pane .goal-card.selected {
+  background: var(--geek-tint-04);
+  border-bottom-color: var(--geek-tint-18);
+}
+
+html[data-theme="geek"] .app-minimal .goal-card-child {
+  border-left-color: var(--geek-tint-15);
+}
+
+html[data-theme="geek"] .app-minimal .dashboard-goal-row:hover,
+html[data-theme="geek"] .app-minimal .dashboard-conv-row:hover {
+  border-color: var(--geek-tint-35);
+}
+
+html[data-theme="geek"] .pin-dock-btn.pinned,
+html[data-theme="geek"] .pin-dock-pin-mark,
+html[data-theme="geek"] .pin-desktop-grid .flexible-widget-pin.pinned {
+  color: var(--geek-green);
+  border-color: var(--geek-line);
+  background: var(--selected-bg);
+  box-shadow: inset 0 -1px 0 var(--geek-line-active);
+}
+
+html[data-theme="geek"] .refined-preview {
+  background: var(--geek-tint-06);
+  border-color: var(--geek-tint-18);
+}
+
+html[data-theme="geek"] .workspace-picker-path:hover:not(:disabled) {
+  border-color: var(--geek-tint-30);
+  background: var(--geek-tint-06);
+}
+
+html[data-theme="geek"] .coach-status-badge.llm {
+  border-color: var(--geek-tint-22);
+  color: var(--geek-green);
+  background: var(--geek-tint-08);
+}
+
+html[data-theme="geek"] .chat-task-card .delivery-chip.file {
+  background: var(--geek-tint-06);
+  color: var(--geek-white);
+}
+
+/* Hyper Pin 工作区 — 细线网格 */
+html[data-theme="geek"] .hyper-pin-stage {
+  padding: 0;
+  gap: 0;
+  background: var(--bg);
+}
+
+html[data-theme="geek"] .hyper-pin-desktop,
+html[data-theme="geek"] .pin-desktop-grid,
+html[data-theme="geek"] .flexible-canvas,
+html[data-theme="geek"] .flexible-widget-body,
+html[data-theme="geek"] .flexible-widget-fill,
+html[data-theme="geek"] .goals-workspace,
+html[data-theme="geek"] .goals-workspace-kanban,
+html[data-theme="geek"] .goal-kanban-wide,
+html[data-theme="geek"] .goal-kanban-tabbed,
+html[data-theme="geek"] .goal-kanban-column,
+html[data-theme="geek"] .workspace-pane,
+html[data-theme="geek"] .workspace-pane .panel-scroll,
+html[data-theme="geek"] .task-index-card,
+html[data-theme="geek"] .task-index-list {
+  background: var(--bg);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .pin-desktop-grid {
+  gap: 0;
+}
+
+html[data-theme="geek"] .flexible-widget,
+html[data-theme="geek"] .flexible-canvas-single .flexible-widget {
+  background: var(--bg);
+  border: 0;
+  border-right: 1px solid var(--geek-line);
+  border-bottom: 1px solid var(--geek-line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .flexible-widget-head,
+html[data-theme="geek"] .pin-dock,
+html[data-theme="geek"] .foreman-dock,
+html[data-theme="geek"] .flexible-canvas-unpinned-hint {
+  background: var(--bg);
+  border-color: var(--geek-line);
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .flexible-widget-head {
+  border-bottom: 1px solid var(--geek-line);
+  min-height: 1.75rem;
+}
+
+html[data-theme="geek"] .pin-dock,
+html[data-theme="geek"] .foreman-dock {
+  border-top: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .preview-rail-head,
+html[data-theme="geek"] .preview-rail-section {
+  border-bottom: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .goal-kanban-column-head {
+  border-bottom: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .flexible-widget-title,
+html[data-theme="geek"] .smart-card-title,
+html[data-theme="geek"] .preview-rail-title,
+html[data-theme="geek"] .goal-kanban-column-title {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .flexible-widget-pin,
+html[data-theme="geek"] .flexible-widget-drag {
+  color: var(--geek-white-dim);
+}
+
+html[data-theme="geek"] .preview-rail,
+html[data-theme="geek"] .smart-card:not(.smart-card-fill) {
+  background: var(--bg);
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .goal-kanban-column-head {
+  background: var(--bg);
+}
+
+html[data-theme="geek"] .goal-kanban-card {
+  background: var(--surface-inset);
+  border: 1px solid var(--geek-line);
+  color: var(--geek-green);
+  border-radius: 0;
+}
+
+html[data-theme="geek"] .goal-kanban-card.selected {
+  border-color: var(--geek-line-active);
+  box-shadow: inset 2px 0 0 var(--geek-line-active);
+  background: var(--selected-bg);
+}
+
+html[data-theme="geek"] .task-index-filter.active {
+  color: var(--geek-green);
+  border: 1px solid var(--geek-line);
+  background: var(--selected-bg);
+  box-shadow: inset 0 -1px 0 var(--geek-line-active);
+}
+
+html[data-theme="geek"] .task-index-filter:hover,
+html[data-theme="geek"] .task-index-item:hover {
+  background: var(--hover-bg);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .task-index-item.selected {
+  border: 1px solid var(--geek-line-active);
+  background: var(--selected-bg);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .log-strip {
+  background: var(--bg);
+  border-top: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .flexible-canvas-split .pane-divider::after,
+html[data-theme="geek"] .pane-divider::after {
+  width: 1px;
+  border-radius: 0;
+  background: var(--geek-line);
+  opacity: 1;
+}
+
+html[data-theme="geek"] .flexible-canvas-split .pane-divider:hover::after,
+html[data-theme="geek"] .flexible-canvas-split .pane-divider:focus-visible::after,
+html[data-theme="geek"] body.split-dragging .flexible-canvas-split .pane-divider::after,
+html[data-theme="geek"] .pane-divider:hover::after,
+html[data-theme="geek"] .pane-divider:focus-visible::after,
+html[data-theme="geek"] body.split-dragging .pane-divider::after {
+  background: var(--geek-line-active);
+  opacity: 1;
+}
+
+html[data-theme="geek"] .pin-desktop-seam::after {
+  width: 1px;
+  border-radius: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--geek-line);
+}
+
+html[data-theme="geek"] .pin-desktop-seam:hover::after,
+html[data-theme="geek"] .pin-desktop-seam.active::after,
+html[data-theme="geek"] body.pin-desktop-body-resizing .pin-desktop-seam.active::after {
+  background: var(--geek-line-active);
+}
+
+html[data-theme="geek"] .pin-desktop-edge-handle-left:hover,
+html[data-theme="geek"] .pin-desktop-edge-handle-left:active,
+html[data-theme="geek"] body.pin-desktop-body-resizing .pin-desktop-edge-handle-left,
+html[data-theme="geek"] .pin-desktop-edge-handle-right:hover,
+html[data-theme="geek"] .pin-desktop-edge-handle-right:active,
+html[data-theme="geek"] body.pin-desktop-body-resizing .pin-desktop-edge-handle-right {
+  background: var(--hover-bg);
+}
+
+html[data-theme="geek"] .filter-tabs .filter-chip.active,
+html[data-theme="geek"] .cursor-workspace .filter-tabs .filter-chip.active {
+  color: var(--geek-green);
+  background: transparent;
+  border-bottom: 1px solid var(--geek-line-active);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .filter-chip.active {
+  background: var(--selected-bg);
+  border: 1px solid var(--geek-line);
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .smart-strip {
+  background: var(--bg);
+  border-bottom: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .smart-strip-title {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .smart-strip-subtitle,
+html[data-theme="geek"] .smart-strip-stat {
+  color: var(--geek-white-dim);
+}
+
+html[data-theme="geek"] .app-topbar,
+html[data-theme="geek"] .app-minimal .workspace-pane-head,
+html[data-theme="geek"] .app-minimal .tasks-toolbar {
+  border-bottom: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .smart-strip-stat strong {
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .task-index-title,
+html[data-theme="geek"] .goal-kanban-card-title {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .empty-hint,
+html[data-theme="geek"] .smart-card-hint,
+html[data-theme="geek"] .preview-rail-meta,
+html[data-theme="geek"] .preview-rail-hint,
+html[data-theme="geek"] .preview-rail-section-label {
+  color: var(--geek-white-dim);
+}
+
+html[data-theme="geek"] .log-strip-chip {
+  background: transparent;
+  color: var(--geek-white-dim);
+  border: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .log-strip-sse {
+  background: var(--surface-inset);
+  color: var(--geek-white-dim);
+  border: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .pin-desktop-empty {
+  background: var(--surface-inset);
+  border: 1px dashed var(--geek-line);
+  border-radius: 0;
+}
+
+html[data-theme="geek"] .workspace-pane .goal-card {
+  border-bottom: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .workspace-pane .goal-card:hover {
+  background: var(--hover-bg);
+}
+
+html[data-theme="geek"] .settings-section,
+html[data-theme="geek"] .theme-preference-row,
+html[data-theme="geek"] .mech-switch {
+  border-bottom: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] button,
+html[data-theme="geek"] .btn,
+html[data-theme="geek"] input:not([type="checkbox"]),
+html[data-theme="geek"] textarea,
+html[data-theme="geek"] select {
+  border-radius: 0 !important;
+  box-shadow: none;
+}
+
+html[data-theme="geek"] .flexible-widget-resize::after {
+  border-radius: 0;
+  background: var(--geek-line);
+}
+
+html[data-theme="geek"] .flexible-widget-resize:hover::after,
+html[data-theme="geek"] .pin-desktop-resizing .flexible-widget-resize::after {
+  background: var(--geek-line-active);
+}

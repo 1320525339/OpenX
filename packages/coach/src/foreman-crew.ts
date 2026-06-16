@@ -31,6 +31,7 @@ export type ForemanCrewInput = {
 export type ForemanCrewOptions = {
   coachThreadPrefix?: string;
   llmContextSettings?: Partial<LlmContextSettings>;
+  browserDesktopContext?: string;
 };
 
 const FOREMAN_CREW_PLAYBOOK = [
@@ -45,7 +46,10 @@ const FOREMAN_CREW_PLAYBOOK = [
   "5. 不要输出 JSON、markdown 代码块或 crew-question 块。",
 ].join("\n");
 
-export function buildForemanCrewUserPrompt(input: ForemanCrewInput): string {
+export function buildForemanCrewUserPrompt(
+  input: ForemanCrewInput,
+  options?: ForemanCrewOptions,
+): string {
   const { goal, question } = input;
   const parts = [
     `## 当前目标`,
@@ -70,6 +74,9 @@ export function buildForemanCrewUserPrompt(input: ForemanCrewInput): string {
   }
   if (question.escalate) {
     parts.push("", "（施工队已请求上报开发商；若你判断仍需用户决策，请以 [上报开发商] 开头回复）");
+  }
+  if (options?.browserDesktopContext?.trim()) {
+    parts.push("", "## 工头可见浏览器（桌面 Pin）", options.browserDesktopContext.trim());
   }
   parts.push("", "请直接用自然语言回复施工队。");
   return parts.filter((line) => line !== "").join("\n");
@@ -99,7 +106,7 @@ export async function resolveForemanDirectiveViaCoach(
 
   const baseSystem = buildRoleSystemPrompt("coach", options?.llmContextSettings);
   const system = composeForemanCrewSystem(baseSystem, options);
-  const prompt = buildForemanCrewUserPrompt(input);
+  const prompt = buildForemanCrewUserPrompt(input, options);
 
   const provider = createOpenAICompatible({
     name: "openx-foreman-crew",

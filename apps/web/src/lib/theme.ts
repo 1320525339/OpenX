@@ -1,12 +1,12 @@
-export type ThemePreference = "light" | "dark" | "system";
-export type ResolvedTheme = "light" | "dark";
+export type ThemePreference = "light" | "dark" | "system" | "geek";
+export type ResolvedTheme = "light" | "dark" | "geek";
 
 const STORAGE_KEY = "openx.theme";
 
 export function loadThemePreference(): ThemePreference {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === "light" || raw === "dark" || raw === "system") return raw;
+    if (raw === "light" || raw === "dark" || raw === "system" || raw === "geek") return raw;
   } catch {
     /* ignore */
   }
@@ -22,13 +22,13 @@ export function saveThemePreference(preference: ThemePreference): void {
 }
 
 export function resolveTheme(preference: ThemePreference): ResolvedTheme {
-  if (preference === "light" || preference === "dark") return preference;
+  if (preference === "light" || preference === "dark" || preference === "geek") return preference;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function applyResolvedTheme(resolved: ResolvedTheme): void {
   document.documentElement.dataset.theme = resolved;
-  document.documentElement.style.colorScheme = resolved;
+  document.documentElement.style.colorScheme = resolved === "light" ? "light" : "dark";
 }
 
 export function applyThemePreference(preference: ThemePreference): ResolvedTheme {

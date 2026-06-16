@@ -8,7 +8,8 @@ type Props = {
   selectedGoal?: Goal;
   taskCount: number;
   awaitingReviewCount: number;
-  artifactsEnabled: boolean;
+  /** @deprecated 施工桌面始终可进入，保留 prop 兼容旧调用 */
+  artifactsEnabled?: boolean;
   onApprove?: () => void;
   onRework?: () => void;
   onStart?: () => void;
@@ -21,7 +22,7 @@ const DOCK_ITEMS: { key: DockMode; label: string; icon: string }[] = [
   { key: "chat", label: "对话", icon: "💬" },
   { key: "tasks", label: "任务", icon: "📋" },
   { key: "artifacts", label: "施工", icon: "📦" },
-  { key: "fleet", label: "调度", icon: "⚙" },
+  { key: "fleet", label: "执行器", icon: "⚙" },
 ];
 
 export function ForemanDock({
@@ -30,7 +31,6 @@ export function ForemanDock({
   selectedGoal,
   taskCount,
   awaitingReviewCount,
-  artifactsEnabled,
   onApprove,
   onRework,
   onStart,
@@ -38,8 +38,10 @@ export function ForemanDock({
   startEnabled,
   visibleModes = ["chat", "tasks", "artifacts", "fleet"],
 }: Props) {
-  const dockItems = DOCK_ITEMS.filter((item) => visibleModes.includes(item.key));  return (
-    <footer className="foreman-dock">
+  const dockItems = DOCK_ITEMS.filter((item) => visibleModes.includes(item.key));
+
+  return (
+    <footer className="foreman-dock" data-dock-mode={dockMode}>
       <div className="foreman-dock-modes" role="tablist" aria-label="工头底栏">
         {dockItems.map((item) => {
           const badge =
@@ -48,15 +50,13 @@ export function ForemanDock({
               : item.key === "chat" && awaitingReviewCount > 0
                 ? awaitingReviewCount
                 : null;
-          const disabled = item.key === "artifacts" && !artifactsEnabled;
           return (
             <button
               key={item.key}
               type="button"
               role="tab"
               aria-selected={dockMode === item.key}
-              className={`foreman-dock-btn${dockMode === item.key ? " active" : ""}${disabled ? " disabled" : ""}`}
-              disabled={disabled}
+              className={`foreman-dock-btn${dockMode === item.key ? " active" : ""}`}
               onClick={() => onDockModeChange(item.key)}
             >
               <span className="foreman-dock-icon" aria-hidden>

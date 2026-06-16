@@ -10,6 +10,40 @@
   background: transparent;
 }
 
+.topbar-leading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.sidebar-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.sidebar-toggle-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.1));
+}
+
+.sidebar-toggle-icon {
+  display: block;
+}
+
 .topbar-primary {
   display: flex;
   align-items: baseline;

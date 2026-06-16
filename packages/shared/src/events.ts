@@ -21,6 +21,7 @@ export const SseEventTypeSchema = z.enum([
   "run.event",
   "run.ended",
   "island.push",
+  "desktop.layout_changed",
 ]);
 export type SseEventType = z.infer<typeof SseEventTypeSchema>;
 
@@ -124,6 +125,12 @@ export const SseEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("island.push"),
     payload: DynamicIslandPayloadSchema,
+  }),
+  z.object({
+    type: z.literal("desktop.layout_changed"),
+    scope: z.enum(["console", "conversation"]),
+    revision: z.number(),
+    timestamp: z.string(),
   }),
 ]);
 export type SseEvent = z.infer<typeof SseEventSchema>;

@@ -86,6 +86,10 @@ export function renderCoachDynamicContext(context: CoachChatContext): string {
     blocks.push("");
     blocks.push(context.projectMemory.trim());
   }
+  if (context.browserDesktopContext?.trim()) {
+    blocks.push("");
+    blocks.push(context.browserDesktopContext.trim());
+  }
 
   if (blocks.length === 1) return "";
   return blocks.join("\n");

@@ -11,6 +11,7 @@ import { ChatExecutionCard } from "./ChatExecutionCard";
 import { ChatTaskChip } from "./ChatTaskChip";
 import { useSkillCatalog } from "../lib/use-skill-catalog";
 import { renderChatMessageText } from "../lib/chat-message-format";
+import { useResizeFromTop } from "../lib/use-resize-from-top";
 import {
   appendCoachRecord,
   buildDisplayThreadItems,
@@ -212,6 +213,23 @@ export function ChatPanel({
 
   const threadRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
+  const composerFieldRef = useRef<HTMLDivElement>(null);
+
+  const getComposerMaxHeight = useCallback(() => {
+    const panel = composerFieldRef.current?.closest(".chat-panel-body");
+    const scroll = panel?.querySelector(".chat-scroll-region");
+    const textarea = composerFieldRef.current?.querySelector("textarea");
+    if (!scroll || !textarea) return 320;
+    const minThread = 72;
+    return textarea.clientHeight + scroll.clientHeight - minThread;
+  }, []);
+
+  const { height: composerHeight, onResizePointerDown } = useResizeFromTop({
+    storageKey: `chat-composer.${conversationId}`,
+    defaultHeight: 55,
+    minHeight: 40,
+    getMaxHeight: getComposerMaxHeight,
+  });
   const stickToBottomRef = useRef(true);
   const skipNextScrollRef = useRef(false);
   const prevThreadCountRef = useRef(0);
@@ -370,22 +388,6 @@ export function ChatPanel({
     if (!activeCoachStream || !stickToBottomRef.current) return;
     scrollToBottom("auto");
   }, [activeCoachStream, scrollToBottom]);
-
-  const contextSummary = useMemo(() => {
-    const parts: string[] = [];
-    if (chatSkillIds.length) parts.push(`Skill×${chatSkillIds.length}`);
-    if (chatMcpIds.length) parts.push(`MCP×${chatMcpIds.length}`);
-    if (chatPermissionMode) {
-      const label =
-        {
-          read_only: "只读",
-          ask_write: "写前确认",
-          full: "完全授权",
-        }[chatPermissionMode] ?? chatPermissionMode;
-      parts.push(`权限·${label}`);
-    }
-    return parts.length ? `上下文：${parts.join(" · ")}` : "";
-  }, [chatSkillIds, chatMcpIds, chatPermissionMode]);
 
   useEffect(() => {
     if (!refinedPreview) {
@@ -1050,11 +1052,6 @@ export function ChatPanel({
   return (
     <section className="mech-panel chat-panel">
       <div className="chat-panel-body">
-        <div className="workspace-pane-head" aria-hidden={!contextSummary}>
-          <span className="workspace-pane-head-title">
-            {contextSummary || "\u00a0"}
-          </span>
-        </div>
         <div
           ref={threadRef}
           className="chat-scroll-region"
@@ -1428,19 +1425,29 @@ export function ChatPanel({
               {draft.startsWith("/") ? (
                 <p className="chat-slash-hint">OpenX 斜杠命令 · /help 查看全部</p>
               ) : null}
-              <textarea
-                className="mech-textarea"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-                placeholder="说你想推进的事… 或 /help 查看斜杠命令"
-                rows={2}
-              />
+              <div className="chat-composer-field" ref={composerFieldRef}>
+                <div
+                  className="chat-composer-resize"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="调整输入框高度"
+                  onPointerDown={onResizePointerDown}
+                />
+                <textarea
+                  className="mech-textarea chat-composer-textarea"
+                  style={{ height: composerHeight }}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                  placeholder="说你想推进的事… 或 /help 查看斜杠命令"
+                  rows={2}
+                />
+              </div>
               <div className="chat-composer-actions">
                 <button
                   type="button"

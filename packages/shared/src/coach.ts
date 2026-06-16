@@ -112,6 +112,8 @@ export type CoachChatContext = {
   coachThreadBlock?: string;
   /** 项目级 MEMORY.md 检索片段 */
   projectMemory?: string;
+  /** 已 Pin 的浏览器拓展槽 DOM/网络快照（工头可见） */
+  browserDesktopContext?: string;
 };
 
 /** Coach 一次派单可拆分的子任务 */

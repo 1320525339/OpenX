@@ -42,6 +42,7 @@ import {
 import { loadSettings } from "../settings-store.js";
 import { broadcast } from "../sse.js";
 import { buildCoachChatContext } from "../coach-context.js";
+import { attachBrowserDesktopContext } from "../coach-browser-context.js";
 import { listSkillCatalog, loadSkillManifest } from "../skills-service.js";
 import { backfillRefinedGoal } from "../refined-backfill.js";
 import { createCoachStreamBroadcaster } from "../coach-stream.js";
@@ -180,6 +181,7 @@ coachRoutes.post("/refined/:messageId/respond", async (c) => {
     const chatHistory = prepared.turns;
     const ctx = buildCoachChatContext(input.conversationId, input.goalId);
     ctx.coachThreadBlock = prepared.block || undefined;
+    await attachBrowserDesktopContext(ctx, input.conversationId);
 
     const stream = createCoachStreamBroadcaster(input.conversationId);
     let message: string;
@@ -274,6 +276,7 @@ coachRoutes.post("/clarify/:messageId/respond", async (c) => {
     const chatHistory = prepared.turns;
     const ctx = buildCoachChatContext(input.conversationId);
     ctx.coachThreadBlock = prepared.block || undefined;
+    await attachBrowserDesktopContext(ctx, input.conversationId);
 
     const stream = createCoachStreamBroadcaster(input.conversationId);
     let message: string;
@@ -372,6 +375,7 @@ coachRoutes.post("/chat", async (c) => {
       clientLocale: input.clientLocale,
     });
     ctx.coachThreadBlock = prepared.block || undefined;
+    await attachBrowserDesktopContext(ctx, input.conversationId);
     if (input.skillIds?.length) {
       const catalog = listSkillCatalog(loadSkillManifest());
       ctx.enabledSkills = catalog

@@ -147,6 +147,7 @@ export async function runOperatorSelfTest(opts?: {
         executionPrompt: "只回复 OK",
         executorId: "pi",
         autoStart: true,
+        autoReview: false,
       };
       const goalRes = await inProcessReq("POST", "/api/goals", goalPayload);
       const goalBody = (await goalRes.json()) as {
@@ -246,6 +247,7 @@ export async function runOperatorSelfTest(opts?: {
           executionPrompt: "只回复 OK",
           executorId: "pi",
           autoStart: true,
+          autoReview: false,
         },
       });
       const goalBody = (goalRes.data ?? {}) as { goal?: { id: string; status: string } };

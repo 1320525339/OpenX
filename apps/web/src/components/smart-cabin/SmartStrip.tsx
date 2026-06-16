@@ -6,9 +6,9 @@ import { WorkOrderIdBadge } from "../WorkOrderIdBadge";
 type Props = {
   title: string;
   subtitle?: string;
-  scene: DesktopScene;
-  sceneLabel: string;
-  onSceneChange: (scene: DesktopScene) => void;
+  scene?: DesktopScene;
+  sceneLabel?: string;
+  onSceneChange?: (scene: DesktopScene) => void;
   selectedGoal?: Goal;
   awaitingReviewCount: number;
   executorOnlineCount: number;
@@ -41,21 +41,27 @@ export function SmartStrip({
           <h2 className="smart-strip-title">{title}</h2>
           {subtitle ? <span className="smart-strip-subtitle">{subtitle}</span> : null}
         </div>
-        <div className="smart-strip-scene">
-          <span className="smart-strip-scene-label">{sceneLabel}</span>
-          <select
-            className="smart-strip-scene-select"
-            value={scene}
-            aria-label="切换桌面场景"
-            onChange={(e) => onSceneChange(e.target.value as DesktopScene)}
-          >
-            {SCENES.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {scene && onSceneChange ? (
+          <div className="smart-strip-scene">
+            {sceneLabel ? (
+              <span className="smart-strip-scene-label">{sceneLabel}</span>
+            ) : null}
+            <select
+              className="smart-strip-scene-select"
+              value={scene}
+              aria-label="切换桌面场景"
+              onChange={(e) => onSceneChange(e.target.value as DesktopScene)}
+            >
+              {SCENES.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <span className="smart-strip-scene-label">柔性桌面 · Pin 最多 3 栏</span>
+        )}
       </div>
 
       <div className="smart-strip-stats">

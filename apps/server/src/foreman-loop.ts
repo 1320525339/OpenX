@@ -11,6 +11,10 @@ import { appendLog } from "./db.js";
 import { loadSettings } from "./settings-store.js";
 import { prepareCoachThreadForPrompt } from "./coach-thread-service.js";
 import { resolveMergedLlmContext } from "./llm-context-resolve.js";
+import {
+  buildBrowserDesktopContext,
+  pinDesktopScopeForConversation,
+} from "./browser-desktop-context.js";
 
 export {
   resolveForemanDirectiveAuto,
@@ -34,6 +38,18 @@ function buildForemanCrewOptions(
       conversationId: input.goal.conversationId,
       goalId: input.goal.id,
     }),
+  };
+}
+
+async function buildForemanCrewOptionsAsync(
+  input: ForemanLoopInput,
+): Promise<ForemanCrewOptions> {
+  const base = buildForemanCrewOptions(input);
+  const scope = pinDesktopScopeForConversation(input.goal.conversationId);
+  const browserDesktopContext = await buildBrowserDesktopContext(scope);
+  return {
+    ...base,
+    browserDesktopContext,
   };
 }
 
@@ -68,7 +84,7 @@ export async function handleCrewQuestion(input: ForemanLoopInput) {
     },
     settings,
     process.env as Record<string, string | undefined>,
-    buildForemanCrewOptions(input),
+    await buildForemanCrewOptionsAsync(input),
   );
 
   if (outcome) {

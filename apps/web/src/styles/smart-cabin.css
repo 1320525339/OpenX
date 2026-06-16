@@ -10,6 +10,12 @@
   gap: 0;
 }
 
+.console-smart-cabin,
+.conversation-smart-cabin {
+  height: 100%;
+  min-height: 0;
+}
+
 .smart-cabin-cards {
   display: grid;
   flex: 1 1 0;
@@ -17,6 +23,10 @@
   overflow: hidden;
   align-items: stretch;
   width: 100%;
+  padding: 0.45rem 0.45rem 0;
+  gap: 0.45rem;
+  box-sizing: border-box;
+  background: var(--bg);
 }
 
 .smart-cabin-card {
@@ -300,6 +310,8 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   padding: 0.35rem var(--workspace-grid-pad, 0.75rem);
   border-top: 1px solid var(--border);
   background: var(--surface-raised, var(--bg));
+  position: relative;
+  z-index: 4;
 }
 
 .foreman-dock-modes {
@@ -321,11 +333,25 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    transform 0.12s ease;
+}
+
+.foreman-dock-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
 }
 
 .foreman-dock-btn.active {
-  color: var(--text);
-  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+  color: var(--accent, #0071e3);
+  background: rgba(0, 113, 227, 0.08);
+  box-shadow: inset 0 -2px 0 var(--accent, #0071e3);
+}
+
+.foreman-dock-btn.active .foreman-dock-icon {
+  transform: scale(1.08);
 }
 
 .foreman-dock-btn.disabled {
@@ -437,20 +463,26 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
 
 .console-smart-cabin .smart-cabin-card-left,
 .console-smart-cabin .smart-cabin-card-canvas {
-  background: var(--bg);
+  background: transparent;
 }
 
 .console-smart-cabin .smart-cabin-card-left {
   border-right: none;
 }
 
+.console-smart-cabin .smart-cabin-card-left .smart-card {
+  border-radius: var(--hyper-window-radius, 18px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+}
+
 .console-smart-cabin .smart-cabin-card-canvas {
   border-left: none;
   min-width: 0;
   overflow: hidden;
+  padding: 0;
 }
 
-/* ── Flexible Canvas（柔性主屏） ── */
+/* ── Flexible Canvas（柔性主屏 · HyperOS 卡片） ── */
 
 .flexible-canvas {
   display: flex;
@@ -459,6 +491,18 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  animation: flex-canvas-enter 0.22s ease;
+}
+
+@keyframes flex-canvas-enter {
+  from {
+    opacity: 0.55;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .flexible-canvas-split {
@@ -467,11 +511,16 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   min-height: 0;
   align-items: stretch;
   overflow: hidden;
+  gap: 0.45rem;
+  padding: 0.35rem;
+  box-sizing: border-box;
 }
 
 .flexible-canvas-single {
   flex: 1 1 0;
   min-height: 0;
+  padding: 0.35rem;
+  box-sizing: border-box;
 }
 
 .flexible-widget {
@@ -481,29 +530,42 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  background: var(--surface-raised, var(--bg));
+  position: relative;
+  background: var(--surface-raised, #fff);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--hyper-window-radius, 18px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
 }
 
 .flexible-canvas-split .flexible-widget {
-  border-radius: 0;
-  border-top: none;
-  border-bottom: none;
+  border-radius: var(--hyper-window-radius, 18px);
 }
 
-.flexible-canvas-split .flexible-widget:first-child {
-  border-left: none;
+.flexible-canvas-split .pane-divider {
+  align-self: stretch;
+  width: var(--pane-divider-hit);
+  cursor: col-resize;
 }
 
-.flexible-canvas-split .flexible-widget:last-child {
-  border-right: none;
+.flexible-canvas-split .pane-divider::after {
+  width: 3px;
+  border-radius: 999px;
+  background: var(--border);
+  opacity: 0.85;
+}
+
+.flexible-canvas-split .pane-divider:hover::after,
+.flexible-canvas-split .pane-divider:focus-visible::after,
+body.split-dragging .flexible-canvas-split .pane-divider::after {
+  background: var(--accent, #0071e3);
+  opacity: 1;
 }
 
 .flexible-canvas-single .flexible-widget {
-  border: none;
-  border-radius: 0;
-  background: transparent;
+  border-radius: var(--hyper-window-radius, 18px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  background: var(--surface-raised, #fff);
+  border: 1px solid var(--border);
 }
 
 .flexible-widget-head {
@@ -517,8 +579,99 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   background: var(--surface-raised, var(--bg));
 }
 
-.flexible-canvas-single .flexible-widget-head {
-  display: none;
+.flexible-widget-head-left {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.flexible-widget-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.flexible-widget-head-draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.flexible-widget-head-draggable:active {
+  cursor: grabbing;
+}
+
+.flexible-widget-drag {
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.flexible-widget-drag:active {
+  cursor: grabbing;
+}
+
+.flexible-widget-resize {
+  position: absolute;
+  top: 0;
+  width: 10px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.flexible-widget-resize-right {
+  right: 0;
+}
+
+.flexible-widget-resize-left {
+  left: 0;
+}
+
+.flexible-widget-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 2.5rem;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--border);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.flexible-widget-resize-right::after {
+  right: 3px;
+}
+
+.flexible-widget-resize-left::after {
+  left: 3px;
+}
+
+.flexible-widget-resize:hover::after,
+.pin-desktop-resizing .flexible-widget-resize::after {
+  opacity: 1;
+  background: var(--accent, #0071e3);
+}
+
+.flexible-widget-wide {
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.flexible-widget-wide.active {
+  color: var(--accent, #2563eb);
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.06);
 }
 
 .flexible-widget-title {
@@ -642,20 +795,67 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.5rem;
   align-items: start;
-  min-height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
   padding: 0.35rem 0.5rem 0.75rem;
 }
 
 .goal-kanban-tabbed {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
   padding: 0.35rem 0.5rem 0.75rem;
 }
 
 .goal-kanban-tabs {
+  flex: 0 0 auto;
   flex-shrink: 0;
   margin-bottom: 0.35rem;
+  align-items: flex-start;
+}
+
+/* 避免 .cursor-workspace .filter-tabs { flex: 1 1 auto } 把 Tab 行撑满整列高度 */
+.cursor-workspace .goal-kanban-tabs.filter-tabs {
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
+
+.goal-kanban-tabs.filter-tabs button {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim, var(--text-muted));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.goal-kanban-tabs.filter-tabs button:hover {
+  color: var(--text);
+}
+
+.goal-kanban-tabs.filter-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent, var(--text));
+  font-weight: 600;
+}
+
+.goal-kanban-tabbed .goal-kanban-column {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.goal-kanban-tabbed .goal-kanban-cards {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 @media (max-width: 900px) {

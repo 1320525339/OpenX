@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resetDb,
   insertGoal,
@@ -46,7 +46,13 @@ function seedGoal(): Goal {
 
 describe("foreman-review", () => {
   beforeEach(() => {
+    process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+  });
+
+  afterEach(() => {
+    resetDb();
+    delete process.env.OPENX_DB_PATH;
   });
 
   it("records pass verdict into crew_messages and coach thread", () => {

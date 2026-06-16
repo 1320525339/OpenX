@@ -30,14 +30,16 @@ type Props = {
 export function FlexibleCanvas({ scope, dockMode, widgets }: Props) {
   const preset = useMemo(() => getFlexPreset(dockMode), [dockMode]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [layoutTick, setLayoutTick] = useState(0);
 
   const [secondaryPinned, setSecondaryPinnedState] = useState(() =>
     loadFlexSecondaryPinned(scope, dockMode, preset),
   );
 
   useEffect(() => {
-    setSecondaryPinnedState(loadFlexSecondaryPinned(scope, dockMode, preset));
-  }, [scope, dockMode, preset]);
+    setSecondaryPinnedState(preset.defaultSecondaryPinned);
+    setLayoutTick((t) => t + 1);
+  }, [scope, dockMode, preset.defaultSecondaryPinned]);
 
   const setSecondaryPinned = useCallback(
     (pinned: boolean) => {
@@ -107,7 +109,11 @@ export function FlexibleCanvas({ scope, dockMode, widgets }: Props) {
 
   if (!showSplit) {
     return (
-      <div className="flexible-canvas flexible-canvas-single">
+      <div
+        key={`${dockMode}-${layoutTick}`}
+        className="flexible-canvas flexible-canvas-single"
+        data-dock-mode={dockMode}
+      >
         <FlexibleWidgetFrame title={WIDGET_LABELS[preset.primary]}>
           {primaryContent}
         </FlexibleWidgetFrame>
@@ -116,7 +122,7 @@ export function FlexibleCanvas({ scope, dockMode, widgets }: Props) {
             <span>{WIDGET_LABELS[secondaryId]} 已收起。</span>
             <button
               type="button"
-              className="btn compact"
+              className="btn compact primary"
               onClick={() => setSecondaryPinned(true)}
             >
               固定 {WIDGET_LABELS[secondaryId]}
@@ -132,8 +138,10 @@ export function FlexibleCanvas({ scope, dockMode, widgets }: Props) {
 
   return (
     <div
+      key={`${dockMode}-${layoutTick}`}
       ref={containerRef}
       className="flexible-canvas flexible-canvas-split"
+      data-dock-mode={dockMode}
       style={
         {
           gridTemplateColumns: `minmax(0, ${leftFr}fr) var(--pane-divider-hit) minmax(0, ${rightFr}fr)`,

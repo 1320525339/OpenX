@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDefaultModelSection, createDefaultProvidersMap } from "@openx/shared";
 import { resetDb } from "./db.js";
 import { resetConnections } from "./connect-store.js";
 import { app } from "./routes.js";
@@ -178,6 +182,7 @@ describe("goals API", () => {
         acceptance: "回复包含 OK",
         executionPrompt: "只回复 OK，不要调用任何工具。",
         autoStart: false,
+        autoReview: false,
       }));
       const { goal } = (await create.json()) as { goal: { id: string } };
 
@@ -233,7 +238,19 @@ describe("goals API", () => {
 });
 
 describe("coach provider API", () => {
+  let tempDir: string;
+
   beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "openx-coach-route-test-"));
+    const configPath = join(tempDir, "config.json");
+    const providersPath = join(tempDir, "providers.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ revision: 0, model: createDefaultModelSection() }),
+    );
+    writeFileSync(providersPath, JSON.stringify(createDefaultProvidersMap()));
+    process.env.OPENX_CONFIG_PATH = configPath;
+    process.env.OPENX_PROVIDERS_PATH = providersPath;
     process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
   });
@@ -241,6 +258,9 @@ describe("coach provider API", () => {
   afterEach(() => {
     resetDb();
     delete process.env.OPENX_DB_PATH;
+    delete process.env.OPENX_CONFIG_PATH;
+    delete process.env.OPENX_PROVIDERS_PATH;
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("lists llm providers", async () => {

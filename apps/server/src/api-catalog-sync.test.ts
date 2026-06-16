@@ -20,6 +20,18 @@ const IMPLEMENTED_ROUTES: Array<{ method: string; path: string }> = [
   { method: "POST", path: "/api/coach/clarify/:messageId/respond" },
   { method: "GET", path: "/api/operator/playbook" },
   { method: "POST", path: "/api/operator/self-test" },
+  { method: "GET", path: "/api/desktop/slots" },
+  { method: "POST", path: "/api/desktop/slots" },
+  { method: "POST", path: "/api/desktop/slots/:slotId/command" },
+  { method: "DELETE", path: "/api/desktop/slots/:slotId" },
+  { method: "PUT", path: "/api/desktop/state" },
+  { method: "GET", path: "/api/desktop/browser/:sessionId/frame" },
+  { method: "GET", path: "/api/desktop/browser/:sessionId/ws" },
+  { method: "GET", path: "/api/desktop/browser/:sessionId/stream" },
+  { method: "GET", path: "/api/desktop/browser/:sessionId/dom" },
+  { method: "GET", path: "/api/desktop/browser/:sessionId/network" },
+  { method: "POST", path: "/api/desktop/browser/:sessionId/ensure" },
+  { method: "POST", path: "/api/desktop/browser/:sessionId/input" },
 ];
 
 describe("api-catalog sync", () => {

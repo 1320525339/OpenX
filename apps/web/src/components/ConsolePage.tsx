@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BatchGoalsAction, CliProfile, CoachMessageRecord, Conversation, Goal, GoalRunState, Project } from "@openx/shared";
 import { goalMatchesDisplayFilter } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
 import { buildConsoleAgentRows, type ConsoleConnection } from "../lib/console-agents";
-import { useDesktopLayout } from "../lib/use-desktop-layout";
-import type { CanvasWidgetId } from "../lib/flexible-desktop";
+import { usePinDesktop } from "../lib/use-pin-desktop";
+import { usePinDockDrag } from "../lib/use-pin-dock-drag";
+import type { PinWidgetId } from "../lib/pin-desktop";
+import { extWidgetId } from "../lib/oxsp-catalog";
 import { ChatPanel } from "./ChatPanel";
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { PreviewRail } from "./PreviewRail";
-import { SmartCabinDesktop } from "./smart-cabin/SmartCabinDesktop";
-import { FlexibleCanvas } from "./smart-cabin/FlexibleCanvas";
+import { HyperPinDesktop } from "./smart-cabin/HyperPinDesktop";
+import { PinDesktopCanvas } from "./smart-cabin/PinDesktopCanvas";
+import { PinDesktopPager } from "./smart-cabin/PinDesktopPager";
+import { OxspSlotRenderer } from "./smart-cabin/OxspSlotRenderer";
+import { PinDock } from "./smart-cabin/PinDock";
 import { SmartStrip } from "./smart-cabin/SmartStrip";
-import { ForemanDock } from "./smart-cabin/ForemanDock";
 import { TaskIndexCard } from "./smart-cabin/TaskIndexCard";
-import { ConsoleFleetPanel } from "./smart-cabin/ConsoleFleetPanel";
-import { AwaitingReviewCompanion } from "./smart-cabin/ConsoleCompanionPanels";
 
 type ConsoleData = {
   project: Project;
@@ -115,7 +117,6 @@ export function ConsolePage(props: Props) {
     onRefreshed,
     onOpenGoalDetail,
     onLocateGoal,
-    onNavigateToGoal,
     coachReplyEvent,
     coachStream,
     coachMessageEvent,
@@ -125,8 +126,34 @@ export function ConsolePage(props: Props) {
   } = props;
 
   const [consoleData, setConsoleData] = useState<ConsoleData | null>(null);
-  const { scene, setScene, dockMode, setDockMode, sceneLabel } =
-    useDesktopLayout("dispatch");
+  const {
+    layout,
+    slotCatalog,
+    activePage,
+    pageCount,
+    pinnedCount,
+    setPage,
+    isPinned,
+    togglePin,
+    unpin,
+    addDockCardAtCol,
+    addSlotFromTemplate,
+    registerSlotFromTemplate,
+    extDockItems,
+    getSlotLabel,
+    applyDrop,
+    placeAtDrop,
+    commitSeamResize,
+  } = usePinDesktop("console");
+  const getCellRectRef = useRef<(col: number) => DOMRect | null>(() => null);
+  const {
+    dockDrag,
+    onGridRectChange,
+    onDockDragStart,
+    onDockDragMove,
+    onDockDragEnd,
+    onDockDragCancel,
+  } = usePinDockDrag(layout, placeAtDrop, () => getCellRectRef.current);
 
   const loadConsole = useCallback(async () => {
     try {
@@ -177,16 +204,7 @@ export function ConsolePage(props: Props) {
 
   const selectedRun = selectedGoal ? runs[selectedGoal.id] : undefined;
 
-  const artifactsEnabled = Boolean(
-    selectedGoal &&
-      (selectedGoal.status === "running" ||
-        selectedGoal.status === "awaiting_review" ||
-        selectedGoal.status === "done" ||
-        selectedRun?.active ||
-        (selectedRun?.events.length ?? 0) > 0),
-  );
-
-  const flexWidgets = useMemo((): Partial<Record<CanvasWidgetId, React.ReactNode>> => {
+  const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
     const chatPanelProps = {
       conversationId,
       goals: consoleChatGoals,
@@ -206,13 +224,25 @@ export function ConsolePage(props: Props) {
       coachMessageEvent,
     };
 
-    return {
+    const builtinWidgets: Partial<Record<PinWidgetId, ReactNode>> = {
       chat: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-assistant">
           <ChatPanel {...chatPanelProps} />
         </div>
       ),
       tasks: (
+        <div className="flexible-widget-fill">
+          <TaskIndexCard
+            goals={allConsoleGoals}
+            filter={statusFilter}
+            onFilterChange={onFilterChange}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            totalCount={allConsoleGoals.length}
+          />
+        </div>
+      ),
+      kanban: (
         <div className="flexible-widget-fill console-task-stage">
           <GoalsWorkspace
             goals={allConsoleFiltered}
@@ -243,7 +273,7 @@ export function ConsolePage(props: Props) {
           />
         </div>
       ),
-      artifacts: (
+      detail: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-preview">
           <PreviewRail
             goal={selectedGoal}
@@ -253,38 +283,34 @@ export function ConsolePage(props: Props) {
           />
         </div>
       ),
-      review: (
-        <div className="flexible-widget-fill">
-          <AwaitingReviewCompanion goals={awaitingReviewGoals} onSelect={onSelect} />
-        </div>
-      ),
-      fleet: (
-        <div className="flexible-widget-fill">
-          <ConsoleFleetPanel
-            executors={executors}
-            cliProfiles={cliProfiles}
-            connections={connections}
-            crossProjectReviewGoals={consoleData?.crossProjectReviewGoals ?? []}
-            crossProjectAwaitingReview={
-              consoleData?.stats.crossProjectAwaitingReview ?? 0
-            }
-            onNavigateToGoal={onNavigateToGoal}
-          />
-        </div>
-      ),
     };
+
+    const extEntries = slotCatalog.slots.map((slot) => {
+      const widget = extWidgetId(slot.id);
+      return [
+        widget,
+        (
+          <OxspSlotRenderer
+            key={slot.id}
+            widget={widget}
+            catalog={slotCatalog}
+            builtinWidgets={builtinWidgets}
+            desktopScope="console"
+          />
+        ),
+      ] as const;
+    });
+
+    return { ...builtinWidgets, ...Object.fromEntries(extEntries) };
   }, [
     allConsoleFiltered,
     allConsoleGoals,
     autoExecute,
-    awaitingReviewGoals,
     cliProfiles,
     coachMessageEvent,
     coachReplyEvent,
     coachStream,
-    connections,
     consoleChatGoals,
-    consoleData,
     conversationId,
     conversationProjectIds,
     conversationTitles,
@@ -298,7 +324,6 @@ export function ConsolePage(props: Props) {
     onEditModeChange,
     onFilterChange,
     onLocateGoal,
-    onNavigateToGoal,
     onNewGoal,
     onOpenDetail,
     onOpenGoalDetail,
@@ -313,18 +338,16 @@ export function ConsolePage(props: Props) {
     selectedIds,
     selectedRun,
     statusFilter,
+    slotCatalog,
   ]);
 
   return (
-    <SmartCabinDesktop
-      className="cursor-workspace console-smart-cabin"
+    <HyperPinDesktop
+      className="cursor-workspace console-smart-cabin hyper-pin-desktop"
       strip={
         <SmartStrip
           title="调度台"
           subtitle={consoleData?.conversation.title ?? "系统对话"}
-          scene={scene}
-          sceneLabel={sceneLabel}
-          onSceneChange={setScene}
           selectedGoal={selectedGoal}
           awaitingReviewCount={awaitingReviewGoals.length}
           executorOnlineCount={executorOnlineCount}
@@ -332,38 +355,44 @@ export function ConsolePage(props: Props) {
           totalGoals={allConsoleGoals.length}
         />
       }
-      left={
-        <TaskIndexCard
-          goals={allConsoleGoals}
-          filter={statusFilter}
-          onFilterChange={onFilterChange}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          totalCount={allConsoleGoals.length}
-        />
-      }
       canvas={
-        <FlexibleCanvas scope="console" dockMode={dockMode} widgets={flexWidgets} />
+        <PinDesktopPager
+          pageIndex={activePage}
+          pageCount={pageCount}
+          onPageChange={setPage}
+        >
+          <PinDesktopCanvas
+            layout={layout}
+            widgets={pinWidgets}
+            getSlotLabel={getSlotLabel}
+            onUnpin={unpin}
+            onApplyDrop={applyDrop}
+            onSeamCommit={commitSeamResize}
+            dockDragWidget={dockDrag?.widget ?? null}
+            dockDragOverCol={dockDrag?.overCol ?? null}
+            dockDragOverZone={dockDrag?.overZone ?? null}
+            onGridRectChange={onGridRectChange}
+            onBindCellRect={(getter) => {
+              getCellRectRef.current = getter;
+            }}
+            onPinWidgetAtCol={addDockCardAtCol}
+            onAddTemplateAtCol={addSlotFromTemplate}
+            isDockWidgetPinned={isPinned}
+          />
+        </PinDesktopPager>
       }
       dock={
-        <ForemanDock
-          dockMode={dockMode}
-          onDockModeChange={setDockMode}
-          selectedGoal={selectedGoal}
-          taskCount={allConsoleGoals.length}
-          awaitingReviewCount={awaitingReviewGoals.length}
-          artifactsEnabled={artifactsEnabled}
-          approveEnabled={selectedGoal?.status === "awaiting_review"}
-          startEnabled={selectedGoal != null && selectedGoal.status === "draft"}
-          onApprove={
-            selectedGoal ? () => void goalActions.onApprove(selectedGoal.id) : undefined
-          }
-          onRework={
-            selectedGoal ? () => void goalActions.onRework(selectedGoal.id) : undefined
-          }
-          onStart={
-            selectedGoal ? () => void goalActions.onStart(selectedGoal.id) : undefined
-          }
+        <PinDock
+          extItems={extDockItems}
+          isPinned={isPinned}
+          pinnedCount={pinnedCount}
+          onTogglePin={togglePin}
+          onRegisterTemplate={registerSlotFromTemplate}
+          onDockDragStart={onDockDragStart}
+          onDockDragMove={onDockDragMove}
+          onDockDragEnd={onDockDragEnd}
+          onDockDragCancel={onDockDragCancel}
+          onRemoveTab={unpin}
         />
       }
     />

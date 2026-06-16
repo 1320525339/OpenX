@@ -1,19 +1,22 @@
-import { useMemo } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import type { CoachMessageRecord, Goal, GoalRunState } from "@openx/shared";
 import { goalMatchesDisplayFilter } from "@openx/shared";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
-import { useDesktopLayout } from "../lib/use-desktop-layout";
+import { usePinDesktop } from "../lib/use-pin-desktop";
+import { usePinDockDrag } from "../lib/use-pin-dock-drag";
+import type { PinWidgetId } from "../lib/pin-desktop";
+import { extWidgetId } from "../lib/oxsp-catalog";
 import type { ExecutorInfo } from "../api";
 import type { BatchGoalsAction, GoalAccessActor } from "@openx/shared";
 import { ChatPanel } from "./ChatPanel";
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { PreviewRail } from "./PreviewRail";
-import { SmartCabinDesktop } from "./smart-cabin/SmartCabinDesktop";
-import { FlexibleCanvas } from "./smart-cabin/FlexibleCanvas";
-import { ForemanDock } from "./smart-cabin/ForemanDock";
+import { HyperPinDesktop } from "./smart-cabin/HyperPinDesktop";
+import { PinDesktopCanvas } from "./smart-cabin/PinDesktopCanvas";
+import { PinDesktopPager } from "./smart-cabin/PinDesktopPager";
+import { OxspSlotRenderer } from "./smart-cabin/OxspSlotRenderer";
+import { PinDock } from "./smart-cabin/PinDock";
 import { TaskIndexCard } from "./smart-cabin/TaskIndexCard";
-import { AwaitingReviewCompanion } from "./smart-cabin/ConsoleCompanionPanels";
-import type { CanvasWidgetId } from "../lib/flexible-desktop";
 
 type GoalActions = {
   onApprove: (id: string) => Promise<void>;
@@ -56,7 +59,6 @@ type Props = {
 export function ConversationWorkspace(props: Props) {
   const {
     conversationId,
-    conversationTitle,
     goals,
     selectedGoal,
     selectedId,
@@ -86,30 +88,43 @@ export function ConversationWorkspace(props: Props) {
     coachMessageEvent,
   } = props;
 
-  const { dockMode, setDockMode } = useDesktopLayout("planning", "conversation");
+  const {
+    layout,
+    slotCatalog,
+    activePage,
+    pageCount,
+    pinnedCount,
+    setPage,
+    isPinned,
+    togglePin,
+    unpin,
+    addDockCardAtCol,
+    addSlotFromTemplate,
+    registerSlotFromTemplate,
+    extDockItems,
+    getSlotLabel,
+    applyDrop,
+    placeAtDrop,
+    commitSeamResize,
+  } = usePinDesktop("conversation");
+  const getCellRectRef = useRef<(col: number) => DOMRect | null>(() => null);
+  const {
+    dockDrag,
+    onGridRectChange,
+    onDockDragStart,
+    onDockDragMove,
+    onDockDragEnd,
+    onDockDragCancel,
+  } = usePinDockDrag(layout, placeAtDrop, () => getCellRectRef.current);
 
   const filteredGoals = useMemo(
     () => goals.filter((g) => goalMatchesDisplayFilter(g, statusFilter)),
     [goals, statusFilter],
   );
 
-  const awaitingReviewGoals = useMemo(
-    () => goals.filter((g) => g.status === "awaiting_review"),
-    [goals],
-  );
-
   const selectedRun = selectedGoal ? runs[selectedGoal.id] : undefined;
 
-  const artifactsEnabled = Boolean(
-    selectedGoal &&
-      (selectedGoal.status === "running" ||
-        selectedGoal.status === "awaiting_review" ||
-        selectedGoal.status === "done" ||
-        selectedRun?.active ||
-        (selectedRun?.events.length ?? 0) > 0),
-  );
-
-  const flexWidgets = useMemo((): Partial<Record<CanvasWidgetId, React.ReactNode>> => {
+  const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
     const chatPanelProps = {
       conversationId,
       goals,
@@ -129,13 +144,25 @@ export function ConversationWorkspace(props: Props) {
       coachMessageEvent,
     };
 
-    return {
+    const builtinWidgets: Partial<Record<PinWidgetId, ReactNode>> = {
       chat: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-assistant">
           <ChatPanel {...chatPanelProps} />
         </div>
       ),
       tasks: (
+        <div className="flexible-widget-fill">
+          <TaskIndexCard
+            goals={goals}
+            filter={statusFilter}
+            onFilterChange={onFilterChange}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            totalCount={goals.length}
+          />
+        </div>
+      ),
+      kanban: (
         <div className="flexible-widget-fill console-task-stage">
           <GoalsWorkspace
             goals={filteredGoals}
@@ -157,11 +184,12 @@ export function ConversationWorkspace(props: Props) {
             locateRequest={locateRequest}
             goalAccess={goalAccess}
             goalActions={goalActions}
-            defaultViewMode="list"
+            defaultViewMode="kanban"
+            embedKanbanOnly
           />
         </div>
       ),
-      artifacts: (
+      detail: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-preview">
           <PreviewRail
             goal={selectedGoal}
@@ -171,15 +199,27 @@ export function ConversationWorkspace(props: Props) {
           />
         </div>
       ),
-      review: (
-        <div className="flexible-widget-fill">
-          <AwaitingReviewCompanion goals={awaitingReviewGoals} onSelect={onSelect} />
-        </div>
-      ),
     };
+
+    const extEntries = slotCatalog.slots.map((slot) => {
+      const widget = extWidgetId(slot.id);
+      return [
+        widget,
+        (
+          <OxspSlotRenderer
+            key={slot.id}
+            widget={widget}
+            catalog={slotCatalog}
+            builtinWidgets={builtinWidgets}
+            desktopScope="conversation"
+          />
+        ),
+      ] as const;
+    });
+
+    return { ...builtinWidgets, ...Object.fromEntries(extEntries) };
   }, [
     autoExecute,
-    awaitingReviewGoals,
     coachMessageEvent,
     coachReplyEvent,
     coachStream,
@@ -208,68 +248,50 @@ export function ConversationWorkspace(props: Props) {
     selectedIds,
     selectedRun,
     statusFilter,
+    slotCatalog,
   ]);
 
   return (
-    <SmartCabinDesktop
-      className="main-view cursor-workspace conversation-smart-cabin"
-      strip={
-        <header className="smart-strip conversation-strip">
-          <div className="smart-strip-main">
-            <div className="smart-strip-titles">
-              <h2 className="smart-strip-title">项目对话</h2>
-              {conversationTitle ? (
-                <span className="smart-strip-subtitle">{conversationTitle}</span>
-              ) : null}
-            </div>
-          </div>
-          <div className="smart-strip-stats">
-            <span className="smart-strip-stat">
-              本对话任务 <strong>{goals.length}</strong>
-            </span>
-            <span className="smart-strip-stat">
-              待验收 <strong>{awaitingReviewGoals.length}</strong>
-            </span>
-          </div>
-        </header>
-      }
-      left={
-        <TaskIndexCard
-          goals={goals}
-          filter={statusFilter}
-          onFilterChange={onFilterChange}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          totalCount={goals.length}
-        />
-      }
+    <HyperPinDesktop
+      className="main-view cursor-workspace conversation-smart-cabin hyper-pin-desktop"
       canvas={
-        <FlexibleCanvas
-          scope="conversation"
-          dockMode={dockMode}
-          widgets={flexWidgets}
-        />
+        <PinDesktopPager
+          pageIndex={activePage}
+          pageCount={pageCount}
+          onPageChange={setPage}
+        >
+          <PinDesktopCanvas
+            layout={layout}
+            widgets={pinWidgets}
+            getSlotLabel={getSlotLabel}
+            onUnpin={unpin}
+            onApplyDrop={applyDrop}
+            onSeamCommit={commitSeamResize}
+            dockDragWidget={dockDrag?.widget ?? null}
+            dockDragOverCol={dockDrag?.overCol ?? null}
+            dockDragOverZone={dockDrag?.overZone ?? null}
+            onGridRectChange={onGridRectChange}
+            onBindCellRect={(getter) => {
+              getCellRectRef.current = getter;
+            }}
+            onPinWidgetAtCol={addDockCardAtCol}
+            onAddTemplateAtCol={addSlotFromTemplate}
+            isDockWidgetPinned={isPinned}
+          />
+        </PinDesktopPager>
       }
       dock={
-        <ForemanDock
-          dockMode={dockMode}
-          onDockModeChange={setDockMode}
-          selectedGoal={selectedGoal}
-          taskCount={goals.length}
-          awaitingReviewCount={awaitingReviewGoals.length}
-          artifactsEnabled={artifactsEnabled}
-          visibleModes={["chat", "tasks", "artifacts"]}
-          approveEnabled={selectedGoal?.status === "awaiting_review"}
-          startEnabled={selectedGoal != null && selectedGoal.status === "draft"}
-          onApprove={
-            selectedGoal ? () => void goalActions.onApprove(selectedGoal.id) : undefined
-          }
-          onRework={
-            selectedGoal ? () => void goalActions.onRework(selectedGoal.id) : undefined
-          }
-          onStart={
-            selectedGoal ? () => void goalActions.onStart(selectedGoal.id) : undefined
-          }
+        <PinDock
+          extItems={extDockItems}
+          isPinned={isPinned}
+          pinnedCount={pinnedCount}
+          onTogglePin={togglePin}
+          onRegisterTemplate={registerSlotFromTemplate}
+          onDockDragStart={onDockDragStart}
+          onDockDragMove={onDockDragMove}
+          onDockDragEnd={onDockDragEnd}
+          onDockDragCancel={onDockDragCancel}
+          onRemoveTab={unpin}
         />
       }
     />

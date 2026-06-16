@@ -1,5 +1,7 @@
 import { serve } from "@hono/node-server";
 import { app } from "./routes.js";
+import type { Server as HttpServer } from "node:http";
+import { attachBrowserWebSocket } from "./browser-ws.js";
 import { ensureBuiltinSkillsOnStartup } from "./skills-service.js";
 import { ensureBuiltinAgentsOnStartup } from "./agents-service.js";
 import { startConnectWatchdog, stopConnectWatchdog } from "./connect-watchdog.js";
@@ -12,6 +14,7 @@ import {
 } from "./cli-bootstrap.js";
 import { loadOpenxDotEnv } from "./openx-dotenv.js";
 import { loadSettings, runSettingsMigrations } from "./settings-store.js";
+import { closeAllBrowserSessions } from "./browser-session.js";
 
 const port = Number(process.env.PORT ?? 3921);
 const host = process.env.HOST ?? "127.0.0.1";
@@ -32,6 +35,7 @@ startPiWatchdog();
 startAcpWatchdog();
 
 const server = serve({ fetch: app.fetch, port, hostname: host });
+attachBrowserWebSocket(server as HttpServer);
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
@@ -47,13 +51,15 @@ function shutdown(signal: string) {
   stopConnectWatchdog();
   stopPiWatchdog();
   stopAcpWatchdog();
-  try {
-    getDb().close();
-  } catch {
-    /* ignore */
-  }
-  resetDb();
-  process.exit(0);
+  void closeAllBrowserSessions().finally(() => {
+    try {
+      getDb().close();
+    } catch {
+      /* ignore */
+    }
+    resetDb();
+    process.exit(0);
+  });
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));

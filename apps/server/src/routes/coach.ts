@@ -72,6 +72,10 @@ import {
   dismissOperatorAction,
 } from "../operator-gateway.js";
 import { prepareCoachThreadForPrompt } from "../coach-thread-service.js";
+import {
+  findAwaitingUserGoal,
+  resumeCrewAfterUserDecision,
+} from "../orchestrator.js";
 
 function loadCoachThreadContext(
   conversationId: string,
@@ -600,6 +604,42 @@ coachRoutes.post("/chat", async (c) => {
       saveCoachMessage(input.conversationId, "user", input.message);
       maybeAutoTitleConversation(input.conversationId, input.message);
     }
+
+    const awaitingGoal = findAwaitingUserGoal(
+      input.conversationId,
+      input.goalId,
+    );
+    if (
+      awaitingGoal &&
+      !input.forceRefine &&
+      input.skipRefine !== true &&
+      !isWorkOrderDismissMessage(input.message)
+    ) {
+      const resumed = await resumeCrewAfterUserDecision(
+        awaitingGoal.id,
+        input.message,
+      );
+      if (resumed.ok) {
+        const ack = `收到。已转告施工队按你的决策继续执行（任务单仍在进行中）。`;
+        const saved = saveCoachMessage(input.conversationId, "coach", ack, awaitingGoal.id);
+        broadcast({
+          type: "coach.message",
+          conversationId: input.conversationId,
+          message: saved,
+        });
+        return c.json({
+          message: ack,
+          intent: "message",
+          crewResumed: true,
+          goalId: awaitingGoal.id,
+        });
+      }
+      return c.json(
+        { error: resumed.error ?? "转告施工队失败，请稍后重试" },
+        400,
+      );
+    }
+
     const ctx = await buildCoachChatContextAsync(input.conversationId, input.goalId, {
       message: input.message,
       mcpIds: input.mcpIds,

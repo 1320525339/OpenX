@@ -393,6 +393,12 @@ export const api = {
       body: JSON.stringify(body),
     })),
 
+  resumeCrewGoal: (id: string, message: string) =>
+    request<{ ok: true; goal: Goal }>(`/api/goals/${id}/crew/resume`, withGoalAccess({
+      method: "POST",
+      body: JSON.stringify({ message }),
+    })),
+
   refineGoal: (id: string) =>
     request<{ goal: Goal; refined: RefinedGoal }>(`/api/goals/${id}/refine`, withGoalAccess({
       method: "POST",
@@ -527,6 +533,8 @@ export const api = {
       refined?: RefinedGoal;
       clarify?: import("@openx/shared").CoachClarifyPayload;
       suggestRefine?: boolean;
+      crewResumed?: boolean;
+      goalId?: string;
       meta?: CoachMeta;
     }>("/api/coach/chat", {
       method: "POST",

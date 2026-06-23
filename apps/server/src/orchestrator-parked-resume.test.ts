@@ -7,6 +7,7 @@ import {
   insertGoal,
   insertProject,
   listCrewExchanges,
+  listLogs,
   listRunEventRecords,
   resetDb,
   updateGoalCrewBinding,
@@ -152,6 +153,38 @@ describe("orchestrator park and resume", () => {
     expect(userDirective?.payload).toMatchObject({
       message: expect.stringContaining("选方案 B"),
     });
+  });
+
+  it("dispatchGoal 跳过 awaiting_user 任务", async () => {
+    const goal = seedRunningGoal(`${Date.now()}`);
+    updateGoalCrewBinding(goal.id, { crewStatus: "awaiting_user" });
+
+    await dispatchGoal(goal.id);
+
+    const logs = listLogs(goal.id).map((l) => l.message);
+    expect(logs.some((m) => m.includes("等待开发商决策"))).toBe(true);
+    expect(isRunActive(goal.id)).toBe(false);
+  });
+
+  it("resumeCrewAfterUserDecision 在不支持 steer 时保持 awaiting_user", async () => {
+    const goal = seedRunningGoal(`${Date.now()}`);
+    updateGoalCrewBinding(goal.id, {
+      crewStatus: "awaiting_user",
+      crewSessionId: "crew-session-park",
+    });
+
+    registerExecutor({
+      id: "pi",
+      displayName: "Pi no steer",
+      async detect() {
+        return { available: true };
+      },
+      async run() {},
+    });
+
+    const resumed = await resumeCrewAfterUserDecision(goal.id, "选方案 B");
+    expect(resumed.ok).toBe(false);
+    expect(getGoalById(goal.id)?.crewStatus).toBe("awaiting_user");
   });
 
   it("findAwaitingUserGoal 优先返回指定 goalId", () => {

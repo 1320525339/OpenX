@@ -533,9 +533,13 @@ async function handlePiForemanLoopOutcome(
     return "failed";
   }
   if (disposition.action === "awaiting_user") {
-    if (park && opts.session) {
-      parkSession(opts.goalId, opts.session);
+    if (!park || !opts.session) {
+      await callbacks.onFail(
+        "工头提请开发商确认，但施工队会话不可恢复，请重新派发",
+      );
+      return "failed";
     }
+    parkSession(opts.goalId, opts.session);
     await callbacks.onProgress(95, "等待开发商决策…");
     if (callbacks.onParkAwaitingUser) {
       await callbacks.onParkAwaitingUser(summary);
@@ -917,7 +921,7 @@ export const piExecutor: ExecutorAdapter = {
 
       if (outcome === "failed") {
         parked.session.dispose();
-        return true;
+        return false;
       }
       if (outcome === "parked") {
         return true;

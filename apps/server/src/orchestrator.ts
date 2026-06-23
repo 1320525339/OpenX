@@ -121,6 +121,21 @@ function ensureExecutors() {
   }
 }
 
+function isGoalCrewBindingWritable(goalId: string): boolean {
+  const g = getGoalById(goalId);
+  return g?.status === "running";
+}
+
+function syncCrewBinding(
+  goalId: string,
+  patch: Parameters<typeof updateGoalCrewBinding>[1],
+): void {
+  if (!isGoalCrewBindingWritable(goalId)) return;
+  updateGoalCrewBinding(goalId, patch);
+  const updated = getGoalById(goalId);
+  if (updated) broadcast({ type: "goal.updated", goal: updated });
+}
+
 function buildCallbacks(goalId: string) {
   return {
     onProgress: async (progress: number, message?: string) => {
@@ -168,7 +183,7 @@ function buildCallbacks(goalId: string) {
     },
     onCrewSession: async (crewSessionId: string) => {
       const g = getGoalById(goalId);
-      if (!g) return;
+      if (!g || g.status !== "running") return;
       updateGoalCrewBinding(goalId, {
         foremanThreadId: g.foremanThreadId ?? g.conversationId,
         crewSessionId,
@@ -179,29 +194,34 @@ function buildCallbacks(goalId: string) {
     },
     onCrewQuestion: async (question: CrewQuestion): Promise<CrewDirective> => {
       const g = getGoalById(goalId);
-      if (!g) {
+      if (!g || g.status !== "running") {
         return {
           kind: "directive",
           message: "工头暂不可用，请按验收标准自行选择合理方案继续。",
           source: "foreman_rule",
         };
       }
-      updateGoalCrewBinding(goalId, { crewStatus: "awaiting_foreman" });
+      syncCrewBinding(goalId, { crewStatus: "awaiting_foreman" });
       persistCrewQuestion(goalId, question);
       const outcome = await handleCrewQuestion({
         goal: g,
         question,
       });
+      if (!isGoalCrewBindingWritable(goalId)) {
+        return {
+          kind: "directive",
+          message: "任务已结束，施工队将按最后已知指令收尾。",
+          source: "foreman_rule",
+        };
+      }
       if (isCrewEscalation(outcome)) {
-        updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
+        syncCrewBinding(goalId, { crewStatus: "awaiting_user" });
         persistForemanEscalation(goalId, outcome);
         appendLog(
           goalId,
           "warn",
           `工头上报开发商：${outcome.prompt.slice(0, 200)}`,
         );
-        const updated = getGoalById(goalId);
-        if (updated) broadcast({ type: "goal.updated", goal: updated });
         return {
           kind: "directive",
           message: outcome.reason
@@ -211,32 +231,33 @@ function buildCallbacks(goalId: string) {
           pauseUntilUser: true,
         };
       }
-      updateGoalCrewBinding(goalId, { crewStatus: "idle" });
+      syncCrewBinding(goalId, { crewStatus: "idle" });
       persistForemanDirective(goalId, outcome);
       appendLog(goalId, "info", `工头指令 › ${outcome.message.slice(0, 240)}`);
-      const updated = getGoalById(goalId);
-      if (updated) broadcast({ type: "goal.updated", goal: updated });
       return outcome;
     },
     onCrewTurnReview: async (turn: ForemanTurnReviewInput) => {
       const g = getGoalById(goalId);
-      if (!g) {
+      if (!g || g.status !== "running") {
         return {
           action: "continue" as const,
           message: "继续推进，按验收标准完成可验证产出。",
           source: "foreman_rule" as const,
         };
       }
-      updateGoalCrewBinding(goalId, { crewStatus: "awaiting_foreman" });
+      syncCrewBinding(goalId, { crewStatus: "awaiting_foreman" });
       const decision = await handleCrewTurnReview({ goal: g, turn });
+      if (!isGoalCrewBindingWritable(goalId)) {
+        return decision;
+      }
 
       switch (decision.action) {
         case "continue":
-          updateGoalCrewBinding(goalId, { crewStatus: "idle" });
+          syncCrewBinding(goalId, { crewStatus: "idle" });
           persistForemanDirective(goalId, foremanTurnDecisionToDirective(decision));
           break;
         case "ask_user":
-          updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
+          syncCrewBinding(goalId, { crewStatus: "awaiting_user" });
           persistForemanReview(
             goalId,
             `提请开发商：${decision.message}`,
@@ -244,11 +265,11 @@ function buildCallbacks(goalId: string) {
           );
           break;
         case "submit_for_review":
-          updateGoalCrewBinding(goalId, { crewStatus: "idle" });
+          syncCrewBinding(goalId, { crewStatus: "idle" });
           persistForemanReview(goalId, `交差：${decision.message}`, decision);
           break;
         case "fail":
-          updateGoalCrewBinding(goalId, { crewStatus: null });
+          syncCrewBinding(goalId, { crewStatus: null });
           persistForemanReview(goalId, `失败：${decision.message}`, decision);
           break;
       }
@@ -258,8 +279,6 @@ function buildCallbacks(goalId: string) {
         decision.action === "fail" ? "warn" : "info",
         `工头轮次 › ${decision.action}: ${decision.message.slice(0, 240)}`,
       );
-      const updated = getGoalById(goalId);
-      if (updated) broadcast({ type: "goal.updated", goal: updated });
       return decision;
     },
   };
@@ -411,6 +430,11 @@ export async function resumeCrewAfterUserDecision(
   const trimmed = userMessage.trim();
   if (!trimmed) return { ok: false, error: "回复不能为空" };
 
+  const adapter = resolveExecutor(goal.executorId);
+  if (!adapter?.steerRework) {
+    return { ok: false, error: "当前执行器不支持施工队续跑" };
+  }
+
   const directive: CrewDirective = {
     kind: "directive",
     message: trimmed,
@@ -418,10 +442,9 @@ export async function resumeCrewAfterUserDecision(
   };
   persistUserCrewDirective(goalId, directive);
   updateGoalCrewBinding(goalId, { crewStatus: "idle" });
-
-  const adapter = resolveExecutor(goal.executorId);
-  if (!adapter?.steerRework) {
-    return { ok: false, error: "当前执行器不支持施工队续跑" };
+  const updatedAfterDirective = getGoalById(goalId);
+  if (updatedAfterDirective) {
+    broadcast({ type: "goal.updated", goal: updatedAfterDirective });
   }
 
   startGoalRun(goalId, goal.executorId);
@@ -602,6 +625,15 @@ export async function dispatchGoal(goalId: string): Promise<void> {
 
     if (resolved.status !== "running") {
       appendLog(goalId, "warn", `派发跳过：目标状态为 ${resolved.status}`);
+      return;
+    }
+
+    if (resolved.crewStatus === "awaiting_user") {
+      appendLog(
+        goalId,
+        "warn",
+        "派发跳过：工头已暂停施工队，等待开发商决策；请在对话中回复后自动续跑",
+      );
       return;
     }
 

@@ -29,6 +29,7 @@ export function goalDisplayLabel(goal: Goal): string {
 export function goalDisplayHint(goal: Goal): string | null {
   if (goal.status === "awaiting_review") return "待验收";
   if (goal.status === "running") {
+    if (goal.crewStatus === "awaiting_user") return "等待开发商决策";
     if (goal.effectStatus === "rework") return "返工中";
     return "进行中";
   }

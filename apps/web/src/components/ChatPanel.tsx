@@ -182,6 +182,19 @@ export function ChatPanel({
     [goals, conversationId],
   );
 
+  const awaitingUserGoal = useMemo(() => {
+    if (
+      selectedGoal?.status === "running" &&
+      selectedGoal.crewStatus === "awaiting_user"
+    ) {
+      return selectedGoal;
+    }
+    const waiting = conversationGoals.filter(
+      (g) => g.status === "running" && g.crewStatus === "awaiting_user",
+    );
+    return waiting[waiting.length - 1];
+  }, [selectedGoal, conversationGoals]);
+
   const handleContextChange = useCallback(
     ({
       skills,
@@ -613,16 +626,19 @@ export function ChatPanel({
     setRefinedPreview(null);
     setRefinedMessageId(null);
     setRefineSuggestion(null);
-    const ambiguous = shouldTryLlmClarify(text);
+    const resumeGoal = awaitingUserGoal;
+    const ambiguous = resumeGoal ? false : shouldTryLlmClarify(text);
     setStructuringKind(ambiguous ? "clarify" : "refine");
     setLoadingMode(
-      !ambiguous && shouldUseCoachStreaming(text) ? "streaming" : "structuring",
+      resumeGoal || (!ambiguous && shouldUseCoachStreaming(text))
+        ? "streaming"
+        : "structuring",
     );
     setLoading(true);
     try {
       const { suggestRefine, meta } = await api.coachChat(text, {
         conversationId,
-        goalId: selectedGoal?.id,
+        goalId: resumeGoal?.id ?? selectedGoal?.id,
         skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
         mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
         skipRefine: dismiss || undefined,
@@ -1444,7 +1460,11 @@ export function ChatPanel({
                       void send();
                     }
                   }}
-                  placeholder="说你想推进的事… 或 /help 查看斜杠命令"
+                  placeholder={
+                    awaitingUserGoal
+                      ? "回复工头，转告施工队继续执行…"
+                      : "说你想推进的事… 或 /help 查看斜杠命令"
+                  }
                   rows={2}
                 />
               </div>

@@ -12,6 +12,7 @@ import {
   saveExecutionSummary,
   transitionGoalStatus,
   updateGoal,
+  updateGoalCrewBinding,
 } from "./db.js";
 import { narrateGoalChange } from "./narration.js";
 import { endGoalRun, emitGoalRunEvent } from "./run-service.js";
@@ -156,8 +157,10 @@ export function cancelGoalStatus(goalId: string): LifecycleResult {
   goal.status = "cancelled";
   goal.updatedAt = new Date().toISOString();
   updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  return { ok: true, goal };
+  updateGoalCrewBinding(goalId, { crewStatus: null });
+  const cleared = getGoalById(goalId) ?? goal;
+  broadcast({ type: "goal.updated", goal: cleared });
+  return { ok: true, goal: cleared };
 }
 
 /** CAS 式将目标迁移到 running（用于派发防竞态） */

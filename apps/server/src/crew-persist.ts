@@ -61,6 +61,26 @@ export function persistForemanEscalation(goalId: string, escalation: CrewEscalat
   );
 }
 
+/** 开发商在对话中确认后，转告施工队 */
+export function persistUserCrewDirective(goalId: string, directive: CrewDirective) {
+  const goal = getGoalById(goalId);
+  if (!goal) return;
+  const summary = `开发商 › ${directive.message.slice(0, 480)}`;
+  appendCrewExchange({
+    goalId,
+    conversationId: goal.conversationId,
+    direction: "foreman_to_crew",
+    summary,
+    payload: directive,
+  });
+  saveCoachMessage(
+    goal.conversationId,
+    "coach",
+    formatCrewExchangeCoachLine("foreman_to_crew", summary),
+    goalId,
+  );
+}
+
 export function persistForemanReview(
   goalId: string,
   summary: string,

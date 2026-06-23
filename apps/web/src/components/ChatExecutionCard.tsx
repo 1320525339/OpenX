@@ -1,8 +1,12 @@
 import type { Goal, GoalRunState } from "@openx/shared";
-import { goalStatusText } from "../lib/goal-detail";
 import { RunConsole } from "./RunConsole";
-import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 import { CrewDialogueSummary } from "./CrewDialogueSummary";
+import {
+  ChatTaskOrderDispatch,
+  ChatTaskOrderFooter,
+  ChatTaskOrderHeader,
+} from "./ChatTaskOrderSections";
+import { executorAgentShortName } from "../lib/chat-task-order";
 
 type Props = {
   goal: Goal;
@@ -11,35 +15,36 @@ type Props = {
 };
 
 export function ChatExecutionCard({ goal, run, onOpenDetail }: Props) {
+  const agentShort = executorAgentShortName(goal.executorId);
+
   return (
     <div className="chat-turn chat-turn-execution">
-      <div className="chat-execution-card">
-        {goal.orderNo > 0 ? (
-          <div className="chat-execution-order-banner">
-            <WorkOrderIdBadge orderNo={goal.orderNo} />
-          </div>
-        ) : null}
-        <div className="chat-execution-head">
-          <span className="chat-execution-label">
-            {run.active ? "任务执行中" : "最近执行"}
-          </span>
-          <strong className="chat-execution-title">{goal.title}</strong>
-          <span className={`status-pill compact ${goal.status}`}>
-            {goalStatusText(goal)}
-          </span>
-          {onOpenDetail && (
-            <button type="button" className="btn compact linkish chat-execution-link" onClick={onOpenDetail}>
+      <article className={`chat-task-card chat-task-order chat-execution-order status-${goal.status}`}>
+        <ChatTaskOrderHeader
+          goal={goal}
+          title={goal.title}
+          expanded={false}
+          run={run}
+          showLiveMeta
+        />
+        {onOpenDetail ? (
+          <div className="chat-execution-order-actions">
+            <button
+              type="button"
+              className="btn compact linkish chat-execution-link"
+              onClick={onOpenDetail}
+            >
               查看详情
             </button>
-          )}
+          </div>
+        ) : null}
+        <ChatTaskOrderDispatch goal={goal} />
+        <div className="chat-task-order-feed">
+          <CrewDialogueSummary goalId={goal.id} crewStatus={goal.crewStatus} embedded />
+          <RunConsole run={run} compact taskOrder agentShortName={agentShort} />
         </div>
-        <CrewDialogueSummary
-          goalId={goal.id}
-          crewStatus={goal.crewStatus}
-          embedded
-        />
-        <RunConsole run={run} compact />
-      </div>
+        <ChatTaskOrderFooter goal={goal} run={run} />
+      </article>
     </div>
   );
 }

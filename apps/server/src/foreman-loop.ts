@@ -1,11 +1,15 @@
 import {
   getCoachRuntime,
   resolveForemanDirectiveViaCoach,
+  resolveForemanTurnReviewViaCoach,
   type ForemanCrewOptions,
 } from "@openx/coach";
 import {
   resolveForemanDirectiveAuto,
+  resolveForemanTurnDecisionAuto,
   type ForemanLoopInput,
+  type ForemanTurnReviewLoopInput,
+  type ForemanTurnDecision,
 } from "@openx/shared";
 import { appendLog } from "./db.js";
 import { loadSettings } from "./settings-store.js";
@@ -18,15 +22,17 @@ import {
 
 export {
   resolveForemanDirectiveAuto,
+  resolveForemanTurnDecisionAuto,
   isCrewEscalation,
   isCrewDirective,
   type ForemanLoopInput,
+  type ForemanTurnReviewLoopInput,
 } from "@openx/shared";
 
-function buildForemanCrewOptions(
-  input: ForemanLoopInput,
-): ForemanCrewOptions {
-  const threadId = input.goal.foremanThreadId ?? input.goal.conversationId;
+type ForemanGoalBinding = ForemanLoopInput["goal"];
+
+function buildForemanCrewOptions(goal: ForemanGoalBinding): ForemanCrewOptions {
+  const threadId = goal.foremanThreadId ?? goal.conversationId;
   const prepared = prepareCoachThreadForPrompt(threadId, {
     messageLimit: 40,
     includeExecutionSnapshots: true,
@@ -35,17 +41,17 @@ function buildForemanCrewOptions(
   return {
     coachThreadPrefix: prepared.block || undefined,
     llmContextSettings: resolveMergedLlmContext({
-      conversationId: input.goal.conversationId,
-      goalId: input.goal.id,
+      conversationId: goal.conversationId,
+      goalId: goal.id,
     }),
   };
 }
 
 async function buildForemanCrewOptionsAsync(
-  input: ForemanLoopInput,
+  goal: ForemanGoalBinding,
 ): Promise<ForemanCrewOptions> {
-  const base = buildForemanCrewOptions(input);
-  const scope = pinDesktopScopeForConversation(input.goal.conversationId);
+  const base = buildForemanCrewOptions(goal);
+  const scope = pinDesktopScopeForConversation(goal.conversationId);
   const browserDesktopContext = await buildBrowserDesktopContext(scope);
   return {
     ...base,
@@ -84,7 +90,7 @@ export async function handleCrewQuestion(input: ForemanLoopInput) {
     },
     settings,
     process.env as Record<string, string | undefined>,
-    await buildForemanCrewOptionsAsync(input),
+    await buildForemanCrewOptionsAsync(goal),
   );
 
   if (outcome) {
@@ -102,4 +108,53 @@ export async function handleCrewQuestion(input: ForemanLoopInput) {
     `工头 LLM 不可用，使用兜底答复${llmError ? `：${llmError.slice(0, 120)}` : ""}`,
   );
   return resolveForemanDirectiveAuto(input);
+}
+
+/** 工头主动轮次审阅：每轮施工反馈后的 loop controller 决策 */
+export async function handleCrewTurnReview(
+  input: ForemanTurnReviewLoopInput,
+): Promise<ForemanTurnDecision> {
+  const { goal } = input;
+
+  if (shouldUseRulesOnly()) {
+    return resolveForemanTurnDecisionAuto(input);
+  }
+
+  const settings = loadSettings();
+  const runtime = getCoachRuntime(settings);
+  if (!runtime.ready) {
+    return resolveForemanTurnDecisionAuto(input);
+  }
+
+  const { decision, llmError } = await resolveForemanTurnReviewViaCoach(
+    {
+      goal: {
+        id: goal.id,
+        title: goal.title,
+        acceptance: goal.acceptance,
+        executionPrompt: goal.executionPrompt,
+        constraints: goal.constraints,
+      },
+      turn: input.turn,
+    },
+    settings,
+    process.env as Record<string, string | undefined>,
+    await buildForemanCrewOptionsAsync(goal),
+  );
+
+  if (decision) {
+    appendLog(
+      goal.id,
+      "info",
+      `工头轮次审阅 › ${decision.action}: ${decision.message.slice(0, 160)}`,
+    );
+    return decision;
+  }
+
+  appendLog(
+    goal.id,
+    "warn",
+    `工头轮次审阅 LLM 不可用，使用兜底${llmError ? `：${llmError.slice(0, 120)}` : ""}`,
+  );
+  return resolveForemanTurnDecisionAuto(input);
 }

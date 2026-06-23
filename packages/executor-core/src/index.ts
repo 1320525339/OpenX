@@ -1,4 +1,4 @@
-import type { Goal, GoalDeliverable, LogLevel, LlmContextSettings, ModelSettingsSlice, PiExecutorSettings, RunDeltaEvent, ExecutionSkillHint, CrewDirective, CrewQuestion } from "@openx/shared";
+import type { Goal, GoalDeliverable, LogLevel, LlmContextSettings, ModelSettingsSlice, PiExecutorSettings, RunDeltaEvent, ExecutionSkillHint, CrewDirective, CrewQuestion, ForemanTurnDecision, ForemanTurnReviewInput } from "@openx/shared";
 
 
 
@@ -14,8 +14,14 @@ export interface ExecutorCallbacks {
 
   onFail: (errorMessage: string) => Promise<void>;
 
+  /** 工头提请开发商决策：施工队 park，目标保持 running，不交差 */
+  onParkAwaitingUser?: (checkpointSummary: string) => Promise<void>;
+
   /** 施工队向工头提问；返回工头指令后在同一会话续跑 */
   onCrewQuestion?: (question: CrewQuestion) => Promise<CrewDirective>;
+
+  /** 每轮施工反馈后的工头主动审阅（loop controller） */
+  onCrewTurnReview?: (turn: ForemanTurnReviewInput) => Promise<ForemanTurnDecision>;
 
   /** 绑定施工队会话 ID（持久化到 Goal.crewSessionId） */
   onCrewSession?: (crewSessionId: string) => Promise<void>;
@@ -39,6 +45,13 @@ export interface ExecutorContext {
 
     providers?: ModelSettingsSlice["providers"];
 
+  };
+
+  /** 安全沙箱配置，支持隔离执行（如 docker 或 devcontainer） */
+  sandboxConfig?: {
+    type: "docker" | "devcontainer" | "local";
+    image?: string;
+    volumes?: Record<string, string>;
   };
 
   /** 本轮执行前的近期日志，用于返工续跑 */
@@ -70,8 +83,14 @@ export interface ExecutorContext {
   /** 合并后的 LLM 上下文（全局 + 项目，用于执行 prompt 与路由） */
   llmContext?: Partial<LlmContextSettings>;
 
+  /** 项目用户 + 运行知识（注入执行 prompt） */
+  projectKnowledge?: string;
+
   /** ACP 子进程额外环境变量（来自 OpenX 渠道映射） */
   spawnEnv?: Record<string, string>;
+
+  /** steer 续跑时注入的单条工头/开发商指令（返工或用户确认后） */
+  crewContinuationPrompt?: string;
 }
 
 
@@ -83,9 +102,14 @@ export {
 } from "./run-events.js";
 export {
   runCrewDialogueLoop,
+  runForemanManagedLoop,
+  dispositionForemanManagedLoop,
   MAX_CREW_DIALOGUE_ROUNDS,
+  MAX_FOREMAN_LOOP_ROUNDS,
   type CrewTurnResult,
   type CrewTurnRunner,
+  type ForemanManagedLoopResult,
+  type ForemanManagedLoopDisposition,
 } from "./crew-loop.js";
 export {
   extractDeliverableFromTool,
@@ -93,6 +117,7 @@ export {
   inferFileAction,
   mergeDeliverable,
 } from "./deliverables.js";
+export { toolFileDiffFromDeliverable } from "./tool-file-diff.js";
 export {
   readWorkspaceFileBaseline,
   resolveWorkspaceFilePath,

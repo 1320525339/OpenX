@@ -1,5 +1,94 @@
-import type { CrewDirective, CrewEscalation, CrewForemanOutcome, CrewQuestion } from "./crew.js";
+import type {
+  CrewDirective,
+  CrewEscalation,
+  CrewForemanOutcome,
+  CrewQuestion,
+  ForemanTurnDecision,
+  ForemanTurnReviewInput,
+} from "./crew.js";
 import type { Goal } from "./goal.js";
+import { parseCrewMessageFromText } from "./crew.js";
+
+export type ForemanTurnReviewLoopInput = {
+  goal: Pick<
+    Goal,
+    | "id"
+    | "title"
+    | "conversationId"
+    | "foremanThreadId"
+    | "acceptance"
+    | "executionPrompt"
+    | "constraints"
+  >;
+  turn: ForemanTurnReviewInput;
+};
+
+/** 工头 LLM 轮次审阅结构化输出 */
+export type ForemanTurnLlmDecision = {
+  action: "continue" | "ask_user" | "submit_for_review" | "fail";
+  message: string;
+  reason?: string;
+};
+
+export function mapForemanTurnLlmDecision(
+  decision: ForemanTurnLlmDecision,
+): ForemanTurnDecision {
+  return {
+    action: decision.action,
+    message: decision.message.trim(),
+    reason: decision.reason?.trim(),
+    source: "foreman_llm",
+  };
+}
+
+/** 工头不可用时的轮次审阅兜底 */
+export function resolveForemanTurnDecisionAuto(
+  input: ForemanTurnReviewLoopInput,
+): ForemanTurnDecision {
+  const { goal, turn } = input;
+  const text = turn.assistantText.trim();
+  const implicit = parseCrewMessageFromText(text);
+
+  if (implicit?.escalate || /停服|删库|DELETE|清空.*表|不可恢复/.test(text)) {
+    return {
+      action: "ask_user",
+      message: "施工队提出需开发商确认的操作，请暂停并等待决策。",
+      reason: implicit?.prompt ?? "高风险或需确认的操作",
+      source: "foreman_rule",
+    };
+  }
+
+  const hasDeliverables = (turn.deliverables?.length ?? 0) > 0;
+  const looksComplete =
+    /已完成|已达标|任务完成|交付完成|实现完毕|全部完成/.test(text) ||
+    /已完成|已达标/.test(turn.summary);
+
+  if (hasDeliverables && looksComplete) {
+    return {
+      action: "submit_for_review",
+      message: `施工队已产出可验收结果，进入交差验收。`,
+      source: "foreman_rule",
+    };
+  }
+
+  if (/失败|无法继续|不可达|阻塞/.test(text) && !/未失败/.test(text)) {
+    return {
+      action: "fail",
+      message: text.slice(0, 500) || "施工队报告无法继续推进",
+      source: "foreman_rule",
+    };
+  }
+
+  const acceptanceHint = goal.acceptance?.trim()
+    ? `对照验收标准「${goal.acceptance.slice(0, 120)}」`
+    : "对照任务验收标准";
+
+  return {
+    action: "continue",
+    message: `继续推进。${acceptanceHint}，产出可验证结果后再交差；有阻塞请【请示工头】。`,
+    source: "foreman_rule",
+  };
+}
 
 export type ForemanLoopInput = {
   goal: Pick<

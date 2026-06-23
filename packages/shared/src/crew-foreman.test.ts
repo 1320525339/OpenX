@@ -4,7 +4,9 @@ import {
   isCrewEscalation,
   mapForemanLlmDecision,
   mapForemanTextReply,
+  mapForemanTurnLlmDecision,
   resolveForemanDirectiveAuto,
+  resolveForemanTurnDecisionAuto,
 } from "./crew-foreman.js";
 const goal = {
   id: "g1",
@@ -51,6 +53,55 @@ describe("resolveForemanDirectiveAuto", () => {
     if (outcome.kind === "escalation") {
       expect(outcome.reason).toContain("开发商");
     }
+  });
+});
+
+describe("resolveForemanTurnDecisionAuto", () => {
+  it("asks user for implicit plan confirmation", () => {
+    const decision = resolveForemanTurnDecisionAuto({
+      goal,
+      turn: {
+        assistantText: "建议方案 A。确认后我立即执行停服删除。",
+        summary: "待确认",
+      },
+    });
+    expect(decision.action).toBe("ask_user");
+  });
+
+  it("submits for review when deliverables and completion cues exist", () => {
+    const decision = resolveForemanTurnDecisionAuto({
+      goal,
+      turn: {
+        assistantText: "任务已完成，game.html 可运行。",
+        summary: "已完成",
+        deliverables: [{ kind: "file", path: "game.html" }],
+      },
+    });
+    expect(decision.action).toBe("submit_for_review");
+  });
+
+  it("continues conservatively otherwise", () => {
+    const decision = resolveForemanTurnDecisionAuto({
+      goal,
+      turn: {
+        assistantText: "搭了骨架，还在继续。",
+        summary: "进行中",
+      },
+    });
+    expect(decision.action).toBe("continue");
+    expect(decision.message).toContain("继续推进");
+  });
+});
+
+describe("mapForemanTurnLlmDecision", () => {
+  it("preserves foreman_llm source", () => {
+    const decision = mapForemanTurnLlmDecision({
+      action: "continue",
+      message: "补测试",
+      reason: "缺单测",
+    });
+    expect(decision.source).toBe("foreman_llm");
+    expect(decision.action).toBe("continue");
   });
 });
 

@@ -75,6 +75,11 @@ export {
   type ForemanCrewOptions,
 } from "./foreman-crew.js";
 export {
+  resolveForemanTurnReviewViaCoach,
+  buildForemanTurnReviewUserPrompt,
+  type ForemanTurnReviewInputBundle,
+} from "./foreman-turn-review.js";
+export {
   buildConfiguredSystemPrompt,
   buildRefineSystemPrompt,
   renderCoachDynamicContext,

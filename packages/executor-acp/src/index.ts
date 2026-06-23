@@ -23,17 +23,19 @@ import {
 import {
   buildExecutionPrompt,
   createRunEmitter,
+  dispositionForemanManagedLoop,
   runCrewDialogueLoop,
   type ExecutorAdapter,
   type ExecutorContext,
   type ExecutorDetectEntry,
+  type ForemanManagedLoopResult,
   type RunEventEmitter,
 } from "@openx/executor-core";
 import {
   CREW_FOREMAN_PROMPT_APPENDIX,
   buildAcpCrewSessionKey,
 } from "@openx/shared";
-import { handleAcpSessionUpdate } from "./session-updates.js";
+import { handleAcpSessionUpdate, type AcpSessionState } from "./session-updates.js";
 import { acpSpawnOptions } from "./spawn-win.js";
 import {
   parseStoredAcpSessionId,
@@ -93,8 +95,9 @@ async function terminateProcess(proc: ChildProcess): Promise<void> {
 function buildSessionClient(
   runtimeId: AcpRuntimeId,
   callbacks: ExecutorContext["callbacks"],
-  state: { assistantText: string; toolCount: number; toolNames: Map<string, string> },
+  state: AcpSessionState,
   run: RunEventEmitter | null,
+  workspaceRoot: string,
 ): Client {
   return {
     async writeTextFile() {
@@ -123,6 +126,7 @@ function buildSessionClient(
         callbacks,
         state,
         run,
+        workspaceRoot,
       });
     },
     async requestPermission(params) {
@@ -132,24 +136,66 @@ function buildSessionClient(
   };
 }
 
+async function finalizeAcpForemanLoop(
+  loop: ForemanManagedLoopResult,
+  callbacks: ExecutorContext["callbacks"],
+  runtimeId: AcpRuntimeId,
+): Promise<"complete" | "parked" | "failed"> {
+  const disposition = dispositionForemanManagedLoop(loop);
+
+  if (disposition.action === "tool_budget_exceeded") {
+    await callbacks.onFail(`ACP 工具调用达到上限（${runtimeId}）`);
+    return "failed";
+  }
+  if (disposition.action === "failed") {
+    await callbacks.onFail(disposition.message);
+    return "failed";
+  }
+  if (disposition.action === "dialogue_exhausted") {
+    await callbacks.onFail("工头编排循环达到轮次上限，任务未完成");
+    return "failed";
+  }
+  if (disposition.action === "awaiting_user") {
+    await callbacks.onProgress(95, "等待开发商决策…");
+    if (callbacks.onParkAwaitingUser) {
+      await callbacks.onParkAwaitingUser(loop.summary);
+    }
+    return "parked";
+  }
+
+  await callbacks.onProgress(100, "ACP 完成");
+  await callbacks.onComplete(
+    loop.summary,
+    loop.deliverables.length > 0 ? loop.deliverables : undefined,
+  );
+  return "complete";
+}
+
 async function runAcpTurn(
   ctx: ExecutorContext,
   runtimeId: AcpRuntimeId,
   opts?: { resumeSessionId?: string; steer?: boolean },
-): Promise<{ summary: string; sessionId: string }> {
+): Promise<{
+  loop: ForemanManagedLoopResult;
+  sessionId: string;
+}> {
   const { goal, callbacks, workspaceRoot } = ctx;
   const spawnCfg = resolveAcpSpawn(runtimeId);
-  const promptText = [
-    buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
-      isRework: ctx.isRework,
-      priorSummaries: ctx.priorSummaries,
-      priorReviewRounds: ctx.priorReviewRounds,
-      agentRole: ctx.agentRole,
-      workspaceRoot: ctx.workspaceRoot,
-      llmContext: ctx.llmContext,
-    }),
-    CREW_FOREMAN_PROMPT_APPENDIX,
-  ].join("\n\n");
+  const continuation = ctx.crewContinuationPrompt?.trim();
+  const promptText = continuation
+    ? continuation
+    : [
+        buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
+          isRework: ctx.isRework,
+          priorSummaries: ctx.priorSummaries,
+          priorReviewRounds: ctx.priorReviewRounds,
+          agentRole: ctx.agentRole,
+          workspaceRoot: ctx.workspaceRoot,
+          llmContext: ctx.llmContext,
+          projectKnowledge: (ctx as { projectKnowledge?: string }).projectKnowledge,
+        }),
+        CREW_FOREMAN_PROMPT_APPENDIX,
+      ].join("\n\n");
   const mcpServers = ctx.mcpServers ?? [];
   const spawnCreds =
     runtimeId === "acp:codex" &&
@@ -187,7 +233,13 @@ async function runAcpTurn(
           ? { ...process.env, ...ctx.spawnEnv }
           : undefined;
 
-  const state = { assistantText: "", toolCount: 0, toolNames: new Map<string, string>() };
+  const state: AcpSessionState = {
+    assistantText: "",
+    toolCount: 0,
+    toolNames: new Map<string, string>(),
+    pendingTools: new Map(),
+    deliverables: [],
+  };
   const run = createRunEmitter(ctx);
 
   const proc = spawn(
@@ -207,7 +259,7 @@ async function runAcpTurn(
     if (line) void callbacks.onLog("debug", `[${runtimeId}] ${line}`);
   });
 
-  const client = buildSessionClient(runtimeId, callbacks, state, run);
+  const client = buildSessionClient(runtimeId, callbacks, state, run, workspaceRoot);
   const input = Writable.toWeb(proc.stdin!);
   const output = Readable.toWeb(proc.stdout!) as ReadableStream<Uint8Array>;
   const conn = new ClientSideConnection(() => client, ndJsonStream(input, output));
@@ -265,12 +317,15 @@ async function runAcpTurn(
           assistantText: state.assistantText,
           park: true,
           toolBudgetExceeded: false,
-          deliverables: [],
+          deliverables: state.deliverables,
         };
       },
       { initialSteer: Boolean(opts?.steer && resumeId), logTag: runtimeId },
     );
-    return { summary: loop.summary, sessionId };
+    return {
+      loop,
+      sessionId,
+    };
   } finally {
     await run?.finish();
     activeRuns.delete(goal.id);
@@ -280,8 +335,9 @@ async function runAcpTurn(
 
 async function runAcpGoal(ctx: ExecutorContext, runtimeId: AcpRuntimeId): Promise<void> {
   const parked = parkedSessions.get(ctx.goal.id);
+  const hasContinuation = Boolean(ctx.crewContinuationPrompt?.trim());
   const resumeSteer =
-    ctx.isRework &&
+    (ctx.isRework || hasContinuation) &&
     parked?.runtimeId === runtimeId &&
     Boolean(parked.sessionId);
   if (!resumeSteer) {
@@ -292,11 +348,13 @@ async function runAcpGoal(ctx: ExecutorContext, runtimeId: AcpRuntimeId): Promis
     if (resumeSteer && parked) {
       await callbacks.onLog(
         "info",
-        `[${runtimeId}] 返工续跑：loadSession + steer（保留 ACP 上下文）`,
+        hasContinuation
+          ? `[${runtimeId}] 开发商确认后续跑`
+          : `[${runtimeId}] 返工续跑：loadSession + steer（保留 ACP 上下文）`,
       );
     }
     const storedSession = parseStoredAcpSessionId(ctx.goal.crewSessionId, runtimeId);
-    const turn = await runAcpTurn(
+    const { loop, sessionId } = await runAcpTurn(
       ctx,
       runtimeId,
       resumeSteer && parked
@@ -305,9 +363,11 @@ async function runAcpGoal(ctx: ExecutorContext, runtimeId: AcpRuntimeId): Promis
           ? { resumeSessionId: storedSession, steer: Boolean(ctx.isRework) }
           : undefined,
     );
-    await callbacks.onProgress(100, "ACP 完成");
-    await callbacks.onComplete(turn.summary);
-    parkedSessions.set(ctx.goal.id, { sessionId: turn.sessionId, runtimeId });
+    const outcome = await finalizeAcpForemanLoop(loop, callbacks, runtimeId);
+    if (outcome === "failed") {
+      return;
+    }
+    parkedSessions.set(ctx.goal.id, { sessionId, runtimeId });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await callbacks.onFail(message);
@@ -382,14 +442,17 @@ export const acpExecutor: ExecutorAdapter = {
     const { callbacks } = ctx;
     await callbacks.onProgress(5, "ACP 返工 steer…");
     try {
-      const turn = await runAcpTurn(ctx, runtimeId, {
+      const { loop, sessionId } = await runAcpTurn(ctx, runtimeId, {
         resumeSessionId: parked.sessionId,
         steer: true,
       });
-      await callbacks.onProgress(100, "ACP 返工完成");
-      await callbacks.onComplete(turn.summary);
-      parkedSessions.set(ctx.goal.id, { sessionId: turn.sessionId, runtimeId });
-      return true;
+      const outcome = await finalizeAcpForemanLoop(loop, callbacks, runtimeId);
+      if (outcome !== "failed") {
+        parkedSessions.set(ctx.goal.id, { sessionId, runtimeId });
+      } else {
+        parkedSessions.delete(ctx.goal.id);
+      }
+      return outcome !== "failed";
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await callbacks.onFail(message);

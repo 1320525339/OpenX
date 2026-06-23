@@ -1,44 +1,53 @@
 import { useState } from "react";
-import type { Goal } from "@openx/shared";
-import { goalStatusText, truncate } from "../lib/goal-detail";
-import { executorDisplayLabel } from "../lib/executors";
+import type { Goal, GoalRunState } from "@openx/shared";
+import { createEmptyRunState } from "@openx/shared";
+import { truncate } from "../lib/goal-detail";
 import { GoalTaskExpandBody, goalResultTeaser } from "./GoalTaskExpandBody";
 import {
   GoalTaskActions,
   goalHasTaskActions,
   type GoalTaskActionHandlers,
 } from "./GoalTaskActions";
-import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 import { CrewDialogueSummary } from "./CrewDialogueSummary";
+import { RunConsole } from "./RunConsole";
+import {
+  ChatTaskOrderDispatch,
+  ChatTaskOrderFooter,
+  ChatTaskOrderHeader,
+} from "./ChatTaskOrderSections";
+import { executorAgentShortName } from "../lib/chat-task-order";
 
 type Props = {
   goal?: Goal;
+  run?: GoalRunState;
   fallbackTitle: string;
   onLocate?: () => void;
   onOpenDetail?: () => void;
   handlers?: GoalTaskActionHandlers;
 };
 
-function displayProgress(goal: Goal | undefined): number {
-  if (!goal) return 0;
-  if (goal.status === "awaiting_review" || goal.status === "done") return 100;
-  if (goal.status === "running") return goal.progress;
-  return 0;
-}
-
-/** 对话流内任务芯片：点击展开/收起 */
+/** 对话流内任务单：工头派单 + 实时活动流 + 托管状态底栏 */
 export function ChatTaskChip({
   goal,
+  run,
   fallbackTitle,
   onOpenDetail,
   handlers,
 }: Props) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => goal?.status === "running");
 
   const status = goal?.status ?? "draft";
   const title = goal?.title ?? fallbackTitle;
-  const progress = displayProgress(goal);
   const teaser = goal ? goalResultTeaser(goal) : null;
+  const goalRun = goal && (run ?? createEmptyRunState(goal.id));
+  const showRunConsole =
+    goal &&
+    goalRun &&
+    (goal.status === "running" ||
+      goalRun.active ||
+      goalRun.events.length > 0 ||
+      Boolean(goalRun.liveText) ||
+      Boolean(goalRun.thinkingText));
   const actionHandlers: GoalTaskActionHandlers | undefined = goal
     ? {
         ...handlers,
@@ -47,64 +56,47 @@ export function ChatTaskChip({
     : undefined;
   const showCollapsedActions =
     goal && !expanded && goalHasTaskActions(goal, actionHandlers);
+  const agentShort = goal ? executorAgentShortName(goal.executorId) : "Agent";
 
   return (
     <div className="chat-turn chat-turn-taskchip">
       <article
-        className={`chat-task-card status-${status}${expanded ? " expanded" : ""}`}
+        className={`chat-task-card chat-task-order status-${status}${expanded ? " expanded" : ""}`}
       >
-        {goal?.orderNo && goal.orderNo > 0 ? (
-          <div className="chat-task-order-banner">
-            <WorkOrderIdBadge orderNo={goal.orderNo} />
-          </div>
-        ) : null}
-        <button
-          type="button"
-          className="chat-task-card-head"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          <div
-            className="progress-ring chat-task-progress"
-            style={{ ["--goal-progress" as string]: `${progress}%` }}
-            aria-hidden
-          >
-            {progress}%
-          </div>
-          <div className="chat-task-card-head-main">
-            <div className="chat-task-card-title-row">
-              <strong className="chat-task-card-title">{title}</strong>
-              <span className={`status-pill compact ${status}`}>
-                {goal ? goalStatusText(goal) : "已创建"}
-              </span>
-              {goal && (
-                <span className="executor-tag">{executorDisplayLabel(goal.executorId)}</span>
-              )}
-              <span className={`goal-card-chevron${expanded ? " open" : ""}`} aria-hidden />
-            </div>
-            {!expanded && teaser && (
-              <p className="chat-task-card-teaser">{truncate(teaser, 100)}</p>
-            )}
-            {goal?.status === "running" && !expanded && (
-              <div className="progress-bar chat-task-card-progress thin">
-                <span style={{ width: `${goal.progress}%` }} />
-              </div>
-            )}
-          </div>
-        </button>
+        <ChatTaskOrderHeader
+          goal={goal}
+          title={title}
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+          run={goalRun}
+          showLiveMeta={Boolean(showRunConsole)}
+        />
+
+        {goal ? <ChatTaskOrderDispatch goal={goal} /> : null}
 
         {goal ? (
-          <div
-            className="chat-task-crew-wrap"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <CrewDialogueSummary
-              goalId={goal.id}
-              crewStatus={goal.crewStatus}
-              embedded
-            />
+          <div className="chat-task-order-feed">
+            <div className="chat-task-crew-wrap" onClick={(e) => e.stopPropagation()}>
+              <CrewDialogueSummary
+                goalId={goal.id}
+                crewStatus={goal.crewStatus}
+                embedded
+              />
+            </div>
+
+            {showRunConsole && goalRun ? (
+              <div className="chat-task-run-wrap" onClick={(e) => e.stopPropagation()}>
+                <RunConsole run={goalRun} compact taskOrder agentShortName={agentShort} />
+              </div>
+            ) : null}
+
+            {!showRunConsole && !expanded && teaser ? (
+              <p className="chat-task-card-teaser">{truncate(teaser, 120)}</p>
+            ) : null}
           </div>
         ) : null}
+
+        {goal ? <ChatTaskOrderFooter goal={goal} run={goalRun} /> : null}
 
         {showCollapsedActions && (
           <div

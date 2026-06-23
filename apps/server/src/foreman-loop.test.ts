@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getCoachRuntime,
   resolveForemanDirectiveViaCoach,
+  resolveForemanTurnReviewViaCoach,
 } from "@openx/coach";
-import { handleCrewQuestion } from "./foreman-loop.js";
+import { handleCrewQuestion, handleCrewTurnReview } from "./foreman-loop.js";
 import { resetDb, insertGoal, insertProject, insertConversation } from "./db.js";
 
 vi.mock("@openx/coach", async (importOriginal) => {
@@ -11,6 +12,7 @@ vi.mock("@openx/coach", async (importOriginal) => {
   return {
     ...actual,
     resolveForemanDirectiveViaCoach: vi.fn(),
+    resolveForemanTurnReviewViaCoach: vi.fn(),
     getCoachRuntime: vi.fn(),
   };
 });
@@ -62,6 +64,7 @@ describe("foreman-loop", () => {
     resetDb();
     seedGoal();
     vi.mocked(resolveForemanDirectiveViaCoach).mockReset();
+    vi.mocked(resolveForemanTurnReviewViaCoach).mockReset();
     vi.mocked(getCoachRuntime).mockReset();
     delete process.env.OPENX_FOREMAN_RULES_ONLY;
   });
@@ -174,5 +177,49 @@ describe("foreman-loop", () => {
 
     expect(resolveForemanDirectiveViaCoach).not.toHaveBeenCalled();
     expect(outcome.kind).toBe("directive");
+  });
+
+  it("uses LLM for foreman turn review when coach is ready", async () => {
+    vi.mocked(getCoachRuntime).mockReturnValue({
+      ready: true,
+      model: "test",
+    });
+    vi.mocked(resolveForemanTurnReviewViaCoach).mockResolvedValue({
+      decision: {
+        action: "continue",
+        message: "补 README",
+        source: "foreman_llm",
+      },
+    });
+
+    const decision = await handleCrewTurnReview({
+      goal,
+      turn: {
+        assistantText: "写了 index.html",
+        summary: "进行中",
+      },
+    });
+
+    expect(decision.action).toBe("continue");
+    expect(resolveForemanTurnReviewViaCoach).toHaveBeenCalledOnce();
+  });
+
+  it("falls back turn review when LLM fails", async () => {
+    vi.mocked(getCoachRuntime).mockReturnValue({ ready: true, model: "test" });
+    vi.mocked(resolveForemanTurnReviewViaCoach).mockResolvedValue({
+      decision: null,
+      llmError: "empty",
+    });
+
+    const decision = await handleCrewTurnReview({
+      goal,
+      turn: {
+        assistantText: "建议方案 A。确认后执行。",
+        summary: "待确认",
+      },
+    });
+
+    expect(decision.action).toBe("ask_user");
+    expect(decision.source).toBe("foreman_rule");
   });
 });

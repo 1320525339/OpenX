@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { GoalDeliverableSchema } from "./deliverable.js";
+
+export const MAX_FOREMAN_LOOP_ROUNDS = 10;
 
 export const CrewQuestionOptionSchema = z.object({
   id: z.string().min(1),
@@ -22,6 +25,8 @@ export const CrewDirectiveSchema = z.object({
   message: z.string().min(1),
   selectedOptionId: z.string().optional(),
   source: z.enum(["foreman_auto", "foreman_llm", "foreman_user", "foreman_rule"]).default("foreman_auto"),
+  /** 工头已提请开发商决策，施工队应 park 并等待续跑 */
+  pauseUntilUser: z.boolean().optional(),
 });
 export type CrewDirective = z.infer<typeof CrewDirectiveSchema>;
 
@@ -34,6 +39,36 @@ export const CrewEscalationSchema = z.object({
 export type CrewEscalation = z.infer<typeof CrewEscalationSchema>;
 
 export type CrewForemanOutcome = CrewDirective | CrewEscalation;
+
+/** 工头对一轮施工反馈的控制决策 */
+export const ForemanTurnActionSchema = z.enum([
+  "continue",
+  "ask_user",
+  "submit_for_review",
+  "fail",
+]);
+export type ForemanTurnAction = z.infer<typeof ForemanTurnActionSchema>;
+
+export const ForemanTurnDecisionSchema = z.object({
+  action: ForemanTurnActionSchema,
+  message: z.string().min(1),
+  reason: z.string().optional(),
+  source: z
+    .enum(["foreman_auto", "foreman_llm", "foreman_rule"])
+    .default("foreman_rule"),
+});
+export type ForemanTurnDecision = z.infer<typeof ForemanTurnDecisionSchema>;
+
+/** 施工队一轮结束后的工头审阅输入 */
+export const ForemanTurnReviewInputSchema = z.object({
+  assistantText: z.string(),
+  summary: z.string(),
+  deliverables: z.array(GoalDeliverableSchema).optional(),
+  round: z.number().int().nonnegative().optional(),
+});
+export type ForemanTurnReviewInput = z.infer<typeof ForemanTurnReviewInputSchema>;
+
+export const FOREMAN_TURN_DECISION_FENCE = "foreman-turn-decision";
 
 export const CrewStatusSchema = z.enum([
   "idle",
@@ -61,6 +96,46 @@ export function parseCrewQuestionFromText(text: string): CrewQuestion | null {
   }
 }
 
+/** 施工队未用协议标记、但以自然语言请求确认/选型时，转为工头请示 */
+function detectImplicitCrewQuestion(text: string): CrewQuestion | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const proposesPlan =
+    /方案\s*[A-DＡ-Ｄ0-9]/i.test(trimmed) ||
+    /建议.{0,12}方案/.test(trimmed) ||
+    /可选方案/.test(trimmed);
+  const asksConfirmation =
+    /确认后/.test(trimmed) ||
+    /请.{0,6}确认/.test(trimmed) ||
+    /是否.{0,8}(执行|继续|同意|采用|可以)/.test(trimmed) ||
+    /等你确认/.test(trimmed) ||
+    /待你确认/.test(trimmed) ||
+    /需要你确认/.test(trimmed);
+
+  if (proposesPlan && asksConfirmation) {
+    return {
+      kind: "question",
+      prompt: "施工队已给出实施方案并请求确认，请工头判断是否需上报开发商决策。",
+      context: trimmed,
+      escalate: true,
+    };
+  }
+
+  const blockedHint =
+    /停服|删库|DELETE|清空.*表|不可恢复|备份后/.test(trimmed) && asksConfirmation;
+  if (blockedHint) {
+    return {
+      kind: "question",
+      prompt: "施工队提出高风险操作并请求确认，请工头判断是否上报开发商。",
+      context: trimmed,
+      escalate: true,
+    };
+  }
+
+  return null;
+}
+
 /** 解析施工队向工头的请示：优先 crew-question 块，否则识别自然语言标记 */
 export function parseCrewMessageFromText(text: string): CrewQuestion | null {
   const fenced = parseCrewQuestionFromText(text);
@@ -84,7 +159,7 @@ export function parseCrewMessageFromText(text: string): CrewQuestion | null {
     };
   }
 
-  return null;
+  return detectImplicitCrewQuestion(text);
 }
 
 /** 工头自然语言回复注入施工队 session */
@@ -152,4 +227,29 @@ export function formatCrewExchangeCoachLine(
           ? "工头 → 开发商"
           : "工头验收";
   return `[${prefix}] ${summary}`;
+}
+
+/** 解析工头轮次审阅的结构化 JSON 块 */
+export function parseForemanTurnDecisionFromText(text: string): ForemanTurnDecision | null {
+  const re = /```foreman-turn-decision\s*([\s\S]*?)```/i;
+  const match = text.match(re);
+  if (!match?.[1]) return null;
+  try {
+    const parsed = ForemanTurnDecisionSchema.safeParse(JSON.parse(match[1].trim()));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 将轮次决策转为施工队 steer 指令 */
+export function foremanTurnDecisionToDirective(
+  decision: ForemanTurnDecision,
+): CrewDirective {
+  return {
+    kind: "directive",
+    message: decision.message,
+    source: decision.source ?? "foreman_rule",
+    pauseUntilUser: decision.action === "ask_user",
+  };
 }

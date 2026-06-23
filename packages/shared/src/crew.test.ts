@@ -3,8 +3,10 @@ import {
   formatCrewDirectiveForPrompt,
   formatCrewForemanReplyForPrompt,
   formatCrewQuestionBlock,
+  foremanTurnDecisionToDirective,
   parseCrewMessageFromText,
   parseCrewQuestionFromText,
+  parseForemanTurnDecisionFromText,
   type CrewQuestion,
 } from "./crew.js";
 
@@ -31,6 +33,16 @@ describe("crew protocol", () => {
     expect(parsed?.context).toBe(text);
   });
 
+  it("parses implicit plan confirmation as foreman ask", () => {
+    const text = [
+      "我的建议是 **方案 A**，因为当前唯一的 running goal 就是清理会话自身，停服删除最干净。",
+      "确认后我立即执行：停服 -> 备份 -> 清空 -> 重启 -> 验证。",
+    ].join("\n");
+    const parsed = parseCrewMessageFromText(text);
+    expect(parsed?.escalate).toBe(true);
+    expect(parsed?.context).toBe(text);
+  });
+
   it("formats foreman reply for steer prompt", () => {
     const block = formatCrewForemanReplyForPrompt({
       kind: "directive",
@@ -48,5 +60,31 @@ describe("crew protocol", () => {
       message: "test",
       source: "foreman_llm",
     }));
+  });
+
+  it("round-trips foreman-turn-decision fence", () => {
+    const text = [
+      "工头判定",
+      "```foreman-turn-decision",
+      JSON.stringify({
+        action: "submit_for_review",
+        message: "已满足验收标准",
+        source: "foreman_llm",
+      }),
+      "```",
+    ].join("\n");
+    const parsed = parseForemanTurnDecisionFromText(text);
+    expect(parsed?.action).toBe("submit_for_review");
+    const directive = foremanTurnDecisionToDirective(parsed!);
+    expect(directive.pauseUntilUser).toBe(false);
+  });
+
+  it("maps ask_user decision to pause directive", () => {
+    const directive = foremanTurnDecisionToDirective({
+      action: "ask_user",
+      message: "等待开发商",
+      source: "foreman_rule",
+    });
+    expect(directive.pauseUntilUser).toBe(true);
   });
 });

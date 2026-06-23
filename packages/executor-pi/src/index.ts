@@ -25,13 +25,16 @@ import {
 import {
   buildExecutionPrompt,
   createRunEmitter,
+  dispositionForemanManagedLoop,
   extractDeliverableFromTool,
   extractPathFromToolArgs,
   inferFileAction,
   mergeDeliverable,
   readWorkspaceFileBaseline,
+  toolFileDiffFromDeliverable,
   type ExecutorAdapter,
   type ExecutorContext,
+  type ForemanManagedLoopResult,
   type RunEventEmitter,
 } from "@openx/executor-core";
 import { languageFromPath, parseDeliverablesFromSummary, type GoalDeliverable } from "@openx/shared";
@@ -278,7 +281,8 @@ async function handlePiEvent(
       { previousContent: pending?.previousContent },
     );
     if (item) mergeDeliverable(state.deliverables, item);
-    await run?.toolEnd(tool, isError, evt.toolCallId, resultPreview);
+    const fileDiff = toolFileDiffFromDeliverable(item);
+    await run?.toolEnd(tool, isError, evt.toolCallId, resultPreview, fileDiff);
     await callbacks.onLog(isError ? "warn" : "info", `[pi] 工具完成：${tool}`);
   }
 
@@ -410,13 +414,17 @@ async function runSessionTurn(
 
 
   const unsubscribe = session.subscribe((evt) => {
-    void handlePiEvent(evt, {
+    handlePiEvent(evt, {
       callbacks,
       state,
       run,
       session,
       maxToolCalls,
       workspaceRoot,
+    }).catch((err) => {
+      // 捕获而非静默丢弃，避免 unhandled rejection 崩溃；
+      // 事件流继续，不中断当前执行
+      console.error("[pi] event handler error:", err);
     });
   });
 
@@ -495,6 +503,54 @@ function parkSession(goalId: string, session: AgentSession) {
 
   parkedRuns.set(goalId, { session });
 
+}
+
+async function handlePiForemanLoopOutcome(
+  crewResult: ForemanManagedLoopResult,
+  callbacks: ExecutorContext["callbacks"],
+  opts: {
+    goalId: string;
+    park: boolean;
+    session?: AgentSession;
+    toolBudgetFailMessage: string;
+    completeLabel: string;
+  },
+): Promise<"complete" | "parked" | "failed"> {
+  const { summary, park, deliverables } = crewResult;
+  const disposition = dispositionForemanManagedLoop(crewResult);
+
+  if (disposition.action === "tool_budget_exceeded") {
+    await callbacks.onProgress(100, "Pi 已中止（工具上限）");
+    await callbacks.onFail(opts.toolBudgetFailMessage);
+    return "failed";
+  }
+  if (disposition.action === "failed") {
+    await callbacks.onFail(disposition.message);
+    return "failed";
+  }
+  if (disposition.action === "dialogue_exhausted") {
+    await callbacks.onFail("工头编排循环达到轮次上限，任务未完成");
+    return "failed";
+  }
+  if (disposition.action === "awaiting_user") {
+    if (park && opts.session) {
+      parkSession(opts.goalId, opts.session);
+    }
+    await callbacks.onProgress(95, "等待开发商决策…");
+    if (callbacks.onParkAwaitingUser) {
+      await callbacks.onParkAwaitingUser(summary);
+    } else {
+      await callbacks.onLog("warn", "[pi] 工头等待开发商，但 onParkAwaitingUser 未配置");
+    }
+    return "parked";
+  }
+
+  await callbacks.onProgress(100, opts.completeLabel);
+  await callbacks.onComplete(summary, deliverables);
+  if (park && opts.session) {
+    parkSession(opts.goalId, opts.session);
+  }
+  return "complete";
 }
 
 
@@ -640,6 +696,7 @@ export const piExecutor: ExecutorAdapter = {
         agentRole: ctx.agentRole,
         workspaceRoot: ctx.workspaceRoot,
         llmContext: ctx.llmContext,
+        projectKnowledge: (ctx as { projectKnowledge?: string }).projectKnowledge,
       }),
       CREW_FOREMAN_PROMPT_APPENDIX,
     ].join("\n\n");
@@ -755,25 +812,15 @@ export const piExecutor: ExecutorAdapter = {
         },
       );
 
-      const { summary, park, toolBudgetExceeded, deliverables } = crewResult;
-
-      if (toolBudgetExceeded) {
-        await callbacks.onProgress(100, "Pi 已中止（工具上限）");
-        await callbacks.onFail(
-          `Pi 工具调用达到上限（${resolveMaxToolCalls(pi)} 次），任务未完成。摘要：${summary.slice(0, 500)}`,
-        );
-        return;
-      }
-
-      await callbacks.onProgress(100, "Pi 完成");
-      await callbacks.onComplete(summary, deliverables);
-
-      if (park) {
-
-        parkSession(goal.id, session);
-
+      const outcome = await handlePiForemanLoopOutcome(crewResult, callbacks, {
+        goalId: goal.id,
+        park: crewResult.park,
+        session,
+        toolBudgetFailMessage: `Pi 工具调用达到上限（${resolveMaxToolCalls(pi)} 次），任务未完成。摘要：${crewResult.summary.slice(0, 500)}`,
+        completeLabel: "Pi 完成",
+      });
+      if (outcome !== "failed") {
         session = undefined;
-
       }
 
     } catch (err) {
@@ -802,22 +849,26 @@ export const piExecutor: ExecutorAdapter = {
 
     const { callbacks } = ctx;
 
-    const promptText = [
-      buildExecutionPrompt(
-        ctx.goal,
-        ctx.priorLogs ?? [],
-        ctx.enabledSkills,
-        {
-          isRework: true,
-          priorSummaries: ctx.priorSummaries,
-          priorReviewRounds: ctx.priorReviewRounds,
-          agentRole: ctx.agentRole,
-          workspaceRoot: ctx.workspaceRoot,
-          llmContext: ctx.llmContext,
-        },
-      ),
-      CREW_FOREMAN_PROMPT_APPENDIX,
-    ].join("\n\n");
+    const continuation = ctx.crewContinuationPrompt?.trim();
+    const promptText = continuation
+      ? continuation
+      : [
+          buildExecutionPrompt(
+            ctx.goal,
+            ctx.priorLogs ?? [],
+            ctx.enabledSkills,
+            {
+              isRework: true,
+              priorSummaries: ctx.priorSummaries,
+              priorReviewRounds: ctx.priorReviewRounds,
+              agentRole: ctx.agentRole,
+              workspaceRoot: ctx.workspaceRoot,
+              llmContext: ctx.llmContext,
+              projectKnowledge: (ctx as { projectKnowledge?: string }).projectKnowledge,
+            },
+          ),
+          CREW_FOREMAN_PROMPT_APPENDIX,
+        ].join("\n\n");
 
     const crewSessionId = buildPiCrewSessionId(ctx.goal.id);
     if (callbacks.onCrewSession) {
@@ -828,9 +879,12 @@ export const piExecutor: ExecutorAdapter = {
 
 
 
-    await callbacks.onLog("info", "[pi] 返工 steer：保留 session 上下文继续执行");
+    await callbacks.onLog(
+      "info",
+      continuation ? "[pi] 开发商确认后续跑" : "[pi] 返工 steer：保留 session 上下文继续执行",
+    );
 
-    await callbacks.onProgress(5, "返工 steer…");
+    await callbacks.onProgress(5, continuation ? "转告施工队…" : "返工 steer…");
 
 
 
@@ -853,29 +907,24 @@ export const piExecutor: ExecutorAdapter = {
         { initialSteer: true },
       );
 
-      const { summary, park, toolBudgetExceeded, deliverables } = crewResult;
+      const outcome = await handlePiForemanLoopOutcome(crewResult, callbacks, {
+        goalId: ctx.goal.id,
+        park: crewResult.park,
+        session: parked.session,
+        toolBudgetFailMessage: `Pi 返工时工具调用达到上限，任务未完成。摘要：${crewResult.summary.slice(0, 500)}`,
+        completeLabel: continuation ? "Pi 续跑完成" : "Pi 返工完成",
+      });
 
-      if (toolBudgetExceeded) {
-        await callbacks.onProgress(100, "Pi 返工已中止（工具上限）");
-        await callbacks.onFail(
-          `Pi 返工时工具调用达到上限，任务未完成。摘要：${summary.slice(0, 500)}`,
-        );
+      if (outcome === "failed") {
         parked.session.dispose();
         return true;
       }
+      if (outcome === "parked") {
+        return true;
+      }
 
-      await callbacks.onProgress(100, "Pi 返工完成");
-
-      await callbacks.onComplete(summary, deliverables);
-
-      if (park) {
-
-        parkSession(ctx.goal.id, parked.session);
-
-      } else {
-
+      if (!crewResult.park) {
         parked.session.dispose();
-
       }
 
       return true;
@@ -961,5 +1010,4 @@ export function hasParkedPiSession(goalId: string): boolean {
 }
 
 export { pickExecutorWithPi, type ExecutorCandidate } from "./router.js";
-
 

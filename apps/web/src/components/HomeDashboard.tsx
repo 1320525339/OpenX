@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import type { Conversation, Goal, Project } from "@openx/shared";
 import { goalStatusText } from "../lib/goal-detail";
+import { goalNeedsUserAttention } from "../lib/goal-attention";
+import { KnowledgeSpacePanel } from "./KnowledgeSpacePanel";
 
 type Props = {
   goals: Goal[];
@@ -9,14 +11,6 @@ type Props = {
   onOpenConversation: (projectId: string, conversationId: string, goalId?: string) => void;
   onAddProject: () => void;
 };
-
-function isUrgent(goal: Goal): boolean {
-  return (
-    goal.status === "awaiting_review" ||
-    goal.status === "failed" ||
-    goal.effectStatus === "rework"
-  );
-}
 
 export function HomeDashboard({
   goals,
@@ -37,7 +31,7 @@ export function HomeDashboard({
   const urgentGoals = useMemo(
     () =>
       goals
-        .filter(isUrgent)
+        .filter(goalNeedsUserAttention)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .slice(0, 12),
     [goals],
@@ -60,6 +54,9 @@ export function HomeDashboard({
             ＋ 添加项目
           </button>
         </div>
+        <section className="dashboard-section dashboard-knowledge-section">
+          <KnowledgeSpacePanel mode="global" embedded />
+        </section>
       </div>
     );
   }
@@ -69,7 +66,7 @@ export function HomeDashboard({
       <section className="dashboard-section">
         <h3 className="dashboard-section-title">需要你关注</h3>
         {urgentGoals.length === 0 ? (
-          <p className="dashboard-muted">暂无待确认或失败的任务</p>
+          <p className="dashboard-muted">暂无需要你关注的任务</p>
         ) : (
           <ul className="dashboard-goal-list">
             {urgentGoals.map((goal) => {
@@ -129,6 +126,10 @@ export function HomeDashboard({
             })}
           </ul>
         )}
+      </section>
+
+      <section className="dashboard-section dashboard-knowledge-section">
+        <KnowledgeSpacePanel mode="global" embedded />
       </section>
     </div>
   );

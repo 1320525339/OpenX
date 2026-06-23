@@ -1,22 +1,8 @@
-import { useMemo, useState } from "react";
-import type { Goal } from "@openx/shared";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { Goal, BatchGoalsAction, GoalAccessActor } from "@openx/shared";
 import { goalMatchesDisplayFilter } from "@openx/shared";
-import { GoalKanban } from "./GoalKanban";
 import { TasksPanel } from "./TasksPanel";
-import type { BatchGoalsAction } from "@openx/shared";
-import type { GoalAccessActor } from "@openx/shared";
-
-const VIEW_MODE_KEY = "openx.goalsViewMode";
-
-function loadViewMode(defaultMode: "list" | "kanban"): "list" | "kanban" {
-  try {
-    const raw = localStorage.getItem(VIEW_MODE_KEY);
-    if (raw === "kanban" || raw === "list") return raw;
-  } catch {
-    /* ignore */
-  }
-  return defaultMode;
-}
+import { usePaginatedGoals } from "../lib/use-paginated-goals";
 
 type GoalActions = {
   onApprove: (id: string) => Promise<void>;
@@ -38,7 +24,8 @@ type Props = {
   onEditModeChange: (edit: boolean) => void;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  onSelectAllVisible: () => void;
+  /** 可选传入当前可见目标 id；分页列表由工作区自行解析 */
+  onSelectAllVisible: (visibleIds?: string[]) => void;
   onClearSelection: () => void;
   onBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
   locateRequest?: { goalId: string; tick: number } | null;
@@ -48,9 +35,11 @@ type Props = {
   conversationProjectIds?: Record<string, string>;
   goalAccess?: GoalAccessActor;
   goalActions: GoalActions;
-  defaultViewMode?: "list" | "kanban";
-  /** 嵌入 Smart Cabin 中卡：固定看板，隐藏列表/看板切换 */
-  embedKanbanOnly?: boolean;
+  /** 启用服务端分页 */
+  paginationScope?: { conversationId?: string; projectId?: string };
+  /** Pin 桌面嵌入：紧凑任务台样式 */
+  embedInPin?: boolean;
+  logs?: { goalId: string; level: string; message: string; timestamp: string }[];
 };
 
 export function GoalsWorkspace({
@@ -77,91 +66,122 @@ export function GoalsWorkspace({
   conversationProjectIds,
   goalAccess,
   goalActions,
-  defaultViewMode = "list",
-  embedKanbanOnly = false,
+  paginationScope,
+  embedInPin = false,
+  logs,
 }: Props) {
-  const [viewMode, setViewMode] = useState<"list" | "kanban">(() =>
-    embedKanbanOnly ? "kanban" : loadViewMode(defaultViewMode),
-  );
+  const paginationEnabled = Boolean(paginationScope);
+  const paginated = usePaginatedGoals(paginationScope ?? {}, filter, paginationEnabled);
 
-  const filteredGoals = useMemo(
+  const clientFilteredGoals = useMemo(
     () => goals.filter((g) => goalMatchesDisplayFilter(g, filter)),
     [goals, filter],
   );
 
-  const setViewModePersisted = (mode: "list" | "kanban") => {
-    setViewMode(mode);
-    try {
-      localStorage.setItem(VIEW_MODE_KEY, mode);
-    } catch {
-      /* ignore */
+  const listGoals = paginationEnabled ? paginated.goals : clientFilteredGoals;
+  const knownAllGoalIdsRef = useRef<Set<string>>(new Set());
+  const paginationScopeKey = `${paginationScope?.projectId ?? ""}:${paginationScope?.conversationId ?? ""}:${filter}`;
+
+  useEffect(() => {
+    if (!paginationEnabled) return;
+    knownAllGoalIdsRef.current = new Set();
+  }, [paginationScopeKey, paginationEnabled]);
+
+  useEffect(() => {
+    if (!paginationEnabled) return;
+
+    const allById = new Map(allGoals.map((g) => [g.id, g]));
+    const prevKnown = knownAllGoalIdsRef.current;
+    let addedNew = false;
+
+    if (prevKnown.size > 0) {
+      for (const g of allGoals) {
+        if (prevKnown.has(g.id)) continue;
+        if (!goalMatchesDisplayFilter(g, filter)) continue;
+        paginated.mergeGoal(g);
+        addedNew = true;
+      }
     }
-  };
+
+    knownAllGoalIdsRef.current = new Set(allGoals.map((g) => g.id));
+
+    if (addedNew) {
+      void paginated.refreshCounts();
+    }
+
+    for (const pg of paginated.goals) {
+      const latest = allById.get(pg.id);
+      if (!latest) {
+        paginated.removeGoal(pg.id);
+        continue;
+      }
+      if (!goalMatchesDisplayFilter(latest, filter)) {
+        paginated.removeGoal(pg.id);
+        continue;
+      }
+      paginated.mergeGoal(latest);
+    }
+  }, [
+    allGoals,
+    filter,
+    paginationEnabled,
+    paginated.goals,
+    paginated.mergeGoal,
+    paginated.removeGoal,
+    paginated.refreshCounts,
+  ]);
+
+  const handleSelectAllVisible = useCallback(() => {
+    if (paginationEnabled) {
+      onSelectAllVisible(paginated.goals.map((g) => g.id));
+      return;
+    }
+    onSelectAllVisible();
+  }, [onSelectAllVisible, paginated.goals, paginationEnabled]);
+
+  const handleBatchAction = useCallback(
+    async (action: BatchGoalsAction, ids: string[]) => {
+      await onBatchAction(action, ids);
+      if (paginationEnabled) paginated.reload();
+    },
+    [onBatchAction, paginated, paginationEnabled],
+  );
 
   return (
-    <div className={`goals-workspace${embedKanbanOnly ? " goals-workspace-embedded" : ""}`}>
-      {!embedKanbanOnly ? (
-        <div className="goals-workspace-toolbar">
-          <div className="goals-view-toggle" role="tablist" aria-label="任务视图">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "list"}
-              className={viewMode === "list" ? "active" : ""}
-              onClick={() => setViewModePersisted("list")}
-            >
-              列表
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "kanban"}
-              className={viewMode === "kanban" ? "active" : ""}
-              onClick={() => setViewModePersisted("kanban")}
-            >
-              看板
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {viewMode === "kanban" ? (
-        <div className="goals-workspace-kanban panel-scroll">
-          <GoalKanban
-            goals={filteredGoals}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onOpenDetail={onOpenDetail}
-            conversationTitles={conversationTitles}
-          />
-        </div>
-      ) : (
-        <TasksPanel
-          goals={filteredGoals}
-          allGoals={allGoals}
-          filter={filter}
-          onFilterChange={onFilterChange}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onOpenDetail={onOpenDetail}
-          onNewGoal={onNewGoal}
-          hideFooterNewGoal={hideFooterNewGoal}
-          editMode={editMode}
-          onEditModeChange={onEditModeChange}
-          selectedIds={selectedIds}
-          onToggleSelect={onToggleSelect}
-          onSelectAllVisible={onSelectAllVisible}
-          onClearSelection={onClearSelection}
-          onBatchAction={onBatchAction}
-          locateRequest={locateRequest}
-          showConnectClaimStatus={showConnectClaimStatus}
-          conversationTitles={conversationTitles}
-          projectTitles={projectTitles}
-          conversationProjectIds={conversationProjectIds}
-          goalAccess={goalAccess}
-          {...goalActions}
-        />
-      )}
+    <div className={`goals-workspace${embedInPin ? " goals-workspace-embedded goals-workspace-pin" : ""}`}>
+      <TasksPanel
+        goals={listGoals}
+        allGoals={allGoals}
+        filter={filter}
+        onFilterChange={onFilterChange}
+        filterCounts={paginationEnabled ? paginated.counts : undefined}
+        hasMore={paginationEnabled ? paginated.hasMore : false}
+        loadingMore={paginationEnabled ? paginated.loading : false}
+        onLoadMore={paginationEnabled ? paginated.loadMore : undefined}
+        loadError={paginationEnabled ? paginated.error : null}
+        onRetryLoad={paginationEnabled ? paginated.reload : undefined}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onOpenDetail={onOpenDetail}
+        onNewGoal={onNewGoal}
+        hideFooterNewGoal={hideFooterNewGoal}
+        editMode={editMode}
+        onEditModeChange={onEditModeChange}
+        selectedIds={selectedIds}
+        onToggleSelect={onToggleSelect}
+        onSelectAllVisible={handleSelectAllVisible}
+        onClearSelection={onClearSelection}
+        onBatchAction={handleBatchAction}
+        locateRequest={locateRequest}
+        showConnectClaimStatus={showConnectClaimStatus}
+        conversationTitles={conversationTitles}
+        projectTitles={projectTitles}
+        conversationProjectIds={conversationProjectIds}
+        goalAccess={goalAccess}
+        embedInPin={embedInPin}
+        logs={logs}
+        {...goalActions}
+      />
     </div>
   );
 }

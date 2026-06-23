@@ -1,8 +1,11 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { clearGoalCancelledForConnect } from "./connect-store.js";
 import type {
   CoachClarifyMessage,
+  CoachClarifyStatus,
+  CoachDispatchPermissionMessage,
   CoachExecutionMeta,
   CoachExecutionMessage,
   CoachMessageRecord,
@@ -11,6 +14,8 @@ import type {
   CoachToolResultMessage,
   CoachToolResultPayload,
   Conversation,
+  CrewExchangeDirection,
+  CrewExchangeRecord,
   Goal,
   GoalPriority,
   GoalStatus,
@@ -21,22 +26,22 @@ import type {
 } from "@openx/shared";
 import {
   CoachClarifyPayloadSchema,
+  CoachDispatchPermissionPayloadSchema,
   CoachExecutionMetaSchema,
   CoachToolResultPayloadSchema,
   CLARIFY_TOOL_NAME,
+  DISPATCH_PERMISSION_TOOL_NAME,
   DispatchContextSchema,
   GoalDeliverableSchema,
   CONNECT_ANY_EXECUTOR_ID,
   GOAL_PRIORITY_WEIGHT,
   RefinedGoalSchema,
   WORK_ORDER_TOOL_NAME,
+  OPERATOR_ACTION_TOOL_NAME,
   OperatorActionMetaSchema,
   findPendingClarifyRecordIds,
   CrewExchangeDirectionSchema,
-  type CrewExchangeDirection,
-  type CrewExchangeRecord,
 } from "@openx/shared";
-import type { CoachClarifyStatus } from "@openx/shared";
 import { getDbPath } from "./paths.js";
 
 export const MAX_SSE_CATCHUP = 500;
@@ -394,31 +399,179 @@ export type ListGoalsFilter = {
   status?: GoalStatus;
   conversationId?: string;
   projectId?: string;
+  displayFilter?: string;
 };
+
+export type GoalsPageQuery = {
+  limit: number;
+  offset: number;
+};
+
+export type GoalsPageResult = {
+  goals: Goal[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
+export type GoalDisplayCounts = {
+  all: number;
+  incomplete: number;
+  failed: number;
+  done: number;
+  rework: number;
+};
+
+export type LogPageRow = {
+  goalId: string;
+  level: LogLevel;
+  message: string;
+  timestamp: string;
+};
+
+export type LogsPageResult = {
+  logs: LogPageRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
+function buildGoalsFilterClause(filter: ListGoalsFilter): { where: string; params: unknown[] } {
+  const conditions: string[] = ["conversation_id IS NOT NULL"];
+  const params: unknown[] = [];
+  if (filter.status) {
+    conditions.push("status = ?");
+    params.push(filter.status);
+  }
+  if (filter.conversationId) {
+    conditions.push("conversation_id = ?");
+    params.push(filter.conversationId);
+  }
+  if (filter.projectId) {
+    conditions.push(
+      "conversation_id IN (SELECT id FROM conversations WHERE project_id = ?)",
+    );
+    params.push(filter.projectId);
+  }
+  const displayFilter = filter.displayFilter;
+  if (displayFilter && displayFilter !== "all") {
+    if (displayFilter === "incomplete") {
+      conditions.push("status NOT IN ('done', 'failed', 'cancelled')");
+    } else if (displayFilter === "failed") {
+      conditions.push("status IN ('failed', 'cancelled')");
+    } else if (displayFilter === "done") {
+      conditions.push("status = 'done'");
+    } else if (displayFilter === "rework") {
+      conditions.push("status = 'running' AND effect_status = 'rework'");
+    } else if (displayFilter === "awaiting_review") {
+      conditions.push("status = 'awaiting_review'");
+    } else if (displayFilter === "running") {
+      conditions.push("status = 'running'");
+    } else if (displayFilter === "draft") {
+      conditions.push("status = 'draft'");
+    } else {
+      conditions.push("status = ?");
+      params.push(displayFilter);
+    }
+  }
+  return {
+    where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    params,
+  };
+}
+
+export function listGoalsPage(
+  filter: ListGoalsFilter = {},
+  page: GoalsPageQuery = { limit: 80, offset: 0 },
+): GoalsPageResult {
+  const database = getDb();
+  const { where, params } = buildGoalsFilterClause(filter);
+  const limit = Math.min(Math.max(page.limit, 1), 500);
+  const offset = Math.max(page.offset, 0);
+  const totalRow = database
+    .prepare(`SELECT COUNT(*) AS total FROM goals ${where}`)
+    .get(...params) as { total: number };
+  const goals = database
+    .prepare(
+      `SELECT * FROM goals ${where} ORDER BY order_no ASC, created_at ASC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset)
+    .map((r) => rowToGoal(r as GoalRow));
+  const total = totalRow.total ?? 0;
+  return {
+    goals,
+    total,
+    limit,
+    offset,
+    hasMore: offset + goals.length < total,
+  };
+}
+
+export function countGoalsByDisplay(filter: ListGoalsFilter = {}): GoalDisplayCounts {
+  const database = getDb();
+  const base = { ...filter, displayFilter: undefined as string | undefined };
+  const countFor = (displayFilter: string) => {
+    const { where, params } = buildGoalsFilterClause({ ...base, displayFilter });
+    const row = database
+      .prepare(`SELECT COUNT(*) AS total FROM goals ${where}`)
+      .get(...params) as { total: number };
+    return row.total ?? 0;
+  };
+  return {
+    all: countFor("all"),
+    incomplete: countFor("incomplete"),
+    failed: countFor("failed"),
+    done: countFor("done"),
+    rework: countFor("rework"),
+  };
+}
+
+export function listLogsPage(opts: {
+  goalId?: string;
+  limit?: number;
+  offset?: number;
+}): LogsPageResult {
+  const database = getDb();
+  const limit = Math.min(Math.max(opts.limit ?? 120, 1), 500);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (opts.goalId) {
+    conditions.push("goal_id = ?");
+    params.push(opts.goalId);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const totalRow = database
+    .prepare(`SELECT COUNT(*) AS total FROM goal_logs ${where}`)
+    .get(...params) as { total: number };
+  const logs = database
+    .prepare(
+      `SELECT goal_id AS goalId, level, message, created_at AS timestamp
+       FROM goal_logs ${where}
+       ORDER BY id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset)
+    .reverse() as LogPageRow[];
+  const total = totalRow.total ?? 0;
+  return {
+    logs,
+    total,
+    limit,
+    offset,
+    hasMore: offset + logs.length < total,
+  };
+}
 
 export function listGoals(filter?: GoalStatus | ListGoalsFilter): Goal[] {
   const database = getDb();
   const f: ListGoalsFilter =
     typeof filter === "string" ? { status: filter } : (filter ?? {});
-  const conditions: string[] = ["conversation_id IS NOT NULL"];
-  const params: unknown[] = [];
-  if (f.status) {
-    conditions.push("status = ?");
-    params.push(f.status);
-  }
-  if (f.conversationId) {
-    conditions.push("conversation_id = ?");
-    params.push(f.conversationId);
-  }
-  if (f.projectId) {
-    conditions.push(
-      `conversation_id IN (SELECT id FROM conversations WHERE project_id = ?)`,
-    );
-    params.push(f.projectId);
-  }
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const { where, params } = buildGoalsFilterClause(f);
   return database
-    .prepare(`SELECT * FROM goals ${where} ORDER BY updated_at DESC`)
+    .prepare(`SELECT * FROM goals ${where} ORDER BY order_no ASC, created_at ASC`)
     .all(...params)
     .map((r) => rowToGoal(r as GoalRow));
 }
@@ -634,6 +787,8 @@ function purgeGoalRecords(id: string): void {
   database.prepare("DELETE FROM execution_summaries WHERE goal_id = ?").run(id);
   database.prepare("DELETE FROM run_events WHERE goal_id = ?").run(id);
   database.prepare("DELETE FROM goals WHERE id = ?").run(id);
+  // 清理 Connect 取消标记，避免 cancelledGoalIds Set 无限增长
+  clearGoalCancelledForConnect(id);
 }
 
 function goalDepthInSet(id: string, idSet: Set<string>): number {
@@ -668,12 +823,14 @@ export function deleteGoals(ids: string[]): {
   }
 
   const blocked = new Map<string, string>();
+  // 一次性读取所有目标，避免循环内 N 次全表扫描
+  const allGoals = listGoals();
   for (const id of toDelete) {
-    const blockers = listGoals().filter(
+    const blocker = allGoals.find(
       (g) => !toDelete.has(g.id) && (g.dependsOn?.includes(id) ?? false),
     );
-    if (blockers.length > 0) {
-      blocked.set(id, `被「${blockers[0]!.title}」依赖`);
+    if (blocker) {
+      blocked.set(id, `被「${blocker.title}」依赖`);
     }
   }
 
@@ -786,6 +943,18 @@ function rowToCoachMessage(row: CoachMessageRow): CoachMessageRecord {
       operatorAction,
     };
   }
+  if (row.kind === "dispatch_permission" && row.meta_json) {
+    const dispatchPermission = CoachDispatchPermissionPayloadSchema.parse(
+      JSON.parse(row.meta_json),
+    );
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      kind: "dispatch_permission",
+      timestamp: row.timestamp,
+      dispatchPermission,
+    };
+  }
   return {
     id: row.id,
     conversationId: row.conversationId,
@@ -896,6 +1065,43 @@ export function hasClarifyToolResult(
   return Boolean(row);
 }
 
+export function hasOperatorActionToolResult(
+  conversationId: string,
+  operatorMessageId: number,
+): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM coach_messages
+       WHERE conversation_id = ? AND kind = 'tool_result'
+         AND json_extract(meta_json, '$.toolName') = ?
+         AND json_extract(meta_json, '$.operatorMessageId') = ?
+       LIMIT 1`,
+    )
+    .get(conversationId, OPERATOR_ACTION_TOOL_NAME, operatorMessageId) as
+    | { id: number }
+    | undefined;
+  return Boolean(row);
+}
+
+export function saveCoachOperatorToolTrace(
+  conversationId: string,
+  toolCalls: Array<{ name: string; args: unknown; result: unknown }>,
+): void {
+  for (const tc of toolCalls) {
+    const pending =
+      tc.name === "openx_call_api" ||
+      tc.name === "request_admin_access" ||
+      tc.name === "propose_dispatch_permission"
+        ? (tc.result as { kind?: string })?.kind === "pending" ||
+          (tc.result as { kind?: string })?.kind === "proposal"
+        : false;
+    if (pending) continue;
+    const payload = JSON.stringify({ args: tc.args, result: tc.result });
+    const text = `[工具调用 ${tc.name}] ${payload.length > 4000 ? `${payload.slice(0, 4000)}…` : payload}`;
+    saveCoachMessage(conversationId, "coach", text);
+  }
+}
+
 export function saveCoachToolResultMessage(
   conversationId: string,
   toolResult: CoachToolResultPayload,
@@ -951,6 +1157,61 @@ export function saveCoachClarifyMessage(
     timestamp,
     clarify,
   };
+}
+
+export function saveCoachDispatchPermissionMessage(
+  conversationId: string,
+  dispatchPermission: CoachDispatchPermissionMessage["dispatchPermission"],
+): CoachDispatchPermissionMessage {
+  const timestamp = new Date().toISOString();
+  const metaJson = JSON.stringify(dispatchPermission);
+  const result = getDb()
+    .prepare(
+      `INSERT INTO coach_messages (conversation_id, goal_id, role, text, kind, meta_json, created_at)
+       VALUES (?, NULL, 'coach', '', 'dispatch_permission', ?, ?)`,
+    )
+    .run(conversationId, metaJson, timestamp);
+  touchConversation(conversationId);
+  return {
+    id: Number(result.lastInsertRowid),
+    conversationId,
+    kind: "dispatch_permission",
+    timestamp,
+    dispatchPermission,
+  };
+}
+
+export function updateCoachDispatchPermissionStatus(
+  messageId: number,
+  status: "confirmed" | "dismissed",
+): void {
+  const row = getDb()
+    .prepare(`SELECT meta_json FROM coach_messages WHERE id = ? AND kind = 'dispatch_permission'`)
+    .get(messageId) as { meta_json: string } | undefined;
+  if (!row?.meta_json) return;
+  const payload = CoachDispatchPermissionPayloadSchema.parse(JSON.parse(row.meta_json));
+  const metaJson = JSON.stringify({ ...payload, status });
+  getDb()
+    .prepare(`UPDATE coach_messages SET meta_json = ? WHERE id = ?`)
+    .run(metaJson, messageId);
+}
+
+export function hasDispatchPermissionToolResult(
+  conversationId: string,
+  dispatchPermissionMessageId: number,
+): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM coach_messages
+       WHERE conversation_id = ? AND kind = 'tool_result'
+         AND json_extract(meta_json, '$.toolName') = ?
+         AND json_extract(meta_json, '$.dispatchPermissionMessageId') = ?
+       LIMIT 1`,
+    )
+    .get(conversationId, DISPATCH_PERMISSION_TOOL_NAME, dispatchPermissionMessageId) as
+    | { id: number }
+    | undefined;
+  return Boolean(row);
 }
 
 export function updateCoachClarifyStatus(
@@ -1145,6 +1406,7 @@ export function searchMemoryFts(
   projectId: string,
   query: string,
   limit = 5,
+  scope?: string,
 ): MemorySearchHit[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -1154,6 +1416,18 @@ export function searchMemoryFts(
     .map((t) => `"${t.replace(/"/g, '""')}"`)
     .join(" OR ");
   if (!terms) return [];
+  if (scope) {
+    return getDb()
+      .prepare(
+        `SELECT project_id as projectId, scope, content,
+                bm25(memory_fts) as rank
+         FROM memory_fts
+         WHERE project_id = ? AND scope = ? AND memory_fts MATCH ?
+         ORDER BY rank
+         LIMIT ?`,
+      )
+      .all(projectId, scope, terms, limit) as MemorySearchHit[];
+  }
   return getDb()
     .prepare(
       `SELECT project_id as projectId, scope, content,

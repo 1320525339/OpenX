@@ -157,6 +157,11 @@
   white-space: nowrap;
 }
 
+.log-strip-error {
+  color: var(--status-error, #c62828);
+  white-space: normal;
+}
+
 .log-strip-line {
   font-family: var(--font-mono);
   font-size: var(--text-xs);

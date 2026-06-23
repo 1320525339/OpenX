@@ -13,6 +13,7 @@ import { columnFromPointer } from "./pin-desktop-drag";
 
 export type PinStackRow = "top" | "bottom";
 export type PinDropZone = "replace" | "stack-above" | "stack-below";
+export type PinDropSource = "canvas" | "dock";
 
 export type PinDropTarget = {
   col: number;
@@ -20,7 +21,7 @@ export type PinDropTarget = {
 };
 
 /** 在同一列上停留超过该时长后，才按 Y 三等分判定叠放区 */
-export const PIN_DROP_ZONE_DWELL_MS = 300;
+export const PIN_DROP_ZONE_DWELL_MS = 150;
 
 export type ResolvePinDropTargetParams = {
   gridRect: DOMRect;
@@ -29,6 +30,8 @@ export type ResolvePinDropTargetParams = {
   clientY: number;
   layout: PinDesktopLayout;
   gapPx?: number;
+  /** 已经按视觉卡片命中归并后的目标列 */
+  targetCol?: number;
   /** 为 false 时快速掠过一律换位；停顿后才读 Y 分区 */
   dwellArmed?: boolean;
 };
@@ -199,21 +202,82 @@ function canUseStackZone(layout: PinDesktopLayout, col: number): boolean {
   return !norm.wide[col];
 }
 
-/** 标题栏 / 底栏拖拽落点：中区换位，上下区 50/50 垂直叠放 */
-export function applyPinDropIntent(
-  layout: PinDesktopLayout,
-  widget: PinWidgetId,
-  toCol: number,
-  zone: PinDropZone,
-): PinDesktopLayout {
+function ownerColForMerged(layout: PinDesktopLayout, col: number): number {
+  const norm = normalizeLayout(layout);
+  if (!isColumnMerged(norm, col)) return col;
+  if (col === 1 && norm.wide[0]) return 0;
+  if (col === 2 && norm.wide[0] && norm.wide[2]) return 0;
+  if (col === 2 && norm.wide[1]) return 1;
+  return col;
+}
+
+export function resolvePinDropColumn(params: {
+  gridRect: DOMRect;
+  clientX: number;
+  layout: PinDesktopLayout;
+  gapPx?: number;
+  getCellRect?: (col: number) => DOMRect | null;
+}): number {
+  const norm = normalizeLayout(params.layout);
+  for (let col = 0; col < MAX_PIN_COLUMNS; col++) {
+    if (!norm.cols[col] || isColumnMerged(norm, col)) continue;
+    const rect = params.getCellRect?.(col);
+    if (rect && params.clientX >= rect.left && params.clientX <= rect.right) {
+      return col;
+    }
+  }
+  const rawCol = columnFromPointer(params.gridRect, params.clientX, params.gapPx ?? 8);
+  return ownerColForMerged(norm, rawCol);
+}
+
+type ApplyPinDropCommitParams = {
+  layout: PinDesktopLayout;
+  widget: PinWidgetId;
+  toCol: number;
+  zone: PinDropZone;
+  source: PinDropSource;
+};
+
+/** 统一卡片 / Dock 拖放提交：canvas 中区交换，dock 中区替换 */
+export function applyPinDropCommit({
+  layout,
+  widget,
+  toCol,
+  zone,
+  source,
+}: ApplyPinDropCommitParams): PinDesktopLayout {
   if (toCol < 0 || toCol > 2) return layout;
 
   let norm = normalizeLayout(layout);
-  const from = widgetSlot(norm, widget);
-  if (!from) return norm;
+  const wasPinned = isWidgetPinned(norm, widget);
+  const existingFrom = wasPinned ? widgetSlot(norm, widget) : null;
 
   const effectiveZone =
     canUseStackZone(norm, toCol) || norm.cols[toCol] == null ? zone : "replace";
+
+  const targetOccupied = norm.cols[toCol] != null || isColumnMerged(norm, toCol);
+  const sameColumn =
+    existingFrom?.col === toCol ||
+    (existingFrom &&
+      isColumnMerged(norm, toCol) &&
+      existingFrom.col === ownerColForMerged(norm, toCol));
+
+  if (
+    source === "dock" &&
+    effectiveZone === "replace" &&
+    targetOccupied &&
+    !sameColumn
+  ) {
+    return replacePinWidgetAtColumn(norm, widget, toCol);
+  }
+
+  if (!wasPinned) {
+    norm = togglePinWidget(norm, widget);
+  }
+
+  const activeFrom = widgetSlot(norm, widget);
+  if (!activeFrom) return norm;
+  const from = activeFrom;
 
   if (from.col === toCol) {
     if (effectiveZone === "replace") return norm;
@@ -264,37 +328,35 @@ export function applyPinDropIntent(
   return stackBelowSingle(norm, toCol, widget);
 }
 
+/** 标题栏拖拽落点：中区换位，上下区垂直叠放 */
+export function applyPinDropIntent(
+  layout: PinDesktopLayout,
+  widget: PinWidgetId,
+  toCol: number,
+  zone: PinDropZone,
+): PinDesktopLayout {
+  return applyPinDropCommit({ layout, widget, toCol, zone, source: "canvas" });
+}
+
 export function placePinWidgetAtDrop(
   layout: PinDesktopLayout,
   widget: PinWidgetId,
   toCol: number,
   zone: PinDropZone,
 ): PinDesktopLayout {
-  if (toCol < 0 || toCol > 2) return layout;
-  let norm = normalizeLayout(layout);
-  const wasPinned = isWidgetPinned(norm, widget);
-  const from = wasPinned ? widgetSlot(norm, widget) : null;
-
-  const effectiveZone =
-    canUseStackZone(norm, toCol) || norm.cols[toCol] == null ? zone : "replace";
-
-  const targetOccupied = norm.cols[toCol] != null || isColumnMerged(norm, toCol);
-  const sameColumn = from?.col === toCol || (from && isColumnMerged(norm, toCol) && from.col === toCol - 1);
-
-  if (effectiveZone === "replace" && targetOccupied && !sameColumn) {
-    return replacePinWidgetAtColumn(norm, widget, toCol);
-  }
-
-  if (!wasPinned) {
-    norm = togglePinWidget(norm, widget);
-  }
-  if (!widgetSlot(norm, widget)) return norm;
-  return applyPinDropIntent(norm, widget, toCol, zone);
+  return applyPinDropCommit({ layout, widget, toCol, zone, source: "dock" });
 }
 
 export function resolvePinDropTarget(params: ResolvePinDropTargetParams): PinDropTarget {
   const gapPx = params.gapPx ?? 8;
-  const col = columnFromPointer(params.gridRect, params.clientX, gapPx);
+  const col =
+    params.targetCol ??
+    resolvePinDropColumn({
+      gridRect: params.gridRect,
+      clientX: params.clientX,
+      layout: params.layout,
+      gapPx,
+    });
   const norm = normalizeLayout(params.layout);
   if (!params.cellRect || norm.cols[col] == null) {
     return { col, zone: "replace" };
@@ -327,13 +389,20 @@ export function createPinDropTargetTracker(
     },
     resolve(params, now = Date.now()) {
       const gapPx = params.gapPx ?? 8;
-      const col = columnFromPointer(params.gridRect, params.clientX, gapPx);
+      const col =
+        params.targetCol ??
+        resolvePinDropColumn({
+          gridRect: params.gridRect,
+          clientX: params.clientX,
+          layout: params.layout,
+          gapPx,
+        });
       if (col !== hoverCol) {
         hoverCol = col;
         enteredAt = now;
       }
       const dwellArmed = now - enteredAt >= dwellMs;
-      return resolvePinDropTarget({ ...params, dwellArmed });
+      return resolvePinDropTarget({ ...params, targetCol: col, dwellArmed });
     },
   };
 }

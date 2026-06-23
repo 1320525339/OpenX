@@ -4,7 +4,9 @@ import type {
   DynamicIslandPayload,
   IslandAction,
   IslandActionButton,
+  IslandPayloadKind,
 } from "@openx/shared";
+import { islandDedupeKey } from "@openx/shared";
 import { DeliveryChips } from "./DeliveryChips";
 import { ReviewTimelineCompact } from "./ReviewTimelineCompact";
 
@@ -23,14 +25,30 @@ function islandBtnClass(variant: IslandActionButton["variant"] = "default"): str
   return "dynamic-island-btn";
 }
 
+function islandUsesReviewTimeline(kind: IslandPayloadKind): boolean {
+  return (
+    kind === "goal.awaiting_review" ||
+    kind === "goal.review_limit" ||
+    kind === "goal.review_unavailable" ||
+    kind === "goal.review_fail"
+  );
+}
+
 export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
   const [phase, setPhase] = useState<"hidden" | "entering" | "visible" | "leaving">("hidden");
+  const [visiblePayload, setVisiblePayload] = useState<DynamicIslandPayload | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const dismissTimer = useRef<number | null>(null);
   const leaveTimer = useRef<number | null>(null);
-  const hovered = useRef(false);
+  const hoveredRef = useRef(false);
+  const expandedRef = useRef(false);
+  const displayKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
 
   const clearTimers = useCallback(() => {
     if (dismissTimer.current !== null) {
@@ -49,6 +67,7 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
     leaveTimer.current = window.setTimeout(() => {
       setPhase("hidden");
       setExpanded(false);
+      expandedRef.current = false;
       setFeedback("");
       onDismiss();
     }, 320);
@@ -57,20 +76,35 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
   const scheduleDismiss = useCallback(
     (ms: number) => {
       if (ms <= 0) return;
+      if (expandedRef.current) return;
       if (dismissTimer.current !== null) {
         window.clearTimeout(dismissTimer.current);
       }
       dismissTimer.current = window.setTimeout(() => {
-        if (!hovered.current && !expanded) dismiss();
+        if (!hoveredRef.current && !expandedRef.current) dismiss();
       }, ms);
     },
-    [dismiss, expanded],
+    [dismiss],
   );
 
   useEffect(() => {
-    if (!payload) return;
+    if (!payload) {
+      displayKeyRef.current = null;
+      setVisiblePayload(null);
+      return;
+    }
+
+    const nextKey = islandDedupeKey(payload) ?? payload.id;
+    const sameCard = displayKeyRef.current === nextKey;
+
+    setVisiblePayload(payload);
+    if (sameCard) return;
+
+    displayKeyRef.current = nextKey;
     clearTimers();
-    setExpanded(Boolean(payload.expanded));
+    const nextExpanded = Boolean(payload.expanded);
+    setExpanded(nextExpanded);
+    expandedRef.current = nextExpanded;
     setFeedback("");
     setPhase("entering");
     const enterTimer = window.setTimeout(() => setPhase("visible"), 20);
@@ -79,15 +113,20 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
       window.clearTimeout(enterTimer);
       clearTimers();
     };
-  }, [payload?.id, payload, clearTimers, scheduleDismiss]);
+  }, [payload, clearTimers, scheduleDismiss]);
 
-  const toggleExpand = (e: MouseEvent) => {
-    e.stopPropagation();
-    setExpanded((v) => !v);
-    if (payload) {
-      clearTimers();
-      scheduleDismiss(payload.autoDismissMs ?? DEFAULT_AUTO_DISMISS_MS);
-    }
+  const toggleExpand = (e?: MouseEvent) => {
+    e?.stopPropagation();
+    setExpanded((value) => {
+      const next = !value;
+      expandedRef.current = next;
+      if (next) {
+        clearTimers();
+      } else if (visiblePayload) {
+        scheduleDismiss(visiblePayload.autoDismissMs ?? DEFAULT_AUTO_DISMISS_MS);
+      }
+      return next;
+    });
   };
 
   const runAction = async (action: IslandAction, useFeedback = false) => {
@@ -106,15 +145,17 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
     }
   };
 
-  if (!payload || phase === "hidden") return null;
+  if (!visiblePayload || phase === "hidden") return null;
 
-  const severity = payload.severity ?? "info";
+  const severity = visiblePayload.severity ?? "info";
   const hasExpandable =
-    Boolean(payload.allowFeedback) ||
-    Boolean(payload.meta?.resultPreview) ||
-    Boolean(payload.meta?.deliverables?.length) ||
-    Boolean(payload.meta?.reworkInstruction) ||
-    Boolean(payload.goalId);
+    Boolean(visiblePayload.allowFeedback) ||
+    Boolean(visiblePayload.meta?.resultPreview) ||
+    Boolean(visiblePayload.meta?.deliverables?.length) ||
+    Boolean(visiblePayload.meta?.reworkInstruction) ||
+    Boolean(visiblePayload.meta?.reviewReason) ||
+    Boolean(visiblePayload.actions?.length) ||
+    Boolean(visiblePayload.message?.trim());
 
   return createPortal(
     <div className="dynamic-island-portal app-minimal" role="presentation">
@@ -123,29 +164,37 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
         role="status"
         aria-live="polite"
         onMouseEnter={() => {
-          hovered.current = true;
+          hoveredRef.current = true;
           clearTimers();
         }}
         onMouseLeave={() => {
-          hovered.current = false;
-          scheduleDismiss(payload.autoDismissMs ?? DEFAULT_AUTO_DISMISS_MS);
+          hoveredRef.current = false;
+          scheduleDismiss(visiblePayload.autoDismissMs ?? DEFAULT_AUTO_DISMISS_MS);
         }}
       >
-        <div className="dynamic-island-head">
+        <div
+          className="dynamic-island-head"
+          onClick={hasExpandable && !expanded ? () => toggleExpand() : undefined}
+        >
           <button
             type="button"
             className="dynamic-island-compact"
-            aria-label={payload.message}
-            onClick={hasExpandable ? toggleExpand : () => void runAction({ type: "dismiss" })}
+            aria-label={visiblePayload.message || visiblePayload.title}
+            aria-expanded={hasExpandable ? expanded : undefined}
+            onClick={
+              hasExpandable
+                ? toggleExpand
+                : () => void runAction({ type: "dismiss" })
+            }
           >
             <span className={`dynamic-island-dot ${severity}`} aria-hidden />
             <span className="dynamic-island-body">
-              <span className="dynamic-island-title">{payload.title}</span>
+              <span className="dynamic-island-title">{visiblePayload.title}</span>
               {expanded ? (
-                <span className="dynamic-island-text">{payload.message}</span>
+                <span className="dynamic-island-text">{visiblePayload.message}</span>
               ) : (
                 <span className="dynamic-island-text dynamic-island-text-collapsed">
-                  {payload.message}
+                  {visiblePayload.message}
                 </span>
               )}
             </span>
@@ -165,66 +214,69 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
 
         {expanded ? (
           <div className="dynamic-island-expanded">
-            {payload.meta?.reworkInstruction ? (
+            {visiblePayload.meta?.reworkInstruction ? (
               <div className="dynamic-island-section">
                 <strong>修改清单</strong>
-                <pre className="dynamic-island-preview">{payload.meta.reworkInstruction}</pre>
+                <pre className="dynamic-island-preview">{visiblePayload.meta.reworkInstruction}</pre>
               </div>
             ) : null}
-            {payload.meta?.reviewReason ? (
+            {visiblePayload.meta?.reviewReason ? (
               <div className="dynamic-island-section">
                 <strong>审查说明</strong>
-                <p className="dynamic-island-text-block">{payload.meta.reviewReason}</p>
+                <p className="dynamic-island-text-block">{visiblePayload.meta.reviewReason}</p>
               </div>
             ) : null}
-            {payload.meta?.deliverables && payload.meta.deliverables.length > 0 && (
-              <DeliveryChips items={payload.meta.deliverables} compact />
+            {visiblePayload.meta?.deliverables && visiblePayload.meta.deliverables.length > 0 && (
+              <DeliveryChips items={visiblePayload.meta.deliverables} compact />
             )}
-            {payload.meta?.resultPreview && (
-              <pre className="dynamic-island-preview">{payload.meta.resultPreview}</pre>
+            {visiblePayload.meta?.resultPreview && (
+              <pre className="dynamic-island-preview">{visiblePayload.meta.resultPreview}</pre>
             )}
-            {payload.goalId && payload.kind.startsWith("goal.") ? (
+            {visiblePayload.goalId && islandUsesReviewTimeline(visiblePayload.kind) ? (
               <ReviewTimelineCompact
-                goalId={payload.goalId}
+                goalId={visiblePayload.goalId}
                 compact
-                showFeedback={payload.allowFeedback}
+                showFeedback={visiblePayload.allowFeedback}
                 feedback={feedback}
                 onFeedbackChange={setFeedback}
                 onApprove={
-                  payload.actions?.some((a) => a.action.type === "approve")
-                    ? () => void runAction({ type: "approve", goalId: payload.goalId! })
+                  visiblePayload.actions?.some((a) => a.action.type === "approve")
+                    ? () => void runAction({ type: "approve", goalId: visiblePayload.goalId! })
                     : undefined
                 }
                 onRework={
-                  payload.actions?.some((a) => a.action.type === "rework")
+                  visiblePayload.actions?.some((a) => a.action.type === "rework")
                     ? (reason) =>
                         void runAction(
-                          { type: "rework", goalId: payload.goalId!, reason },
+                          { type: "rework", goalId: visiblePayload.goalId!, reason },
                           true,
                         )
                     : undefined
                 }
                 onTriggerReview={
-                  payload.actions?.some((a) => a.action.type === "trigger_review")
+                  visiblePayload.actions?.some((a) => a.action.type === "trigger_review")
                     ? () =>
                         void runAction({
                           type: "trigger_review",
-                          goalId: payload.goalId!,
+                          goalId: visiblePayload.goalId!,
                         })
                     : undefined
                 }
               />
-            ) : payload.allowFeedback ? (
+            ) : visiblePayload.message ? (
+              <p className="dynamic-island-text-block">{visiblePayload.message}</p>
+            ) : null}
+            {visiblePayload.allowFeedback && !islandUsesReviewTimeline(visiblePayload.kind) ? (
               <textarea
                 className="dynamic-island-feedback"
                 rows={2}
                 value={feedback}
-                placeholder={payload.feedbackPlaceholder ?? "补充反馈…"}
+                placeholder={visiblePayload.feedbackPlaceholder ?? "补充反馈…"}
                 onChange={(e) => setFeedback(e.target.value)}
               />
             ) : null}
             <div className="dynamic-island-actions">
-              {payload.actions?.map((btn: IslandActionButton) => (
+              {visiblePayload.actions?.map((btn: IslandActionButton) => (
                 <button
                   key={btn.id}
                   type="button"
@@ -232,7 +284,7 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
                   disabled={busy}
                   onClick={() => {
                     const needsFeedback =
-                      btn.action.type === "rework" && payload.allowFeedback;
+                      btn.action.type === "rework" && visiblePayload.allowFeedback;
                     void runAction(btn.action, needsFeedback);
                   }}
                 >
@@ -243,7 +295,7 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
                 type="button"
                 className="dynamic-island-btn ghost"
                 disabled={busy}
-                onClick={() => setExpanded(false)}
+                onClick={() => toggleExpand()}
               >
                 收起
               </button>

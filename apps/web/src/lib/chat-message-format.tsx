@@ -1,11 +1,16 @@
 import { useState, type ReactNode } from "react";
 import { api } from "../api";
+import { summarizeCoachTool } from "./coach-tool-present";
 import { buildIdeOpenUrl, inferPathKind, openIdeFileUrl } from "./open-in-ide";
 import { ChatMarkdown } from "./chat-markdown";
 
-/** 仅匹配裸路径；勿匹配 `` `inline code` ``，否则会拆碎 Markdown 行内代码 */
+/** 仅匹配可在 IDE 打开的绝对裸路径；勿匹配相对路径或 JSON 片段 */
 const CHAT_PATH_SPLIT_RE =
-  /([A-Za-z]:\\[^\s\n\r`「」]+|~\/[^\s\n\r`「」]+|\/(?:[\w@.$~+-]+\/)+[\w@.$~+-]+|(?:[\w@.$~+-]+[/\\])+[\w@.$~+-]+)/g;
+  /([A-Za-z]:\\[^\s\n\r`「」]+|~\/[^\s\n\r`「」]+|\/(?:[\w@.$~+-]+\/)+[\w@.$~+-]+)/g;
+
+/** 工头 XML 工具块：拆成正文 + 可折叠工具输出（避免路径芯片拆碎 JSON） */
+const COACH_TOOL_TAG_RE =
+  /<propose_(work_order|clarification)>\s*([\s\S]*?)(?:<\/propose_\1>|$)/gi;
 
 type MessageBlock = { kind: "text"; text: string } | { kind: "path"; path: string };
 
@@ -51,9 +56,109 @@ export function isChatPathSegment(part: string): boolean {
   return (
     /^[A-Za-z]:\\/.test(path) ||
     /^~\//.test(path) ||
-    /^\/(?:[\w@.$~+-]+\/)+[\w@.$~+-]+$/.test(path) ||
-    /^(?:[\w@.$~+-]+[/\\])+[\w@.$~+-]+$/.test(path)
+    /^\/(?:[\w@.$~+-]+\/)+[\w@.$~+-]+$/.test(path)
   );
+}
+
+export type CoachMessagePart =
+  | { kind: "text"; text: string }
+  | { kind: "tool"; toolName: string; payload: string; incomplete: boolean };
+
+export function splitCoachMessageParts(text: string): CoachMessagePart[] {
+  const parts: CoachMessagePart[] = [];
+  let lastIndex = 0;
+  const re = new RegExp(COACH_TOOL_TAG_RE.source, "gi");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const before = text.slice(lastIndex, match.index).replace(/\n{3,}/g, "\n\n");
+    if (before.trim()) {
+      parts.push({ kind: "text", text: before.trimEnd() });
+    }
+    const tag = match[1]!;
+    const full = match[0]!;
+    parts.push({
+      kind: "tool",
+      toolName: `propose_${tag}`,
+      payload: match[2]!.trim(),
+      incomplete: !full.includes(`</propose_${tag}>`),
+    });
+    lastIndex = match.index + full.length;
+  }
+  const tail = text.slice(lastIndex).replace(/\n{3,}/g, "\n\n");
+  if (tail.trim()) {
+    parts.push({ kind: "text", text: tail.trimEnd() });
+  }
+  if (parts.length === 0) {
+    parts.push({ kind: "text", text });
+  }
+  return parts;
+}
+
+function formatCoachToolPayload(raw: string): string {
+  const jsonStart = raw.indexOf("{");
+  if (jsonStart === -1) return raw;
+  try {
+    return JSON.stringify(JSON.parse(raw.slice(jsonStart)), null, 2);
+  } catch {
+    return raw.slice(jsonStart);
+  }
+}
+
+function coachToolLabel(toolName: string): string {
+  if (toolName === "propose_work_order") return "整理任务单";
+  if (toolName === "propose_clarification") return "发起澄清";
+  return toolName;
+}
+
+export function ChatCoachToolBlock({
+  toolName,
+  payload,
+  streaming,
+}: {
+  toolName: string;
+  payload: string;
+  streaming?: boolean;
+}) {
+  const label = coachToolLabel(toolName);
+  const formatted = formatCoachToolPayload(payload);
+  const summary = summarizeCoachTool(toolName, payload, streaming);
+  return (
+    <details className="chat-coach-tool-block" open={streaming || undefined}>
+      <summary className="chat-coach-tool-summary">
+        <span className="chat-coach-tool-badge" aria-hidden>
+          fn
+        </span>
+        {streaming ? `${label}…` : `工头调用 · ${label}`}
+        {!streaming && summary.headline && (
+          <span className="chat-coach-tool-headline">{summary.headline}</span>
+        )}
+      </summary>
+      {summary.details.length > 0 && (
+        <ul className="chat-coach-tool-details">
+          {summary.details.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      )}
+      <pre className="chat-coach-tool-payload">{formatted || "…"}</pre>
+    </details>
+  );
+}
+
+/** @deprecated 保留兼容；展示请用 splitCoachMessageParts / renderCoachMessageText */
+export function prepareCoachMessageDisplay(text: string): string {
+  return splitCoachMessageParts(text)
+    .filter((p): p is Extract<CoachMessagePart, { kind: "text" }> => p.kind === "text")
+    .map((p) => p.text)
+    .join("\n\n")
+    .trimEnd();
+}
+
+function shouldDisablePathChips(text: string, options?: ChatRenderOptions): boolean {
+  if (options?.streaming) return true;
+  if (/<propose_(?:work_order|clarification)>/i.test(text)) return true;
+  if (/"executionPrompt"\s*:/.test(text) && /"action"\s*:/.test(text)) return true;
+  return false;
 }
 
 function pathBasename(path: string): string {
@@ -177,12 +282,43 @@ export type ChatRenderOptions = {
   streaming?: boolean;
 };
 
+export function renderCoachMessageText(
+  text: string,
+  options?: ChatRenderOptions,
+): ReactNode {
+  const parts = splitCoachMessageParts(text);
+  if (parts.length === 1 && parts[0]!.kind === "text") {
+    return renderChatMessageText(parts[0]!.text, false, options);
+  }
+  return (
+    <div className="chat-coach-message">
+      {parts.map((part, index) =>
+        part.kind === "tool" ? (
+          <ChatCoachToolBlock
+            key={`tool-${index}`}
+            toolName={part.toolName}
+            payload={part.payload}
+            streaming={options?.streaming === true && part.incomplete}
+          />
+        ) : (
+          <div key={`text-${index}`}>
+            {renderChatMessageText(part.text, false, options)}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 export function renderChatMessageText(
   text: string,
   onUserBubble = false,
   options?: ChatRenderOptions,
 ): ReactNode {
   const plain = options?.streaming === true;
+  if (shouldDisablePathChips(text, options)) {
+    return <ChatMarkdown text={text} plain={plain} />;
+  }
   const blocks = splitMessageBlocks(text);
   if (blocks.length === 1 && blocks[0]!.kind === "text") {
     return <ChatMarkdown text={blocks[0]!.text} plain={plain} />;

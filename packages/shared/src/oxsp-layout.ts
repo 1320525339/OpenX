@@ -5,7 +5,16 @@ import { z } from "zod";
 import type { PinDesktopScope } from "./oxsp.js";
 import { extWidgetId, isExtWidgetId, isLegacyWebWidgetId } from "./oxsp.js";
 
-export type PinDockWidgetId = "chat" | "tasks" | "kanban" | "detail";
+export type PinDockWidgetId = "chat" | "tasks" | "detail" | "evidence";
+
+/** 旧布局中的看板槽位 → 任务台 */
+export function migrateLegacyDockWidget(
+  widget: PinWidgetId | null | undefined,
+): PinWidgetId | null {
+  if (!widget) return null;
+  if ((widget as string) === "kanban") return "tasks";
+  return widget;
+}
 export type PinWebWidgetId = `web:${string}`;
 export type PinExtWidgetId = `ext:${string}`;
 export type PinWidgetId = PinDockWidgetId | PinWebWidgetId | PinExtWidgetId;
@@ -50,7 +59,7 @@ export type OxspDesktopState = {
   workspace: PinDesktopWorkspace;
 };
 
-const DOCK_WIDGET_SET = new Set<PinDockWidgetId>(["chat", "tasks", "kanban", "detail"]);
+const DOCK_WIDGET_SET = new Set<PinDockWidgetId>(["chat", "tasks", "detail", "evidence"]);
 
 export function isWebWidgetId(id: PinWidgetId): id is PinWebWidgetId {
   return id.startsWith("web:");
@@ -85,6 +94,7 @@ function isValidSlotWidget(w: PinWidgetId | null | undefined): w is PinWidgetId 
 
 export function isColumnMerged(layout: PinDesktopLayout, col: number): boolean {
   if (col === 1 && layout.wide[0]) return true;
+  if (col === 2 && layout.wide[0] && layout.wide[2]) return true;
   if (col === 2 && layout.wide[1]) return true;
   return false;
 }
@@ -97,9 +107,10 @@ export function normalizeLayout(layout: PinDesktopLayout): PinDesktopLayout {
   const seen = new Set<PinWidgetId>();
 
   const take = (w: PinWidgetId | null | undefined): PinWidgetId | null => {
-    if (w && isValidSlotWidget(w) && !seen.has(w)) {
-      seen.add(w);
-      return w;
+    const migrated = migrateLegacyDockWidget(w);
+    if (migrated && isValidSlotWidget(migrated) && !seen.has(migrated)) {
+      seen.add(migrated);
+      return migrated;
     }
     return null;
   };
@@ -115,6 +126,7 @@ export function normalizeLayout(layout: PinDesktopLayout): PinDesktopLayout {
 
   if (cols[0] && layout.wide[0]) wide[0] = true;
   if (cols[1] && layout.wide[1] && !wide[0]) wide[1] = true;
+  if (wide[0] && layout.wide[2]) wide[2] = true;
 
   if (wide[0]) {
     cols[1] = null;
@@ -123,6 +135,10 @@ export function normalizeLayout(layout: PinDesktopLayout): PinDesktopLayout {
     splitBottom[0] = null;
     split[1] = false;
     splitBottom[1] = null;
+    if (wide[2]) {
+      split[2] = false;
+      splitBottom[2] = null;
+    }
   }
   if (wide[1]) {
     cols[2] = null;
@@ -134,11 +150,15 @@ export function normalizeLayout(layout: PinDesktopLayout): PinDesktopLayout {
 
   for (let i = 0; i < MAX_PIN_COLUMNS; i++) {
     if (!cols[i]) {
-      wide[i] = false;
-      split[i] = false;
-      splitBottom[i] = null;
+      if (i === 2 && wide[0] && wide[2]) {
+        /* span-3：col2 被 col0 吞并 */
+      } else {
+        wide[i] = false;
+        split[i] = false;
+        splitBottom[i] = null;
+      }
     }
-    if (wide[i]) {
+    if (wide[i] && i !== 2) {
       split[i] = false;
       splitBottom[i] = null;
     }
@@ -287,7 +307,11 @@ function coerceLayout(raw: unknown): PinDesktopLayout | null {
       (layoutSource.cols?.[1] as PinWidgetId | null) ?? null,
       (layoutSource.cols?.[2] as PinWidgetId | null) ?? null,
     ],
-    wide: [Boolean(layoutSource.wide?.[0]), Boolean(layoutSource.wide?.[1]), false],
+    wide: [
+      Boolean(layoutSource.wide?.[0]),
+      Boolean(layoutSource.wide?.[1]),
+      Boolean(layoutSource.wide?.[2]),
+    ],
     split: [
       Boolean(layoutSource.split?.[0]),
       Boolean(layoutSource.split?.[1]),

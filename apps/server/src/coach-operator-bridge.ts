@@ -2,6 +2,7 @@ import {
   getOperatorCatalog,
   listOperatorApis,
   operatorCallApi,
+  proposeOperatorTierUpgrade,
   type OperatorCallInput,
 } from "./operator-gateway.js";
 import type { OperatorToolGateway } from "@openx/coach";
@@ -12,13 +13,19 @@ import {
   mayNeedGoalRefined,
   operatorToolsEnabled,
 } from "@openx/shared";
+import { createCoachKnowledgeGateway } from "./coach-knowledge-bridge.js";
 
 export function createCoachOperatorGateway(
   tier: OperatorTier,
   conversationId?: string,
 ): OperatorToolGateway {
+  const knowledgeGateway = conversationId
+    ? createCoachKnowledgeGateway(conversationId)
+    : null;
   return {
     tier,
+    knowledgeProjectId: knowledgeGateway?.projectId,
+    saveKnowledge: knowledgeGateway?.saveEntry,
     listApis: async (category?: string) => listOperatorApis(tier, category),
     getCatalog: async () => getOperatorCatalog(tier),
     callApi: async (input) => {
@@ -34,6 +41,24 @@ export function createCoachOperatorGateway(
         };
       }
       return { kind: "executed", result: outcome.result };
+    },
+    requestAdminAccess: async (input) => {
+      if (tier === "admin") {
+        return { kind: "executed", result: { ok: true, alreadyAdmin: true } };
+      }
+      const outcome = proposeOperatorTierUpgrade("admin", {
+        conversationId,
+        reason: input.reason,
+        summary: input.summary ?? "申请将工头自控权限升级为 admin",
+      });
+      if (outcome.kind === "pending") {
+        return {
+          kind: "pending",
+          pendingActionId: outcome.pendingActionId,
+          action: outcome.action,
+        };
+      }
+      return outcome;
     },
   };
 }

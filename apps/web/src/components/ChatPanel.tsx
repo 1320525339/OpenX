@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CoachMessageRecord, Goal, GoalRunState } from "@openx/shared";
-import { DEFAULT_EXECUTION_AGENT_ID, formatWorkOrderId } from "@openx/shared";
+import type {
+  CoachMessageRecord,
+  Goal,
+  GoalRunState,
+  KnowledgeContextSelection,
+  KnowledgeSourceRef,
+} from "@openx/shared";
+import { DEFAULT_EXECUTION_AGENT_ID, formatWorkOrderId, SYSTEM_MAIN_CONVERSATION_ID } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import { defaultExecutorChoice } from "../lib/executors";
 import { ChatWorkOrderCard } from "./ChatWorkOrderCard";
@@ -59,6 +65,7 @@ import {
 
 type Props = {
   conversationId: string;
+  projectId?: string;
   goals: Goal[];
   selectedGoal: Goal | undefined;
   runs: Record<string, GoalRunState>;
@@ -84,6 +91,7 @@ function isNearBottom(el: HTMLElement) {
 
 export function ChatPanel({
   conversationId,
+  projectId,
   goals,
   selectedGoal,
   runs,
@@ -128,6 +136,10 @@ export function ChatPanel({
   );
   const [chatSkillIds, setChatSkillIds] = useState<string[]>([]);
   const [chatMcpIds, setChatMcpIds] = useState<string[]>([]);
+  const [chatKnowledgeSelection, setChatKnowledgeSelection] =
+    useState<KnowledgeContextSelection>({ mode: "all" });
+  const [globalKnowledgeSources, setGlobalKnowledgeSources] = useState<KnowledgeSourceRef[]>([]);
+  const [projectKnowledgeSources, setProjectKnowledgeSources] = useState<KnowledgeSourceRef[]>([]);
   const [chatPermissionMode, setChatPermissionMode] = useState<
     import("@openx/shared").DispatchPermissionMode | undefined
   >(undefined);
@@ -147,12 +159,50 @@ export function ChatPanel({
     mcpIds: chatMcpIds,
     skillIds: chatSkillIds,
     permissionMode: chatPermissionMode,
+    knowledgeSelection: chatKnowledgeSelection,
   });
   chatCtxRef.current = {
     mcpIds: chatMcpIds,
     skillIds: chatSkillIds,
     permissionMode: chatPermissionMode,
+    knowledgeSelection: chatKnowledgeSelection,
   };
+
+  const isSystemMain = conversationId === SYSTEM_MAIN_CONVERSATION_ID;
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getGlobalKnowledgeSources()
+      .then((res) => {
+        if (!cancelled) setGlobalKnowledgeSources(res.sources);
+      })
+      .catch(() => {
+        if (!cancelled) setGlobalKnowledgeSources([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectKnowledgeSources([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getProjectKnowledge(projectId)
+      .then((res) => {
+        if (!cancelled) setProjectKnowledgeSources(res.sources ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectKnowledgeSources([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const syncThread = useCallback(
     async (opts?: { restorePreview?: boolean }) => {
@@ -200,10 +250,12 @@ export function ChatPanel({
       skills,
       mcps,
       permissionMode,
+      knowledgeSelection,
     }: {
       skills: Record<string, boolean>;
       mcps: Record<string, boolean>;
       permissionMode?: import("@openx/shared").DispatchPermissionMode;
+      knowledgeSelection: KnowledgeContextSelection;
     }) => {
       setChatSkillIds(
         Object.entries(skills)
@@ -216,9 +268,15 @@ export function ChatPanel({
           .map(([id]) => id),
       );
       setChatPermissionMode(permissionMode);
+      setChatKnowledgeSelection(knowledgeSelection);
     },
     [],
   );
+
+  const coachKnowledgePayload = useMemo((): KnowledgeContextSelection | undefined => {
+    if (chatKnowledgeSelection.mode === "all") return undefined;
+    return chatKnowledgeSelection;
+  }, [chatKnowledgeSelection]);
 
   useEffect(() => {
     setExecutorId(defaultExecutorChoice(executors, defaultExecutorId));
@@ -556,6 +614,7 @@ export function ChatPanel({
               goalId: selectedGoal?.id,
               skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
               mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
+              knowledge: coachKnowledgePayload,
               forceRefine: true,
             });
             await syncThread();
@@ -641,6 +700,7 @@ export function ChatPanel({
         goalId: resumeGoal?.id ?? selectedGoal?.id,
         skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
         mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
+        knowledge: coachKnowledgePayload,
         skipRefine: dismiss || undefined,
       });
       if (suggestRefine) {
@@ -683,6 +743,7 @@ export function ChatPanel({
         goalId: selectedGoal?.id,
         skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
         mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
+        knowledge: coachKnowledgePayload,
         forceRefine: true,
       });
       await syncThread();
@@ -1436,6 +1497,10 @@ export function ChatPanel({
             <div className="chat-composer">
               <ChatContextPicker
                 skillCatalog={catalogSkills}
+                projectId={projectId}
+                isSystemMain={isSystemMain}
+                globalSources={globalKnowledgeSources}
+                projectSources={projectKnowledgeSources}
                 onContextChange={handleContextChange}
               />
               {draft.startsWith("/") ? (
@@ -1480,8 +1545,12 @@ export function ChatPanel({
                       ? structuringKind === "clarify"
                         ? "准备澄清中…"
                         : "整理工单中…"
-                      : "回复中…"
-                    : "发送"}
+                      : awaitingUserGoal
+                        ? "转告施工队…"
+                        : "回复中…"
+                    : awaitingUserGoal
+                      ? "转告施工队"
+                      : "发送"}
                 </button>
               </div>
             </div>

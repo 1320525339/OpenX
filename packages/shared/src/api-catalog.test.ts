@@ -3,6 +3,7 @@ import {
   buildApiCatalogResponse,
   listApiCatalog,
   OPENX_API_CATALOG,
+  OPENX_API_CATEGORIES,
 } from "./api-catalog.js";
 
 describe("api-catalog", () => {
@@ -27,5 +28,12 @@ describe("api-catalog", () => {
     expect(res.meta.endpointCount).toBe(OPENX_API_CATALOG.length);
     expect(res.endpoints.length).toBe(OPENX_API_CATALOG.length);
     expect(res.meta.mcpServerId).toBe("openx");
+  });
+
+  it("declares every endpoint category in catalog meta", () => {
+    const declared = new Set<string>(OPENX_API_CATEGORIES);
+    for (const endpoint of OPENX_API_CATALOG) {
+      expect(declared.has(endpoint.category), endpoint.id).toBe(true);
+    }
   });
 });

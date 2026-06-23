@@ -8,21 +8,28 @@
       (function () {
         try {
           var pref = localStorage.getItem("openx.theme");
-          var dark =
-            pref === "dark" ||
-            (pref !== "light" &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
-          document.documentElement.dataset.theme = dark ? "dark" : "light";
-          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+          var resolved = pref;
+          if (pref !== "light" && pref !== "dark" && pref !== "geek") {
+            resolved = window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          }
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.style.colorScheme =
+            resolved === "light" ? "light" : "dark";
+          var accentKey =
+            resolved === "light"
+              ? "openx.theme.accent.light"
+              : resolved === "geek"
+                ? "openx.theme.accent.geek"
+                : "openx.theme.accent.dark";
+          var accent = localStorage.getItem(accentKey);
+          if (accent) {
+            document.documentElement.style.setProperty("--accent", accent);
+          }
         } catch (e) {}
       })();
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
   </head>
   <body>
     <div id="root"></div>

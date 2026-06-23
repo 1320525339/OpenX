@@ -36,7 +36,7 @@ describe("use-desktop-layout sync", () => {
     expect(resolveConsoleDock("dispatch")).toBe("fleet");
   });
 
-  it("defaults dispatch scene to tasks kanban dock", () => {
+  it("defaults dispatch scene to tasks dock", () => {
     expect(SCENE_DEFAULTS.dispatch.dockMode).toBe("tasks");
     expect(resolveConsoleDock("dispatch")).toBe("tasks");
   });

@@ -19,17 +19,23 @@ import {
   updateConversation,
   deleteConversation,
 } from "../db.js";
-import { normalizeWorkspaceRootForStorage } from "../workspace-path.js";
+import { normalizeWorkspaceRootForStorage, resolveWorkspaceRoot } from "../workspace-path.js";
 import { ensureWorkspaceSkillsLink } from "../workspace-skills-link.js";
 import {
   isSystemConversationId,
   isSystemProjectId,
 } from "../system-workspace.js";
 import { distillProjectMemory } from "../dream-job.js";
-import { readProjectMemory } from "../memory-store.js";
-import { resolveWorkspaceRoot } from "../workspace-path.js";
+import {
+  ensureRuntimeMemoryInitialized,
+  readRuntimeMemory,
+  deleteUserKnowledgeProject,
+} from "../knowledge-store.js";
+import { registerProjectKnowledgeRoutes } from "./knowledge.js";
 
 export const projectsRoutes = new Hono();
+
+registerProjectKnowledgeRoutes(projectsRoutes);
 
 function defaultProjectName(workspaceDir: string): string {
   const normalized = normalizeWorkspaceRootForStorage(workspaceDir);
@@ -86,6 +92,7 @@ projectsRoutes.delete("/:id", (c) => {
   }
   const ok = deleteProject(id);
   if (!ok) return c.json({ error: "Not found" }, 404);
+  deleteUserKnowledgeProject(id);
   return c.json({ ok: true });
 });
 
@@ -93,7 +100,8 @@ projectsRoutes.get("/:id/memory", (c) => {
   const project = getProjectById(c.req.param("id"));
   if (!project) return c.json({ error: "Not found" }, 404);
   const workspaceRoot = resolveWorkspaceRoot(project.workspaceDir);
-  const memory = readProjectMemory(workspaceRoot, project.id);
+  ensureRuntimeMemoryInitialized(workspaceRoot, project.id);
+  const memory = readRuntimeMemory(workspaceRoot, project.id);
   return c.json({ projectId: project.id, memory: memory ?? "" });
 });
 
@@ -117,6 +125,7 @@ projectsRoutes.post("/:id/conversations", async (c) => {
     createdAt: now,
     updatedAt: now,
   });
+  ensureRuntimeMemoryInitialized(resolveWorkspaceRoot(project.workspaceDir), project.id);
   return c.json({ conversation }, 201);
 });
 

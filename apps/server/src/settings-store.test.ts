@@ -248,4 +248,34 @@ describe("settings-store persistence", () => {
       patchSettings({ operatorTier: "admin" }, { baseRevision: currentRevision - 10 }),
     ).toThrow(/配置已被其他进程更新/);
   });
+
+  it("persists operatorTier to config.json", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          model: {
+            coach: "zen/big-pickle",
+            pi: "zen/big-pickle",
+            default: "zen/big-pickle",
+          },
+          operatorTier: "off",
+          revision: 0,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const { mergeAndSaveSettings, loadSettings } = await loadStore();
+    const current = loadSettings();
+    expect(current.operatorTier).toBe("off");
+
+    mergeAndSaveSettings({ ...current, operatorTier: "read" }, { baseRevision: current.revision });
+
+    const disk = JSON.parse(readFileSync(configPath, "utf8")) as { operatorTier?: string };
+    expect(disk.operatorTier).toBe("read");
+    expect(loadSettings().operatorTier).toBe("read");
+  });
 });

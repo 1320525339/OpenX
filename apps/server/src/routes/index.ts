@@ -56,7 +56,9 @@ import { detectExecutors } from "../orchestrator.js";
 import { listMcpCatalog } from "../dispatch-context.js";
 
 import { goalsRoutes } from "./goals.js";
+import { logsRoutes } from "./logs.js";
 import { projectsRoutes, conversationsRoutes } from "./projects.js";
+import { knowledgeRoutes } from "./knowledge.js";
 import { internalRoutes } from "./internal.js";
 import { cliRoutes } from "./cli.js";
 import { modelRoutes } from "./model.js";
@@ -73,7 +75,17 @@ export const app = new Hono();
 app.use(
   "*",
   cors({
-    origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+    origin: (origin) => {
+      // 开发环境 Vite dev server
+      if (origin === "http://localhost:5173" || origin === "http://127.0.0.1:5173") return origin;
+      // Tauri 桌面应用 WebView
+      if (origin === "http://tauri.localhost" || origin === "https://tauri.localhost") return origin;
+      // Tauri 自定义协议
+      if (origin?.endsWith(".tauri.localhost")) return origin;
+      // file:// 协议（Tauri 或 Electron）
+      if (origin === "null" || origin === "file://") return origin;
+      return undefined;
+    },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   }),
 );
@@ -129,10 +141,13 @@ app.get("/api/events", (c) => {
     }
 
     const clientId = addSseClient((stored) => {
-      void stream.writeSSE({
+      stream.writeSSE({
         id: String(stored.id),
         event: stored.eventType,
         data: JSON.stringify(stored.payload),
+      }).catch(() => {
+        // 客户端已断开但 abort 尚未触发，即时清理避免无效广播
+        removeSseClient(clientId);
       });
     });
 
@@ -367,8 +382,10 @@ app.post("/api/skills/sync", async (c) => {
 });
 
 app.route("/api/projects", projectsRoutes);
+app.route("/api/knowledge", knowledgeRoutes);
 app.route("/api/conversations", conversationsRoutes);
 app.route("/api/goals", goalsRoutes);
+app.route("/api/logs", logsRoutes);
 app.route("/api/cli", cliRoutes);
 app.route("/api/model", modelRoutes);
 app.route("/api/coach", coachRoutes);

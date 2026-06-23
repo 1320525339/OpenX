@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { CoachClarifyPayloadSchema } from "./coach-clarify.js";
+import { CoachDispatchPermissionPayloadSchema } from "./coach-dispatch-permission.js";
 import { ExecutorIdSchema } from "./executor.js";
 import { GoalPrioritySchema } from "./goal.js";
 import type { OperatorTier } from "./operator-tier.js";
 import type { LlmRuntimeSnapshot } from "./llm-runtime-snapshot.js";
 import type { LlmContextSettings } from "./llm-context-config.js";
+import { KnowledgeContextSelectionSchema } from "./knowledge.js";
 
 /** 来自执行器/用户的反馈，供 Coach 优化提示词 */
 export const GoalFeedbackSchema = z.object({
@@ -112,8 +114,12 @@ export type CoachChatContext = {
   coachThreadBlock?: string;
   /** 项目级 MEMORY.md 检索片段 */
   projectMemory?: string;
+  /** 当前对话启用的知识库摘要（供 LLM 感知范围） */
+  knowledgeSelectionSummary?: string;
   /** 已 Pin 的浏览器拓展槽 DOM/网络快照（工头可见） */
   browserDesktopContext?: string;
+  /** 对话栏当前派单权限（read_only / ask_write / full） */
+  dispatchPermissionMode?: "read_only" | "ask_write" | "full";
 };
 
 /** Coach 一次派单可拆分的子任务 */
@@ -167,6 +173,10 @@ export const CoachChatInputSchema = z.object({
   /** Web 客户端自动附带，用于格式化当前时刻（用户无需配置） */
   clientTimezone: z.string().optional(),
   clientLocale: z.string().optional(),
+  /** 本次对话启用的知识库范围；默认 all */
+  knowledge: KnowledgeContextSelectionSchema.optional(),
+  /** 对话栏派单权限（创建工单时写入 dispatchContext） */
+  permissionMode: z.enum(["read_only", "ask_write", "full"]).optional(),
 });
 export type CoachChatInput = z.infer<typeof CoachChatInputSchema>;
 
@@ -184,5 +194,6 @@ export const AgentChatResponseSchema = z.object({
   intent: CoachIntentSchema.optional(),
   refined: RefinedGoalSchema.optional(),
   clarify: CoachClarifyPayloadSchema.optional(),
+  dispatchPermission: CoachDispatchPermissionPayloadSchema.optional(),
 });
 export type AgentChatResponse = z.infer<typeof AgentChatResponseSchema>;

@@ -98,6 +98,7 @@
       <tr><td><code>gemini-cli</code></td><td>~102 MB</td><td>TypeScript</td><td><a href="https://github.com/google-gemini/gemini-cli">google-gemini/gemini-cli</a></td></tr>
       <tr><td><code>goose</code></td><td>~347 MB</td><td>Rust 等</td><td><a href="https://github.com/block/goose">block/goose</a></td></tr>
       <tr><td><code>openhands</code></td><td>~16 MB</td><td>Python/TS</td><td><a href="https://github.com/OpenHands/OpenHands">OpenHands/OpenHands</a></td></tr>
+      <tr><td><code>reasonix</code></td><td>~17 MB</td><td>Go + TS</td><td><a href="https://github.com/esengine/DeepSeek-Reasonix">esengine/DeepSeek-Reasonix</a> <em>（分支 <code>main-v2</code>）</em></td></tr>
     </table>
   </section>
 
@@ -318,6 +319,26 @@
         <ul class="path-list">
           <li>vendors/openhands/README.md</li>
         </ul>
+      </div>
+    </div>
+
+    <div class="card" data-cat="ref">
+      <div class="card-head">
+        <strong>Reasonix Desktop</strong>
+        <span class="tag ref">桌面壳 · Wails</span>
+        <span style="color: var(--dim); font-size: 0.8rem;">vendors/reasonix/desktop</span>
+      </div>
+      <div class="card-body">
+        <p><strong>是什么：</strong>DeepSeek 原生 coding agent（Go 1.x 重写，<code>main-v2</code>）。桌面包用 <strong>Wails v2</strong> 嵌 React 前端，Go <code>control.Controller</code> 直接绑定 webview（无 HTTP 中转），与 TUI/HTTP server 共用同一内核。</p>
+        <p><strong>OpenX：</strong>对照 <code>apps/desktop</code>（Tauri + sidecar）的<strong>桌面壳 + 事件流</strong>设计：bridge 调用、<code>agent:event</code> 流式 UI、工具卡片与 diff 展示。Executor 层可参考其插件/MCP 与 prefix-cache 会话策略，但不建议整仓依赖。</p>
+        <h3>建议阅读路径</h3>
+        <ul class="path-list">
+          <li>vendors/reasonix/desktop/README.md — 架构图与 wails dev/build</li>
+          <li>vendors/reasonix/desktop/frontend/src/ — React UI 与 bridge.ts</li>
+          <li>vendors/reasonix/internal/control/ — 共享 Go 内核</li>
+          <li>vendors/reasonix/REASONIX.md — 产品规格</li>
+        </ul>
+        <p><strong>安装：</strong><code>npm i -g reasonix</code>（1.0+ 为 Go 二进制）；桌面 Release 见 GitHub <code>desktop-v*</code> tags。</p>
       </div>
     </div>
   </section>

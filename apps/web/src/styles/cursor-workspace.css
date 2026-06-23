@@ -244,6 +244,28 @@ body.split-dragging .cursor-workspace .pane-divider::after {
   border-color: var(--primary-hover);
 }
 
+.cursor-workspace .tasks-panel-pin .tasks-desk-head,
+.cursor-workspace .tasks-panel-pin .goal-card-pin {
+  padding-inline: 0.35rem;
+}
+
+.cursor-workspace .workspace-pane-detail,
+.cursor-workspace .workspace-pane-preview {
+  padding-inline: var(--workspace-grid-pad, 0.75rem);
+}
+
+.cursor-workspace .task-detail-panel-pin .panel-scroll {
+  padding-top: 0.35rem;
+}
+
+.cursor-workspace .goal-card-pin {
+  border-radius: 0;
+}
+
+.cursor-workspace .goal-card-pin.selected .progress-bar span {
+  background: var(--accent, var(--text-dim));
+}
+
 .cursor-workspace .tasks-panel-footer {
   padding-top: 0.35rem;
   border-top: 0;
@@ -294,10 +316,28 @@ body.split-dragging .cursor-workspace .pane-divider::after {
 .cursor-workspace .chat-bubble.coach {
   background: transparent;
   border: 0;
-  padding: 0;
+  padding: 0.45rem 0.55rem 0.6rem;
   color: var(--text);
   width: 100%;
   max-width: 100%;
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+.cursor-workspace .chat-bubble.coach .chat-markdown,
+.cursor-workspace .chat-bubble.coach .chat-plain-text,
+.cursor-workspace .chat-bubble.coach .chat-coach-message {
+  overflow: visible;
+}
+
+.cursor-workspace .chat-bubble.coach .chat-markdown > :last-child {
+  margin-bottom: 0.2em;
+}
+
+.cursor-workspace .chat-bubble.coach .chat-markdown ul,
+.cursor-workspace .chat-bubble.coach .chat-markdown ol {
+  margin: 0.4em 0 0.5em;
+  padding-left: 1.4em;
 }
 
 .cursor-workspace .chat-bubble.user {

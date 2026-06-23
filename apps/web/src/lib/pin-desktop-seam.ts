@@ -1,8 +1,13 @@
 import {
+  columnSpan,
   emptyPinLayout,
+  isColumnMerged,
   MAX_PIN_COLUMNS,
   normalizeLayout,
-  setPinWide,
+  setPinSpan,
+  setWidgetSpan,
+  shrinkCol1WideToSingle,
+  widgetColumnSpan,
   type PinDesktopLayout,
   type PinWidgetId,
 } from "./pin-desktop";
@@ -28,9 +33,12 @@ export type SeamResizePreview = {
   commitRightWide: boolean;
   consumeRight: boolean;
   consumeLeft: boolean;
+  /** 第一栏 boundary-1 接缝：对称 snap 后的目标档位 */
+  commitSpan?: 1 | 2 | 3;
   oneWidth: number;
   pairLeft: number;
   pairTotal: number;
+  spanRight: number;
   gapPx: number;
   snapLeft: number;
   snapRight: number;
@@ -53,7 +61,16 @@ export function buildPinSeams(layout: PinDesktopLayout): PinSeam[] {
   }
 
   if (norm.wide[0] && norm.cols[0]) {
-    if (norm.cols[2] && !norm.cols[1]) {
+    if (norm.wide[2]) {
+      seams.push({
+        boundary: 1,
+        leftCol: 0,
+        leftWidget: norm.cols[0],
+        pairRightCol: 2,
+        rightWidget: null,
+        dual: true,
+      });
+    } else if (norm.cols[2] && !norm.cols[1]) {
       seams.push({
         boundary: 1,
         leftCol: 0,
@@ -67,8 +84,8 @@ export function buildPinSeams(layout: PinDesktopLayout): PinSeam[] {
         boundary: 1,
         leftCol: 0,
         leftWidget: norm.cols[0],
-        pairRightCol: 1,
-        rightWidget: null,
+        pairRightCol: norm.cols[1] != null ? 1 : 2,
+        rightWidget: norm.cols[1],
         dual: true,
       });
     }
@@ -127,13 +144,20 @@ export function defaultSeamBoundaryX(
   const { colWidth, colStart } = columnGeometry(gridRect, gapPx);
   const pairLeft = colStart(seam.leftCol);
   const oneWidth = colWidth;
-  const pairTotal = colWidth * 2 + gapPx;
   const segments = buildPinSegmentsFromLayout(layout);
   const leftSeg = segments.find((s) => s.widget === seam.leftWidget);
-  const leftStoredWide = leftSeg?.colspan === 2;
+  const leftSpan = leftSeg?.colspan ?? 1;
   const widgetCol = widgetLogicalCol(layout, seam.leftWidget);
 
-  if (leftStoredWide) return pairLeft + pairTotal;
+  if (leftSpan >= 2) {
+    const spanCols = leftSpan;
+    const edge = pairLeft + spanCols * oneWidth + (spanCols - 1) * gapPx;
+    // span-3 静止时把接缝放在 2 列档（避免贴右缘被 overflow:hidden 裁切）
+    if (leftSpan === 3) {
+      return pairLeft + 2 * oneWidth + gapPx;
+    }
+    return edge;
+  }
   if (widgetCol === seam.pairRightCol) return colStart(seam.pairRightCol);
   if (seam.dual) return pairLeft + oneWidth + gapPx / 2;
   return pairLeft + oneWidth;
@@ -227,7 +251,11 @@ export function isSeamVisuallyPlaced(
 
   if (leftCell && rightCell) {
     if (seam.rightWidget && isWidgetWide(layout, seam.rightWidget)) {
-      return false;
+      // boundary-0：左窄右宽时仍显示接缝，用于 1→2 挤压宽卡
+      const norm = normalizeLayout(layout);
+      if (!(seam.boundary === 0 && !norm.wide[seam.leftCol])) {
+        return false;
+      }
     }
     const gap = rightCell.left - leftCell.right;
     return gap >= -2;
@@ -271,15 +299,147 @@ export function seamLineLeftPx(params: {
 
 function buildPinSegmentsFromLayout(layout: PinDesktopLayout) {
   const norm = normalizeLayout(layout);
-  const segments: { widget: PinWidgetId; colspan: 1 | 2 }[] = [];
+  const segments: { widget: PinWidgetId; colspan: 1 | 2 | 3 }[] = [];
   for (let col = 0; col < MAX_PIN_COLUMNS; col++) {
-    if (col === 1 && norm.wide[0]) continue;
-    if (col === 2 && norm.wide[1]) continue;
+    if (isColumnMerged(norm, col)) continue;
     const widget = norm.cols[col];
     if (!widget) continue;
-    segments.push({ widget, colspan: col < 2 && norm.wide[col] ? 2 : 1 });
+    segments.push({ widget, colspan: columnSpan(norm, col) });
   }
   return segments;
+}
+
+/** 按卡片锚点列与右缘位置 snap 到 1/2/3 列档位（任意锚点均可扩至全宽） */
+export function resolveWidgetSpanTier(params: {
+  anchorCol: number;
+  boundaryX: number;
+  pairLeft: number;
+  oneWidth: number;
+  gapPx: number;
+  gridSpanRight: number;
+}): 1 | 2 | 3 {
+  const left = params.pairLeft;
+  const snap1 = left + params.oneWidth;
+  const snap2 = left + 2 * params.oneWidth + params.gapPx;
+  const snap3 = params.gridSpanRight;
+  const snaps: Array<{ tier: 1 | 2 | 3; x: number }> = [
+    { tier: 1, x: snap1 },
+    { tier: 2, x: snap2 },
+    { tier: 3, x: snap3 },
+  ];
+  let best = snaps[0]!;
+  let bestDist = Math.abs(params.boundaryX - best.x);
+  for (const snap of snaps) {
+    const dist = Math.abs(params.boundaryX - snap.x);
+    if (dist < bestDist) {
+      best = snap;
+      bestDist = dist;
+    }
+  }
+  return best.tier;
+}
+
+function maxLeftExpandSpan(norm: PinDesktopLayout, anchorCol: number): 1 | 2 | 3 {
+  if (anchorCol === 2 && norm.cols[0] == null && !norm.wide[0]) return 3;
+  if (anchorCol >= 1) return 2;
+  return 1;
+}
+
+/** 右栏卡片向左扩：根据 seam 位置 snap 到 1/2/3 列档位 */
+export function resolveWidgetLeftExpandTier(params: {
+  boundaryX: number;
+  anchorCol: number;
+  colStart: (col: number) => number;
+  maxSpan: 1 | 2 | 3;
+  defaultX: number;
+  snapRight: number;
+  oneWidth: number;
+}): 1 | 2 | 3 {
+  const expanding =
+    params.boundaryX < params.defaultX || params.boundaryX >= params.snapRight;
+  if (!expanding) return 1;
+
+  if (
+    params.maxSpan >= 3 &&
+    params.boundaryX <= params.colStart(0) + params.oneWidth / 2
+  ) {
+    return 3;
+  }
+  if (
+    params.maxSpan >= 2 &&
+    params.boundaryX <= params.colStart(params.anchorCol - 1) + params.oneWidth / 2
+  ) {
+    return 2;
+  }
+  if (params.boundaryX >= params.snapRight) return params.maxSpan >= 2 ? 2 : 1;
+  return 1;
+}
+
+/** @deprecated 使用 resolveWidgetSpanTier */
+export function resolveCol0SpanTier(preview: {
+  boundaryX: number;
+  pairLeft: number;
+  oneWidth: number;
+  gapPx: number;
+  spanRight: number;
+}): 1 | 2 | 3 {
+  return resolveWidgetSpanTier({
+    anchorCol: 0,
+    boundaryX: preview.boundaryX,
+    pairLeft: preview.pairLeft,
+    oneWidth: preview.oneWidth,
+    gapPx: preview.gapPx,
+    gridSpanRight: preview.spanRight,
+  });
+}
+
+function seamExpandTier(preview: SeamResizePreview): 1 | 2 | 3 {
+  if (preview.commitSpan != null) return preview.commitSpan;
+  return preview.commitLeftWide ? 2 : 1;
+}
+
+function pickPeakSeamPreview(
+  prev: SeamResizePreview,
+  next: SeamResizePreview,
+): SeamResizePreview {
+  const prevTier = seamExpandTier(prev);
+  const nextTier = seamExpandTier(next);
+  if (nextTier !== prevTier) return nextTier > prevTier ? next : prev;
+  return next.boundaryX >= prev.boundaryX ? next : prev;
+}
+
+function pickMinSeamPreview(
+  prev: SeamResizePreview,
+  next: SeamResizePreview,
+): SeamResizePreview {
+  const prevTier = seamExpandTier(prev);
+  const nextTier = seamExpandTier(next);
+  if (nextTier !== prevTier) return nextTier < prevTier ? next : prev;
+  return next.boundaryX <= prev.boundaryX ? next : prev;
+}
+
+export { pickPeakSeamPreview, pickMinSeamPreview };
+
+/** 松手提交：扩宽取 peak、缩窄取 min，避免松手回弹丢档位 */
+export function pickSeamCommitPreview(
+  startPreview: SeamResizePreview,
+  minPreview: SeamResizePreview,
+  maxPreview: SeamResizePreview,
+  releasePreview: SeamResizePreview | null,
+): SeamResizePreview {
+  const release = releasePreview ?? maxPreview;
+  const startTier = seamExpandTier(startPreview);
+  const releaseTier = seamExpandTier(release);
+  const minTier = seamExpandTier(minPreview);
+  const maxTier = seamExpandTier(maxPreview);
+
+  if (releaseTier < startTier || (releaseTier === startTier && minTier < startTier)) {
+    return minTier < startTier ? minPreview : release;
+  }
+  if (releaseTier > startTier || (releaseTier === startTier && maxTier > startTier)) {
+    return maxTier > startTier ? maxPreview : release;
+  }
+  return release;
 }
 
 /** 将贴边拖拽的指针 X 映射到接缝坐标（修正左右反向） */
@@ -288,41 +448,9 @@ export function resolveSeamPointerX(params: {
   layout: PinDesktopLayout;
   clientX: number;
   gridRect: DOMRect;
-  edge?: "left" | "right";
-  actingWidget?: PinWidgetId;
   gapPx?: number;
 }): number {
-  const { seam, clientX, gridRect, edge, layout } = params;
-  if (!edge || !params.actingWidget) return clientX;
-
-  const gapPx = params.gapPx ?? 8;
-  const norm = normalizeLayout(layout);
-  const { colWidth, colStart } = columnGeometry(gridRect, gapPx);
-  const pairLeft = colStart(seam.leftCol);
-  const pairTotal = colWidth * 2 + gapPx;
-  const pairRight = pairLeft + pairTotal;
-  const mirrorX = pairRight - (clientX - pairLeft);
-  const actor = params.actingWidget;
-
-  // 右缘：卡片是接缝右卡 → 指针右移应让右卡变宽（边界左移）
-  if (edge === "right" && seam.rightWidget === actor) {
-    return mirrorX;
-  }
-
-  // 左缘：卡片是接缝右卡 → 指针左移应让右卡变窄（边界右移）
-  if (edge === "left" && seam.rightWidget === actor) {
-    return mirrorX;
-  }
-
-  // 左缘：宽卡左缘控制的是对侧边界，需镜像
-  if (edge === "left" && seam.leftWidget === actor) {
-    const actorCol = widgetLogicalCol(norm, actor);
-    if (actorCol >= 0 && norm.wide[actorCol] && seam.boundary === 1) {
-      return mirrorX;
-    }
-  }
-
-  return clientX;
+  return params.clientX;
 }
 
 function seamResizeBounds(
@@ -336,19 +464,80 @@ function seamResizeBounds(
   const pairLeft = colStart(seam.leftCol);
   const oneWidth = colWidth;
 
-  const leftWide =
-    seam.leftWidget != null &&
-    norm != null &&
-    isWidgetWide(norm, seam.leftWidget);
-  const rightWide =
-    seam.rightWidget != null &&
-    norm != null &&
-    isWidgetWide(norm, seam.rightWidget);
+  const leftCol =
+    seam.leftWidget != null && norm != null
+      ? widgetLogicalCol(norm, seam.leftWidget)
+      : -1;
+  const leftSpan = leftCol >= 0 ? columnSpan(norm!, leftCol) : 1;
+  const leftWide = leftSpan >= 2;
+  const rightCol =
+    seam.rightWidget != null && norm != null
+      ? widgetLogicalCol(norm, seam.rightWidget)
+      : -1;
+  const rightWide = rightCol >= 0 ? columnSpan(norm!, rightCol) >= 2 : false;
+
+  if (
+    norm &&
+    seam.boundary === 0 &&
+    seam.leftCol === 0 &&
+    norm.cols[0] === seam.leftWidget &&
+    !norm.wide[0]
+  ) {
+    const spanRight = colStart(2) + oneWidth;
+    const minX = colStart(0) + oneWidth;
+    return {
+      pairLeft: colStart(0),
+      pairTotal: spanRight - colStart(0),
+      minX,
+      maxX: spanRight,
+      snapLeft: colMid(0),
+      snapRight: colMid(1),
+      spanRight,
+      rightWide: false as const,
+      oneWidth,
+      gapPx,
+    };
+  }
+
+  if (leftWide && norm?.wide[0] && norm.wide[2]) {
+    const spanRight = colStart(2) + oneWidth;
+    const minX = colStart(seam.leftCol) + oneWidth;
+    return {
+      pairLeft,
+      pairTotal: spanRight - pairLeft,
+      minX,
+      maxX: spanRight,
+      snapLeft: colMid(seam.leftCol),
+      snapRight: colMid(1),
+      spanRight,
+      rightWide: false as const,
+      oneWidth,
+      gapPx,
+    };
+  }
+
+  if (leftWide && !seam.rightWidget && norm && seam.leftCol === 0 && !norm.wide[2]) {
+    const spanRight = colStart(2) + oneWidth;
+    const minX = colStart(seam.leftCol) + oneWidth;
+    return {
+      pairLeft,
+      pairTotal: spanRight - pairLeft,
+      minX,
+      maxX: spanRight,
+      snapLeft: colMid(seam.leftCol),
+      snapRight: colMid(1),
+      spanRight,
+      rightWide: false as const,
+      oneWidth,
+      gapPx,
+    };
+  }
 
   if (leftWide && seam.rightWidget && !rightWide) {
     const rCol = widgetLogicalCol(norm!, seam.rightWidget!)!;
     const rColStart = colStart(rCol);
-    const spanRight = rColStart + oneWidth;
+    const gridRight = colStart(2) + oneWidth;
+    const spanRight = seam.leftCol === 0 ? gridRight : rColStart + oneWidth;
     const minX = colStart(seam.leftCol) + oneWidth;
     const maxX = spanRight;
     return {
@@ -357,7 +546,7 @@ function seamResizeBounds(
       minX,
       maxX,
       snapLeft: colMid(seam.leftCol),
-      snapRight: (minX + rColStart) / 2,
+      snapRight: seam.leftCol === 0 && rCol === 2 ? gridRight - oneWidth / 2 : (minX + rColStart) / 2,
       spanRight,
       rightWide: false as const,
       oneWidth,
@@ -379,6 +568,58 @@ function seamResizeBounds(
       snapRight: (minX + maxX) / 2,
       spanRight,
       rightWide: true as const,
+      oneWidth,
+      gapPx,
+    };
+  }
+
+  const anchorCol =
+    norm && seam.leftWidget != null ? widgetLogicalCol(norm, seam.leftWidget) : -1;
+  if (
+    norm &&
+    seam.boundary === 1 &&
+    anchorCol >= 0 &&
+    anchorCol <= 1 &&
+    norm.cols[anchorCol] === seam.leftWidget &&
+    !seam.rightWidget
+  ) {
+    const gridRight = colStart(2) + oneWidth;
+    const anchorLeft = colStart(anchorCol);
+    const minX = anchorLeft + oneWidth;
+    return {
+      pairLeft: anchorLeft,
+      pairTotal: gridRight - anchorLeft,
+      minX,
+      maxX: gridRight,
+      snapLeft: colMid(Math.max(0, anchorCol - 1)),
+      snapRight: colMid(Math.min(2, anchorCol + 1)),
+      spanRight: gridRight,
+      rightWide: false as const,
+      oneWidth,
+      gapPx,
+    };
+  }
+
+  if (
+    norm &&
+    seam.boundary === 1 &&
+    leftCol === 2 &&
+    seam.leftCol !== leftCol &&
+    norm.cols[2] === seam.leftWidget &&
+    !leftWide
+  ) {
+    const maxSpan = maxLeftExpandSpan(norm, leftCol);
+    const gridRight = colStart(2) + oneWidth;
+    const minX = maxSpan >= 3 ? colStart(0) : colStart(1);
+    return {
+      pairLeft: colStart(seam.leftCol),
+      pairTotal: gridRight - colStart(seam.leftCol),
+      minX,
+      maxX: gridRight,
+      snapLeft: colMid(seam.leftCol),
+      snapRight: colMid(2),
+      spanRight: gridRight,
+      rightWide: false as const,
       oneWidth,
       gapPx,
     };
@@ -407,8 +648,6 @@ export function computeSeamResizePreview(params: {
   gridRect: DOMRect;
   gapPx?: number;
   layout?: PinDesktopLayout;
-  edge?: "left" | "right";
-  actingWidget?: PinWidgetId;
 }): SeamResizePreview | null {
   const { seam, gridRect, layout } = params;
   const gapPx = params.gapPx ?? 8;
@@ -420,8 +659,6 @@ export function computeSeamResizePreview(params: {
           clientX: params.clientX,
           gridRect,
           gapPx,
-          edge: params.edge,
-          actingWidget: params.actingWidget,
         })
       : params.clientX;
   if (seam.pairRightCol >= MAX_PIN_COLUMNS) return null;
@@ -443,18 +680,74 @@ export function computeSeamResizePreview(params: {
   const boundaryX = Math.max(minX, Math.min(maxX, clientX));
   const leftWidth = boundaryX - pairLeft;
   const rightWidth = Math.max(0, spanRight - boundaryX);
-  const commitLeftWide = boundaryX >= snapRight;
+
+  const norm = layout ? normalizeLayout(layout) : null;
+  const anchorCol =
+    norm && seam.leftWidget != null ? widgetLogicalCol(norm, seam.leftWidget) : -1;
+  const { colStart } = columnGeometry(gridRect, gapPx);
+  const leftExpandMax =
+    norm &&
+    anchorCol >= 0 &&
+    anchorCol !== seam.leftCol &&
+    norm.cols[anchorCol] === seam.leftWidget &&
+    seam.boundary === 1
+      ? maxLeftExpandSpan(norm, anchorCol)
+      : null;
+  const leftExpandDefaultX = leftExpandMax != null ? colStart(anchorCol) : null;
+  const leftExpandTier =
+    leftExpandMax != null && leftExpandDefaultX != null
+      ? resolveWidgetLeftExpandTier({
+          boundaryX,
+          anchorCol,
+          colStart,
+          maxSpan: leftExpandMax,
+          defaultX: leftExpandDefaultX,
+          snapRight,
+          oneWidth,
+        })
+      : undefined;
+  const tierPairLeft =
+    anchorCol >= 0 && anchorCol !== seam.leftCol
+      ? pairLeft + oneWidth + gap
+      : pairLeft;
+  const widgetSpanTier =
+    norm &&
+    anchorCol >= 0 &&
+    anchorCol === seam.leftCol &&
+    norm.cols[anchorCol] === seam.leftWidget &&
+    (seam.boundary === 1 || (seam.boundary === 0 && anchorCol === 0))
+      ? resolveWidgetSpanTier({
+          anchorCol,
+          boundaryX,
+          pairLeft: tierPairLeft,
+          oneWidth,
+          gapPx: gap,
+          gridSpanRight: spanRight,
+        })
+      : undefined;
+
+  const col0Tier = widgetSpanTier;
+
+  const commitLeftWide = leftExpandTier
+    ? leftExpandTier >= 2
+    : col0Tier
+      ? col0Tier >= 2
+      : boundaryX >= snapRight;
   const commitRightWide =
     Boolean(seam.rightWidget) && boundaryX <= snapLeft;
-  const leftWidePair =
-    layout != null &&
-    seam.rightWidget != null &&
-    seam.leftWidget != null &&
-    isWidgetWide(normalizeLayout(layout), seam.leftWidget) &&
-    !isWidgetWide(normalizeLayout(layout), seam.rightWidget);
   const consumeRight =
-    (commitLeftWide && seam.rightWidget != null && !rightWide && !leftWidePair) ||
-    (leftWidePair && seam.rightWidget != null && rightWidth <= 1);
+    (col0Tier === 3 && seam.rightWidget != null && !rightWide) ||
+    (commitLeftWide &&
+      col0Tier == null &&
+      seam.rightWidget != null &&
+      !rightWide &&
+      !(
+        norm &&
+        seam.leftWidget != null &&
+        isWidgetWide(norm, seam.leftWidget) &&
+        seam.rightWidget != null &&
+        !isWidgetWide(norm, seam.rightWidget)
+      ));
   const consumeLeft = commitRightWide && seam.leftWidget != null;
 
   return {
@@ -465,9 +758,11 @@ export function computeSeamResizePreview(params: {
     commitRightWide,
     consumeRight,
     consumeLeft,
+    commitSpan: leftExpandTier ?? col0Tier,
     oneWidth,
     pairLeft,
     pairTotal,
+    spanRight,
     gapPx: gap,
     snapLeft,
     snapRight,
@@ -496,12 +791,60 @@ function isWidgetWide(layout: PinDesktopLayout, widget: PinWidgetId): boolean {
   return normalizeLayout(layout).wide[col];
 }
 
-/** 提交接缝改宽（含左右双向吞并）；预览与当前布局一致时不改动 */
+/** boundary-0 右拖：左/中均为单列且第三栏空时，优先扩第二栏（避免误扩第一栏把中列挤到第三栏） */
+function preferBoundary0MiddleExpand(
+  norm: PinDesktopLayout,
+  seam: PinSeam,
+  target: 1 | 2 | 3,
+): PinDesktopLayout | null {
+  if (target !== 2) return null;
+  if (seam.boundary !== 0 || seam.leftCol !== 0 || !seam.rightWidget) return null;
+  if (norm.wide[0] || norm.wide[1]) return null;
+  if (isWidgetWide(norm, seam.rightWidget)) return null;
+  if (widgetLogicalCol(norm, seam.rightWidget) !== 1) return null;
+  if (norm.cols[2] != null || norm.split[2]) return null;
+  return setPinSpan(norm, 1, 2);
+}
+
+/** 提交接缝改宽：任意档位变更统一走 setWidgetSpan */
 export function applySeamResizeCommit(
   layout: PinDesktopLayout,
   seam: PinSeam,
   preview: SeamResizePreview | boolean,
 ): PinDesktopLayout {
+  const norm = normalizeLayout(layout);
+
+  if (typeof preview !== "boolean" && seam.leftWidget) {
+    const anchorCol = widgetLogicalCol(norm, seam.leftWidget);
+    if (
+      !preview.commitRightWide &&
+      anchorCol >= 0 &&
+      anchorCol === seam.leftCol &&
+      norm.cols[anchorCol] === seam.leftWidget &&
+      (seam.boundary === 1 || (seam.boundary === 0 && anchorCol === 0))
+    ) {
+      const tierPairLeft =
+        anchorCol !== seam.leftCol
+          ? preview.pairLeft + preview.oneWidth + preview.gapPx
+          : preview.pairLeft;
+      const target = preview.commitSpan ?? resolveWidgetSpanTier({
+        anchorCol,
+        boundaryX: preview.boundaryX,
+        pairLeft: tierPairLeft,
+        oneWidth: preview.oneWidth,
+        gapPx: preview.gapPx,
+        gridSpanRight: preview.spanRight,
+      });
+      const current = widgetColumnSpan(norm, seam.leftWidget);
+      if (target !== current) {
+        const middleExpand = preferBoundary0MiddleExpand(norm, seam, target);
+        if (middleExpand) return middleExpand;
+        return setWidgetSpan(norm, seam.leftWidget, target);
+      }
+      return norm;
+    }
+  }
+
   const commit =
     typeof preview === "boolean"
       ? { commitLeftWide: preview, commitRightWide: false }
@@ -510,14 +853,11 @@ export function applySeamResizeCommit(
           commitRightWide: preview.commitRightWide,
         };
 
-  const norm = normalizeLayout(layout);
-
-  if (!commit.commitLeftWide && !commit.commitRightWide) {
-    if (!norm.wide[seam.leftCol]) return norm;
+  if (commit.commitLeftWide && seam.boundary === 0 && norm.cols[seam.leftCol] === seam.leftWidget) {
+    const middleExpand = preferBoundary0MiddleExpand(norm, seam, 2);
+    if (middleExpand) return middleExpand;
+    return setPinSpan(norm, seam.leftCol, 2);
   }
-
-  const atLeft = norm.cols[seam.leftCol] === seam.leftWidget;
-  const atRight = norm.cols[seam.pairRightCol] === seam.leftWidget;
 
   if (commit.commitRightWide && seam.rightWidget) {
     const cols = [...norm.cols] as PinDesktopLayout["cols"];
@@ -530,31 +870,32 @@ export function applySeamResizeCommit(
     return normalizeLayout({ ...emptyPinLayout(), cols, wide });
   }
 
-  if (
-    typeof preview !== "boolean" &&
-    preview.consumeRight &&
-    seam.rightWidget &&
-    isWidgetWide(norm, seam.leftWidget) &&
-    !isWidgetWide(norm, seam.rightWidget)
-  ) {
-    const cols = [...norm.cols] as PinDesktopLayout["cols"];
-    const wide = [false, false, false] as PinDesktopLayout["wide"];
-    cols[seam.leftCol] = seam.leftWidget;
-    cols[1] = null;
-    cols[2] = null;
-    wide[seam.leftCol] = true;
-    return normalizeLayout({ ...emptyPinLayout(), cols, wide });
-  }
+  const atLeft = norm.cols[seam.leftCol] === seam.leftWidget;
+  const atRight = norm.cols[seam.pairRightCol] === seam.leftWidget;
 
   if (!atLeft && atRight) {
     if (commit.commitLeftWide) {
+      const target =
+        typeof preview !== "boolean" && preview.commitSpan != null
+          ? preview.commitSpan
+          : 2;
+      if (target === 3) {
+        return setWidgetSpan(norm, seam.leftWidget, 3);
+      }
       const cols = [...norm.cols] as PinDesktopLayout["cols"];
       cols[seam.leftCol] = seam.leftWidget;
       cols[seam.pairRightCol] = null;
-      return setPinWide({ ...norm, cols }, seam.leftCol, true);
+      const wide = [false, false, false] as PinDesktopLayout["wide"];
+      return setPinSpan({ ...norm, cols, wide }, seam.leftCol, 2);
     }
     if (norm.wide[seam.leftCol] && norm.cols[seam.leftCol] === seam.leftWidget) {
-      return setPinWide(norm, seam.leftCol, false);
+      if (typeof preview !== "boolean" && preview.commitSpan === 1) {
+        return setWidgetSpan(norm, seam.leftWidget, 1);
+      }
+      if (seam.leftCol === 1 && !norm.cols[0] && !norm.wide[0]) {
+        return shrinkCol1WideToSingle(norm);
+      }
+      return setWidgetSpan(norm, seam.leftWidget, 1);
     }
     return norm;
   }
@@ -573,85 +914,45 @@ export function applySeamResizeCommit(
     return normalizeLayout({ ...emptyPinLayout(), cols, wide });
   }
 
-  if (
-    !commit.commitLeftWide &&
-    seam.rightWidget &&
-    isWidgetWide(norm, seam.leftWidget) &&
-    !isWidgetWide(norm, seam.rightWidget)
-  ) {
-    const cols = [...norm.cols] as PinDesktopLayout["cols"];
-    const wide = [false, false, false] as PinDesktopLayout["wide"];
-    cols[seam.leftCol] = seam.leftWidget;
-    cols[1] = seam.rightWidget;
-    cols[2] = null;
-    wide[1] = true;
-    return normalizeLayout({ ...emptyPinLayout(), cols, wide });
+  if (typeof preview === "boolean" && !preview && norm.wide[seam.leftCol]) {
+    return setWidgetSpan(norm, seam.leftWidget!, 1);
   }
 
-  return setPinWide(norm, seam.leftCol, commit.commitLeftWide);
-}
-
-/** 卡片左缘对应的可拖拽接缝（用于贴边热区） */
-export function seamForWidgetLeftEdge(
-  layout: PinDesktopLayout,
-  widget: PinWidgetId,
-): PinSeam | null {
-  const norm = normalizeLayout(layout);
-  const col = widgetLogicalCol(norm, widget);
-  if (col <= 0) return null;
-
-  const seams = buildPinSeams(norm);
-
-  if (norm.wide[col]) {
-    const neighbor = seams.find((s) => s.boundary === 0 && s.rightWidget === widget);
-    if (neighbor) return neighbor;
-    return seams.find((s) => s.leftWidget === widget && s.boundary === 1) ?? null;
-  }
-
-  for (const seam of seams) {
-    if (seam.rightWidget === widget) {
-      if (isWidgetWide(norm, widget)) continue;
-      return seam;
+  if (typeof preview !== "boolean") {
+    const wantsMiddleWide =
+      preview.commitLeftWide || preview.boundaryX >= preview.snapRight;
+    if (
+      seam.boundary === 1 &&
+      seam.leftCol === 1 &&
+      norm.cols[1] === seam.leftWidget &&
+      !norm.wide[1] &&
+      wantsMiddleWide
+    ) {
+      const expanded = setWidgetSpan(norm, seam.leftWidget, 2);
+      if (widgetColumnSpan(expanded, seam.leftWidget) >= 2) return expanded;
     }
     if (
-      seam.leftWidget === widget &&
-      col === seam.pairRightCol &&
-      !seam.rightWidget
+      seam.boundary === 0 &&
+      seam.leftCol === 0 &&
+      seam.rightWidget &&
+      widgetLogicalCol(norm, seam.rightWidget) === 1 &&
+      !norm.wide[0] &&
+      !norm.wide[1] &&
+      norm.cols[2] == null &&
+      ((preview.commitSpan ?? 0) >= 2 || preview.commitLeftWide)
     ) {
-      return seam;
+      const expanded = preferBoundary0MiddleExpand(norm, seam, 2);
+      if (expanded?.wide[1]) return expanded;
     }
   }
-  return null;
-}
 
-/** 卡片右缘对应的可拖拽接缝（宽卡缩回 1 格 / 向右扩张） */
-export function seamForWidgetRightEdge(
-  layout: PinDesktopLayout,
-  widget: PinWidgetId,
-): PinSeam | null {
-  const norm = normalizeLayout(layout);
-  const col = widgetLogicalCol(norm, widget);
-  if (col < 0) return null;
-
-  const seams = buildPinSeams(norm);
-  for (const seam of seams) {
-    if (seam.leftWidget !== widget) continue;
-
-    if (norm.wide[seam.leftCol] && seam.boundary === 1) {
-      return seam;
-    }
-
-    if (!norm.wide[col] && seam.boundary === 0 && !seam.rightWidget) {
-      return seam;
-    }
-
-    if (!norm.wide[col] && seam.boundary === 1 && !seam.rightWidget) {
-      return seam;
-    }
-
-    if (!norm.wide[col] && seam.rightWidget) {
-      return seam;
+  if (typeof preview !== "boolean" && seam.leftWidget && preview.commitSpan != null) {
+    const current = widgetColumnSpan(norm, seam.leftWidget);
+    if (preview.commitSpan !== current) {
+      return setWidgetSpan(norm, seam.leftWidget, preview.commitSpan);
     }
   }
-  return null;
+
+  return norm;
 }
+

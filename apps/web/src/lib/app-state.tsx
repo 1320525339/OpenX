@@ -42,6 +42,7 @@ import {
 import { islandFromBroadcast, islandFromGoalChange } from "./island-payload";
 import {
   bindIslandQueueHandlers,
+  clearIslandSeenDedupe,
   hydrateIslandSeenFromServer,
   isIslandCatchupMode,
   requestIsland,
@@ -68,7 +69,6 @@ export type CoachReplyEvent = {
   intent?: CoachIntent;
   refined?: RefinedGoal;
   clarify?: import("@openx/shared").CoachClarifyPayload;
-  suggestRefine?: boolean;
   meta?: { llmError?: string; quotaExceeded?: boolean };
 };
 
@@ -158,7 +158,19 @@ type Action =
     }
   | { type: "coach_message"; message: CoachMessageRecord }
   | { type: "open_goal_detail"; id: string }
-  | { type: "close_goal_detail" };
+  | { type: "close_goal_detail" }
+  | { type: "trim_runtime_cache" };
+
+const MAX_HYDRATED_RUN_IDS = 120;
+const MAX_RETAINED_RUNS = 48;
+
+function trimHydratedRunIds(set: Set<string>) {
+  while (set.size > MAX_HYDRATED_RUN_IDS) {
+    const first = set.values().next().value;
+    if (!first) break;
+    set.delete(first);
+  }
+}
 
 const LAST_CONV_KEY = "openx.lastConversationId";
 
@@ -438,6 +450,27 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, detailGoalId: action.id, selectedId: action.id };
     case "close_goal_detail":
       return { ...state, detailGoalId: null };
+    case "trim_runtime_cache": {
+      const keepRunIds = new Set<string>();
+      if (state.selectedId) keepRunIds.add(state.selectedId);
+      if (state.detailGoalId) keepRunIds.add(state.detailGoalId);
+      for (const goal of state.goals) {
+        if (goal.status === "running") keepRunIds.add(goal.id);
+        if (keepRunIds.size >= MAX_RETAINED_RUNS) break;
+      }
+      const runs: Record<string, GoalRunState> = {};
+      for (const id of keepRunIds) {
+        const run = state.runs[id];
+        if (run) runs[id] = run;
+      }
+      return {
+        ...state,
+        runs,
+        logs: state.logs.slice(-300),
+        coachStream: state.view === "conversation" ? state.coachStream : null,
+        coachReplyEvent: state.view === "conversation" ? state.coachReplyEvent : null,
+      };
+    }
     default:
       return state;
   }
@@ -498,12 +531,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  /** SSE 处理时同步维护，避免 stateRef 滞后导致重复弹窗 */
+  const goalsSnapshotRef = useRef(new Map<string, Goal>());
   const hydratedRunIdsRef = useRef(new Set<string>());
   const restoredConvRef = useRef(false);
 
   const refreshGoals = useCallback(async () => {
     try {
       const { goals } = await api.getGoals();
+      for (const goal of goals) {
+        goalsSnapshotRef.current.set(goal.id, goal);
+      }
       dispatch({ type: "set_goals", goals });
     } catch (err) {
       dispatch({
@@ -796,6 +834,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     bindIslandQueueHandlers({
       show: (payload) => dispatch({ type: "show_island", payload }),
+      update: (payload) => dispatch({ type: "show_island", payload }),
       dismiss: () => dispatch({ type: "dismiss_island" }),
     });
     setIslandCatchupMode(true);
@@ -805,11 +844,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onCatchupComplete: () => setIslandCatchupMode(false),
       onEvent: (event: SseEvent) => {
         if (event.type === "goal.deleted") {
+          goalsSnapshotRef.current.delete(event.goalId);
           dispatch({ type: "remove_goal", goalId: event.goalId });
         }
         if (event.type === "goal.updated") {
-          const prev = stateRef.current.goals.find((g) => g.id === event.goal.id);
+          const prev =
+            goalsSnapshotRef.current.get(event.goal.id) ??
+            stateRef.current.goals.find((g) => g.id === event.goal.id);
+          goalsSnapshotRef.current.set(event.goal.id, event.goal);
           dispatch({ type: "patch_goal", goal: event.goal });
+          if (
+            prev &&
+            prev.status === "awaiting_review" &&
+            event.goal.status !== "awaiting_review"
+          ) {
+            clearIslandSeenDedupe(`goal.awaiting_review:${event.goal.id}`);
+          }
           if (!isIslandCatchupMode() && prev) {
             const island = islandFromGoalChange(prev, event.goal);
             if (island) requestIsland(island);
@@ -880,13 +930,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
               intent: event.intent,
               refined: event.refined,
               clarify: event.clarify,
-              suggestRefine: event.suggestRefine,
               meta: event.meta,
             },
           });
         }
         if (event.type === "narration.append") {
-          notifyIsland(event.message, { severity: "info" });
+          /* 旁白仅用于日志条/调度台，不再重复推灵动岛（与 goal.updated 重复） */
         }
         if (event.type === "desktop.layout_changed") {
           window.dispatchEvent(
@@ -910,6 +959,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     for (const goalId of goalIds) {
       if (hydratedRunIdsRef.current.has(goalId)) continue;
       hydratedRunIdsRef.current.add(goalId);
+      trimHydratedRunIds(hydratedRunIdsRef.current);
       void api.getGoalRun(goalId).then(({ run }) => {
         if (!run || (run.events.length === 0 && !run.liveText)) return;
         dispatch({
@@ -943,6 +993,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     for (const goal of activeGoals) {
       if (hydratedRunIdsRef.current.has(goal.id)) continue;
       hydratedRunIdsRef.current.add(goal.id);
+      trimHydratedRunIds(hydratedRunIdsRef.current);
       void api.getGoalRun(goal.id).then(({ run }) => {
         if (!run || (run.events.length === 0 && !run.liveText)) return;
         dispatch({

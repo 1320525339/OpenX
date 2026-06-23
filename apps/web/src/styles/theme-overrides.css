@@ -18,6 +18,9 @@
 .cursor-workspace .chat-bubble.coach {
   background: var(--bubble-coach-bg);
   color: var(--text);
+  padding: 0.45rem 0.55rem 0.6rem;
+  overflow: visible;
+  box-sizing: border-box;
 }
 
 .cursor-workspace .chat-bubble.user {
@@ -343,6 +346,66 @@ html[data-theme="geek"] .chat-markdown blockquote {
   border-left-color: var(--geek-tint-35);
 }
 
+/* Reasonix One Dark diff tokens — Tool + Chat 共用 */
+html[data-theme="dark"] .tool-diff-view,
+html[data-theme="dark"] .chat-md-diff {
+  --tool-diff-hl-keyword: #c678dd;
+  --tool-diff-hl-string: #98c379;
+  --tool-diff-hl-number: #d19a66;
+  --tool-diff-hl-comment: #6a6a72;
+  --tool-diff-hl-func: #61afef;
+  --tool-diff-hl-type: #e5c07b;
+  --tool-diff-hl-builtin: #56b6c2;
+  --tool-diff-hl-attr: #d19a66;
+  --tool-diff-add-bg: rgba(116, 184, 122, 0.12);
+  --tool-diff-del-bg: rgba(224, 105, 106, 0.12);
+  --tool-diff-add-fg: #82c98a;
+  --tool-diff-del-fg: #e58587;
+}
+
+html[data-theme="dark"] .tool-diff-view {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+html[data-theme="dark"] .tool-diff-ellipsis {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+html[data-theme="dark"] .tool-diff-gutter {
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="geek"] .tool-diff-view,
+html[data-theme="geek"] .chat-md-diff {
+  --tool-diff-hl-keyword: var(--geek-green-bright);
+  --tool-diff-hl-string: #7ee787;
+  --tool-diff-hl-number: var(--geek-white);
+  --tool-diff-hl-comment: var(--geek-white-muted);
+  --tool-diff-hl-func: var(--geek-green);
+  --tool-diff-hl-type: var(--geek-white-dim);
+  --tool-diff-hl-builtin: #56d364;
+  --tool-diff-hl-attr: #79c0ff;
+  --tool-diff-add-bg: var(--geek-tint-12);
+  --tool-diff-del-bg: rgba(207, 34, 46, 0.14);
+  --tool-diff-add-fg: var(--geek-green-bright);
+  --tool-diff-del-fg: #ff7b72;
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .chat-md-diff {
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .tool-diff-copy {
+  border-color: var(--geek-line);
+  color: var(--geek-white-dim);
+}
+
+html[data-theme="geek"] .tool-diff-copy:hover {
+  color: var(--geek-green);
+  border-color: var(--geek-line-hover);
+}
+
 html[data-theme="geek"] .chat-task-card:hover {
   border-color: var(--geek-tint-35);
 }
@@ -443,10 +506,6 @@ html[data-theme="geek"] .flexible-canvas,
 html[data-theme="geek"] .flexible-widget-body,
 html[data-theme="geek"] .flexible-widget-fill,
 html[data-theme="geek"] .goals-workspace,
-html[data-theme="geek"] .goals-workspace-kanban,
-html[data-theme="geek"] .goal-kanban-wide,
-html[data-theme="geek"] .goal-kanban-tabbed,
-html[data-theme="geek"] .goal-kanban-column,
 html[data-theme="geek"] .workspace-pane,
 html[data-theme="geek"] .workspace-pane .panel-scroll,
 html[data-theme="geek"] .task-index-card,
@@ -488,19 +547,27 @@ html[data-theme="geek"] .foreman-dock {
   border-top: 1px solid var(--geek-line);
 }
 
-html[data-theme="geek"] .preview-rail-head,
-html[data-theme="geek"] .preview-rail-section {
-  border-bottom: 1px solid var(--geek-line);
+html[data-theme="geek"] .pin-dock-settings {
+  color: var(--geek-white-dim);
+  border-color: var(--geek-line);
+  background: var(--surface-inset);
 }
 
-html[data-theme="geek"] .goal-kanban-column-head {
+html[data-theme="geek"] .pin-dock-settings:hover {
+  color: var(--geek-green);
+  border-color: var(--geek-line-active);
+  background: var(--selected-bg);
+}
+
+html[data-theme="geek"] .preview-rail-head,
+html[data-theme="geek"] .preview-rail-section {
   border-bottom: 1px solid var(--geek-line);
 }
 
 html[data-theme="geek"] .flexible-widget-title,
 html[data-theme="geek"] .smart-card-title,
 html[data-theme="geek"] .preview-rail-title,
-html[data-theme="geek"] .goal-kanban-column-title {
+html[data-theme="geek"] .task-detail-title {
   color: var(--geek-white);
 }
 
@@ -510,26 +577,10 @@ html[data-theme="geek"] .flexible-widget-drag {
 }
 
 html[data-theme="geek"] .preview-rail,
+html[data-theme="geek"] .task-detail-panel-pin,
 html[data-theme="geek"] .smart-card:not(.smart-card-fill) {
   background: var(--bg);
   border-color: var(--geek-line);
-}
-
-html[data-theme="geek"] .goal-kanban-column-head {
-  background: var(--bg);
-}
-
-html[data-theme="geek"] .goal-kanban-card {
-  background: var(--surface-inset);
-  border: 1px solid var(--geek-line);
-  color: var(--geek-green);
-  border-radius: 0;
-}
-
-html[data-theme="geek"] .goal-kanban-card.selected {
-  border-color: var(--geek-line-active);
-  box-shadow: inset 2px 0 0 var(--geek-line-active);
-  background: var(--selected-bg);
 }
 
 html[data-theme="geek"] .task-index-filter.active {
@@ -588,15 +639,6 @@ html[data-theme="geek"] body.pin-desktop-body-resizing .pin-desktop-seam.active:
   background: var(--geek-line-active);
 }
 
-html[data-theme="geek"] .pin-desktop-edge-handle-left:hover,
-html[data-theme="geek"] .pin-desktop-edge-handle-left:active,
-html[data-theme="geek"] body.pin-desktop-body-resizing .pin-desktop-edge-handle-left,
-html[data-theme="geek"] .pin-desktop-edge-handle-right:hover,
-html[data-theme="geek"] .pin-desktop-edge-handle-right:active,
-html[data-theme="geek"] body.pin-desktop-body-resizing .pin-desktop-edge-handle-right {
-  background: var(--hover-bg);
-}
-
 html[data-theme="geek"] .filter-tabs .filter-chip.active,
 html[data-theme="geek"] .cursor-workspace .filter-tabs .filter-chip.active {
   color: var(--geek-green);
@@ -635,8 +677,7 @@ html[data-theme="geek"] .smart-strip-stat strong {
   color: var(--geek-green);
 }
 
-html[data-theme="geek"] .task-index-title,
-html[data-theme="geek"] .goal-kanban-card-title {
+html[data-theme="geek"] .task-index-title {
   color: var(--geek-white);
 }
 
@@ -664,6 +705,58 @@ html[data-theme="geek"] .pin-desktop-empty {
   background: var(--surface-inset);
   border: 1px dashed var(--geek-line);
   border-radius: 0;
+}
+
+html[data-theme="geek"] .goal-card-pin {
+  border: 1px solid var(--geek-line);
+  background: var(--bg);
+}
+
+html[data-theme="geek"] .goal-card-pin.selected {
+  border-color: var(--geek-line-active);
+  box-shadow: inset 0 0 0 1px var(--geek-line-active);
+  background: var(--selected-bg);
+}
+
+html[data-theme="geek"] .goal-card-pin.failed {
+  border-color: rgba(255, 123, 114, 0.55);
+}
+
+html[data-theme="geek"] .tasks-desk-head,
+html[data-theme="geek"] .task-detail-metrics,
+html[data-theme="geek"] .task-detail-metric,
+html[data-theme="geek"] .evidence-tabs,
+html[data-theme="geek"] .goal-card-pin-actions {
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .tasks-desk-sort,
+html[data-theme="geek"] .tasks-desk-search,
+html[data-theme="geek"] .evidence-file-item {
+  border-color: var(--geek-line);
+  background: var(--surface-inset);
+  color: var(--geek-green);
+}
+
+html[data-theme="geek"] .tasks-desk-tabs .filter-chip.active,
+html[data-theme="geek"] .evidence-tab.active {
+  color: var(--geek-green);
+  border-bottom-color: var(--geek-line-active);
+}
+
+html[data-theme="geek"] .task-detail-metric-label,
+html[data-theme="geek"] .goal-card-pin-acceptance,
+html[data-theme="geek"] .goal-card-pin-log {
+  color: var(--geek-white-dim);
+}
+
+html[data-theme="geek"] .task-detail-metric-value,
+html[data-theme="geek"] .goal-card-pin-main .goal-card-title {
+  color: var(--geek-white);
+}
+
+html[data-theme="geek"] .detail-actions-pin {
+  border-top-color: var(--geek-line);
 }
 
 html[data-theme="geek"] .workspace-pane .goal-card {

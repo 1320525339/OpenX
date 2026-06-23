@@ -60,6 +60,10 @@ export default defineConfig({
     }),
     crewGameDemoPlugin(),
   ],
+  // Tauri 兼容：允许 TAURI_ENV_* 环境变量传入前端
+  envPrefix: ["VITE_", "TAURI_ENV_*"],
+  // Tauri 兼容：防止清除 Rust 编译错误
+  clearScreen: false,
   server: {
     host: "127.0.0.1",
     port: 5173,
@@ -79,5 +83,20 @@ export default defineConfig({
         proxyTimeout: 120_000,
       },
     },
+    watch: {
+      // Tauri 兼容：忽略 src-tauri 目录变更
+      ignored: ["**/src-tauri/**"],
+    },
+  },
+  build: {
+    // Tauri 在 Windows 上使用 WebView2 (Chromium)
+    target: process.env.TAURI_ENV_PLATFORM === "windows"
+      ? "chrome105"
+      : process.env.TAURI_ENV_PLATFORM
+        ? "safari13"
+        : undefined,
+    // debug 模式不压缩
+    minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
+    sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },
 });

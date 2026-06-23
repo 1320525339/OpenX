@@ -97,7 +97,7 @@ function islandForGoalStatus(goal: Goal, from: GoalStatus): DynamicIslandPayload
 
   if (goal.status === "awaiting_review") {
     return {
-      id: `await-review-${goal.id}-${Date.now()}`,
+      id: `await-review-${goal.id}-${goal.iterationCount ?? 0}`,
       kind: "goal.awaiting_review",
       severity: "info",
       title: goal.title,
@@ -211,8 +211,16 @@ function islandForGoalStatus(goal: Goal, from: GoalStatus): DynamicIslandPayload
       title: goal.title,
       message,
       goalId: goal.id,
-      autoDismissMs: 5000,
+      autoDismissMs: 8000,
       meta: { status: goal.status },
+      actions: [
+        {
+          id: "navigate",
+          label: "查看任务",
+          variant: "default",
+          action: { type: "navigate", goalId: goal.id },
+        },
+      ],
     };
   }
 

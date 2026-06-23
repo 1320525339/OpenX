@@ -7,6 +7,10 @@ import { ensureBuiltinAgentsOnStartup } from "./agents-service.js";
 import { startConnectWatchdog, stopConnectWatchdog } from "./connect-watchdog.js";
 import { startAcpWatchdog, stopAcpWatchdog } from "./acp-watchdog.js";
 import { startPiWatchdog, stopPiWatchdog } from "./pi-watchdog.js";
+import {
+  startKnowledgeDistillWatchdog,
+  stopKnowledgeDistillWatchdog,
+} from "./knowledge-distill-watchdog.js";
 import { getDb, resetDb } from "./db.js";
 import {
   rebootstrapOfflineConnectProfiles,
@@ -15,6 +19,15 @@ import {
 import { loadOpenxDotEnv } from "./openx-dotenv.js";
 import { loadSettings, runSettingsMigrations } from "./settings-store.js";
 import { closeAllBrowserSessions } from "./browser-session.js";
+import { startKnowledgeIndexStartupCheck } from "./knowledge-index-startup.js";
+import { shutdownZvecKnowledgeIndex } from "./zvec-knowledge-index.js";
+import { registerEventWebhookHandler } from "./event-webhook.js";
+
+registerEventWebhookHandler((event, payload) => {
+  if (event === "goal_failed") {
+    console.log(`[openx] 任务失败 ${payload.goalId}: ${payload.errorMessage}`);
+  }
+});
 
 const port = Number(process.env.PORT ?? 3921);
 const host = process.env.HOST ?? "127.0.0.1";
@@ -33,6 +46,8 @@ if (!process.env.OPENX_PI_WORKER && process.env.OPENX_MOCK_PI !== "1") {
 startConnectWatchdog();
 startPiWatchdog();
 startAcpWatchdog();
+startKnowledgeDistillWatchdog();
+startKnowledgeIndexStartupCheck();
 
 const server = serve({ fetch: app.fetch, port, hostname: host });
 attachBrowserWebSocket(server as HttpServer);
@@ -51,6 +66,7 @@ function shutdown(signal: string) {
   stopConnectWatchdog();
   stopPiWatchdog();
   stopAcpWatchdog();
+  stopKnowledgeDistillWatchdog();
   void closeAllBrowserSessions().finally(() => {
     try {
       getDb().close();
@@ -58,6 +74,7 @@ function shutdown(signal: string) {
       /* ignore */
     }
     resetDb();
+    shutdownZvecKnowledgeIndex();
     process.exit(0);
   });
 }

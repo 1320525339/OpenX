@@ -37,5 +37,50 @@ describe("buildToolRows", () => {
     ]);
     expect(rows[0]?.outputPreview).toBe("file.txt");
     expect(rows[0]?.resultPreview).toBe("ok");
+    expect(rows[0]?.isShell).toBe(true);
+    expect(rows[0]?.subject).toBeTruthy();
+  });
+
+  it("enriches read-only grep with subject and match summary", () => {
+    const rows = buildToolRows([
+      {
+        type: "tool.start",
+        tool: "grep",
+        toolCallId: "g1",
+        argsPreview: '{"pattern":"TODO"}',
+        timestamp: ts,
+      },
+      {
+        type: "tool.end",
+        tool: "grep",
+        toolCallId: "g1",
+        resultPreview: "a\nb",
+        timestamp: ts,
+      },
+    ]);
+    expect(rows[0]?.readOnly).toBe(true);
+    expect(rows[0]?.subject).toBe("TODO");
+    expect(rows[0]?.summary).toBe("2 匹配");
+  });
+
+  it("carries fileDiff from tool.end", () => {
+    const rows = buildToolRows([
+      {
+        type: "tool.start",
+        tool: "edit_file",
+        toolCallId: "e1",
+        argsPreview: '{"path":"a.ts"}',
+        timestamp: ts,
+      },
+      {
+        type: "tool.end",
+        tool: "edit_file",
+        toolCallId: "e1",
+        fileDiff: { diff: "-old\n+new", added: 1, removed: 1, path: "a.ts" },
+        timestamp: ts,
+      },
+    ]);
+    expect(rows[0]?.fileDiff?.path).toBe("a.ts");
+    expect(rows[0]?.summary).toBe("+1 -1");
   });
 });

@@ -26,12 +26,43 @@ import {
 import { readAcpCliConfig, syncAcpCliFromModelRef } from "../acp-cli-config.js";
 import { ensureSystemCliConversation } from "../system-workspace.js";
 import { getServerBaseUrl } from "../server-base-url.js";
+import {
+  getKnowledgeIndexHealth,
+  KnowledgeRebuildInProgressError,
+  rebuildKnowledgeIndexesAsync,
+} from "../knowledge-store.js";
+import { getProjectById } from "../db.js";
 
 export const cliRoutes = new Hono();
 
 cliRoutes.get("/system-conversation", (c) => {
   const { project, conversation } = ensureSystemCliConversation();
   return c.json({ project, conversation });
+});
+
+cliRoutes.get("/knowledge/health", (c) => {
+  return c.json(getKnowledgeIndexHealth());
+});
+
+cliRoutes.post("/knowledge/rebuild", async (c) => {
+  const projectId = c.req.query("projectId")?.trim();
+  const embedRaw = c.req.query("embed")?.trim().toLowerCase();
+  const includeEmbeddings = embedRaw === "1" || embedRaw === "true" || embedRaw === "yes";
+  if (projectId && !getProjectById(projectId)) {
+    return c.json({ error: "项目不存在" }, 404);
+  }
+  try {
+    const summary = await rebuildKnowledgeIndexesAsync({
+      projectIds: projectId ? [projectId] : undefined,
+      includeEmbeddings,
+    });
+    return c.json({ ok: true, ...summary });
+  } catch (err) {
+    if (err instanceof KnowledgeRebuildInProgressError) {
+      return c.json({ error: "索引重建正在进行中", rebuildInProgress: true }, 409);
+    }
+    throw err;
+  }
 });
 
 cliRoutes.get("/acp-config/:executorId", (c) => {

@@ -8,6 +8,7 @@ import {
   type BrowserServerMessage,
   type BrowserViewport,
 } from "@openx/shared";
+import { getWsBase } from "./api-base";
 import { fitBrowserFrame, mapScreencastClick } from "./browser-screencast-click";
 
 type Options = {
@@ -19,12 +20,7 @@ type Options = {
 function wsUrl(sessionId: string, startUrl?: string): string {
   const qs = startUrl ? `?startUrl=${encodeURIComponent(startUrl)}` : "";
   const path = `${browserWsPath(sessionId)}${qs}`;
-  // Vite dev（5173）直连后端 WS，避免代理 + Strict Mode 竞态
-  if (typeof window !== "undefined" && window.location.port === "5173") {
-    return `ws://127.0.0.1:3921${path}`;
-  }
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}${path}`;
+  return `${getWsBase()}${path}`;
 }
 
 function modifiersFromEvent(e: {

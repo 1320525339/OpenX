@@ -4,6 +4,10 @@ import { RefinedGoalSchema } from "./coach.js";
 import { GoalStatusSchema } from "./goal.js";
 import { GoalRunStateSchema } from "./run.js";
 import { ClarifyToolResultSchema } from "./coach-clarify.js";
+import {
+  CoachDispatchPermissionPayloadSchema,
+  DispatchPermissionToolResultSchema,
+} from "./coach-dispatch-permission.js";
 
 export const CoachMessageKindSchema = z.enum([
   "text",
@@ -12,6 +16,7 @@ export const CoachMessageKindSchema = z.enum([
   "clarify",
   "tool_result",
   "operator_action",
+  "dispatch_permission",
 ]);
 export type CoachMessageKind = z.infer<typeof CoachMessageKindSchema>;
 
@@ -85,11 +90,39 @@ export const WorkOrderToolResultSchema = z.object({
 });
 export type WorkOrderToolResult = z.infer<typeof WorkOrderToolResultSchema>;
 
+/** Coach 通过 openx_call_api 挂起的 admin 写操作（UI 确认/取消后回传 tool_result） */
+export const OPERATOR_ACTION_TOOL_NAME = "openx_call_api" as const;
+
+export const OperatorActionToolOutcomeSchema = z.enum(["confirmed", "dismissed"]);
+export type OperatorActionToolOutcome = z.infer<typeof OperatorActionToolOutcomeSchema>;
+
+export const OperatorActionToolResultSchema = z.object({
+  toolName: z.literal(OPERATOR_ACTION_TOOL_NAME),
+  operatorMessageId: z.number(),
+  pendingActionId: z.string(),
+  outcome: OperatorActionToolOutcomeSchema,
+  method: z.string(),
+  path: z.string(),
+  summary: z.string(),
+  apiOk: z.boolean().optional(),
+  apiStatus: z.number().optional(),
+  apiError: z.string().optional(),
+});
+export type OperatorActionToolResult = z.infer<typeof OperatorActionToolResultSchema>;
+
 export const CoachToolResultPayloadSchema = z.discriminatedUnion("toolName", [
   WorkOrderToolResultSchema,
   ClarifyToolResultSchema,
+  OperatorActionToolResultSchema,
+  DispatchPermissionToolResultSchema,
 ]);
 export type CoachToolResultPayload = z.infer<typeof CoachToolResultPayloadSchema>;
+
+export const OperatorActionRespondSchema = z.object({
+  conversationId: z.string().min(1),
+  outcome: OperatorActionToolOutcomeSchema,
+});
+export type OperatorActionRespondInput = z.infer<typeof OperatorActionRespondSchema>;
 
 export const CoachToolResultMessageSchema = z.object({
   id: z.number(),
@@ -121,6 +154,17 @@ export type CoachOperatorActionMessage = z.infer<
   typeof CoachOperatorActionMessageSchema
 >;
 
+export const CoachDispatchPermissionMessageSchema = z.object({
+  id: z.number(),
+  conversationId: z.string(),
+  kind: z.literal("dispatch_permission"),
+  timestamp: z.string(),
+  dispatchPermission: CoachDispatchPermissionPayloadSchema,
+});
+export type CoachDispatchPermissionMessage = z.infer<
+  typeof CoachDispatchPermissionMessageSchema
+>;
+
 /** 用户对挂起任务单的确认结果，回传 LLM 而非伪造用户消息 */
 export const RefinedWorkOrderRespondSchema = z.object({
   conversationId: z.string().min(1),
@@ -138,5 +182,6 @@ export const CoachMessageRecordSchema = z.discriminatedUnion("kind", [
   CoachClarifyMessageSchema,
   CoachToolResultMessageSchema,
   CoachOperatorActionMessageSchema,
+  CoachDispatchPermissionMessageSchema,
 ]);
 export type CoachMessageRecord = z.infer<typeof CoachMessageRecordSchema>;

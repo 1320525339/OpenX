@@ -1,0 +1,6 @@
+[mcp_servers.openx]
+command = "node"
+args = ["packages/mcp-openx/dist/index.js"]
+
+[mcp_servers.openx.env]
+OPENX_API_BASE = "http://127.0.0.1:3921"

@@ -43,7 +43,11 @@ function coerceLayout(raw: unknown): PinDesktopLayout | null {
       layoutSource.cols?.[1] ?? null,
       layoutSource.cols?.[2] ?? null,
     ],
-    wide: [Boolean(layoutSource.wide?.[0]), Boolean(layoutSource.wide?.[1]), false],
+    wide: [
+      Boolean(layoutSource.wide?.[0]),
+      Boolean(layoutSource.wide?.[1]),
+      Boolean(layoutSource.wide?.[2]),
+    ],
     split: [
       Boolean(layoutSource.split?.[0]),
       Boolean(layoutSource.split?.[1]),

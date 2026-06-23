@@ -27,6 +27,7 @@ type GoalActions = {
 type Props = {
   conversationId: string;
   conversationTitle?: string;
+  projectId?: string;
   goals: Goal[];
   selectedGoal: Goal | undefined;
   selectedId: string | null;
@@ -59,6 +60,7 @@ type Props = {
 export function ConversationWorkspace(props: Props) {
   const {
     conversationId,
+    projectId,
     goals,
     selectedGoal,
     selectedId,
@@ -127,6 +129,7 @@ export function ConversationWorkspace(props: Props) {
   const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
     const chatPanelProps = {
       conversationId,
+      projectId,
       goals,
       selectedGoal,
       runs,
@@ -224,6 +227,7 @@ export function ConversationWorkspace(props: Props) {
     coachReplyEvent,
     coachStream,
     conversationId,
+    projectId,
     defaultExecutorId,
     editMode,
     executors,
@@ -277,6 +281,8 @@ export function ConversationWorkspace(props: Props) {
             onPinWidgetAtCol={addDockCardAtCol}
             onAddTemplateAtCol={addSlotFromTemplate}
             isDockWidgetPinned={isPinned}
+            pageIndex={activePage}
+            pageCount={pageCount}
           />
         </PinDesktopPager>
       }

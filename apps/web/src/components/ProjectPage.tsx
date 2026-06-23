@@ -11,6 +11,7 @@ import { goalMatchesDisplayFilter, isSystemConversationId } from "@openx/shared"
 import { api } from "../api";
 
 import { GoalsWorkspace } from "./GoalsWorkspace";
+import { KnowledgeSpacePanel } from "./KnowledgeSpacePanel";
 import { ProjectBriefTemplatePanel } from "./ProjectBriefTemplatePanel";
 import { RowDeleteButton } from "./RowDeleteButton";
 
@@ -224,10 +225,10 @@ export function ProjectPage({
 
             }}
 
-            onSelectAllVisible={() =>
-
-              setSelectedIds(new Set(filteredGoals.map((g) => g.id)))
-
+            onSelectAllVisible={(visibleIds) =>
+              setSelectedIds(
+                new Set(visibleIds ?? filteredGoals.map((g) => g.id)),
+              )
             }
 
             onClearSelection={() => setSelectedIds(new Set())}
@@ -237,6 +238,8 @@ export function ProjectPage({
             conversationTitles={conversationTitles}
 
             goalActions={goalActions}
+
+            paginationScope={{ projectId: project.id }}
 
           />
 
@@ -314,6 +317,12 @@ export function ProjectPage({
 
         <ProjectBriefTemplatePanel project={project} />
 
+        <KnowledgeSpacePanel
+          mode="project"
+          projectId={project.id}
+          projectName={project.name}
+          embedded
+        />
       </div>
 
     </div>

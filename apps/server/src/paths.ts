@@ -31,3 +31,13 @@ export function getDotEnvPath(): string {
 /** @deprecated 使用 getConfigPath() */
 export const CONFIG_PATH = getConfigPath();
 export const INTERNAL_TOKEN_PATH = join(OPENX_DIR, "internal.token");
+
+/** 集中式知识库根目录（全局 + 项目用户知识，不进 git） */
+export function getKnowledgeRoot(): string {
+  return join(getOpenxDir(), "knowledge");
+}
+
+/** Zvec 知识检索索引根目录（可重建，Markdown 仍为源） */
+export function getZvecRoot(): string {
+  return join(getOpenxDir(), "zvec");
+}

@@ -28,6 +28,8 @@ function minimalRuntimeSnapshot(
     executorsSummary: partial?.executorsSummary ?? "",
     operatorTier: partial?.operatorTier ?? "off",
     operatorCapabilities: partial?.operatorCapabilities ?? "",
+    dispatchPermissionMode: partial?.dispatchPermissionMode ?? "default",
+    dispatchPermissionLabel: partial?.dispatchPermissionLabel ?? "默认（完全授权）",
     playbookSummary: partial?.playbookSummary ?? "",
     intentHint: partial?.intentHint ?? "",
     audienceLabel: partial?.audienceLabel ?? "",

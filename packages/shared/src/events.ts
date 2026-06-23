@@ -60,8 +60,6 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     intent: CoachIntentSchema.optional(),
     refined: RefinedGoalSchema.optional(),
     clarify: CoachClarifyPayloadSchema.optional(),
-    /** Coach 建议把这条消息整理成任务单（待用户轻确认） */
-    suggestRefine: z.boolean().optional(),
     meta: z
       .object({
         llmError: z.string().optional(),

@@ -4,6 +4,16 @@ import type { PinDesktopWorkspace } from "./pin-desktop-workspace";
 import { saveOxspCatalog } from "./oxsp-catalog";
 import { savePinWorkspace } from "./pin-desktop-workspace";
 
+const WORKSPACE_STORAGE_KEY = "openx.pinDesktop.workspace";
+
+function hasLocalWorkspace(scope: PinDesktopScope): boolean {
+  try {
+    return localStorage.getItem(`${WORKSPACE_STORAGE_KEY}.${scope}`) != null;
+  } catch {
+    return false;
+  }
+}
+
 type DesktopBundleResponse = {
   revision: number;
   workspace: PinDesktopWorkspace;
@@ -59,6 +69,7 @@ export function useOxspDesktopSync(
       const remote = await fetchDesktop(scope);
       if (cancelled || !remote) return;
       revisionRef.current = remote.revision;
+      if (hasLocalWorkspace(scope)) return;
       skipPushRef.current = true;
       onRemote({
         workspace: remote.workspace,
@@ -81,6 +92,7 @@ export function useOxspDesktopSync(
       if (detail?.scope !== scope) return;
       void fetchDesktop(scope).then((remote) => {
         if (!remote) return;
+        if (remote.revision <= revisionRef.current) return;
         revisionRef.current = remote.revision;
         skipPushRef.current = true;
         onRemote({

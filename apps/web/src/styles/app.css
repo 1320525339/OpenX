@@ -465,7 +465,7 @@
   position: fixed;
   top: 0.65rem;
   left: 50%;
-  z-index: 1200;
+  z-index: 13000;
   transform: translateX(-50%);
   pointer-events: none;
   display: flex;

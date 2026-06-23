@@ -6,8 +6,7 @@ import {
   type SeamResizePreview,
 } from "./pin-desktop-seam";
 import {
-  applyPinDropIntent,
-  placePinWidgetAtDrop,
+  applyPinDropCommit,
   type PinDropZone,
 } from "./pin-desktop-drop";
 import {
@@ -17,6 +16,7 @@ import {
   slotWidgetLabel,
   unpinWidget,
   slotIdFromWidget,
+  resolveBuiltinDockWidget,
   type PinDesktopLayout,
   type PinDesktopScope,
   type PinDockWidgetId,
@@ -101,9 +101,13 @@ export function usePinDesktop(scope: PinDesktopScope) {
 
   const persistPage = useCallback(
     (pageLayout: PinDesktopLayout) => {
-      persist(updateActivePageLayout(workspace, pageLayout));
+      setWorkspaceState((prev) => {
+        const next = updateActivePageLayout(prev, pageLayout);
+        savePinWorkspace(scope, next);
+        return next;
+      });
     },
-    [persist, workspace],
+    [scope],
   );
 
   const setPage = useCallback(
@@ -185,7 +189,10 @@ export function usePinDesktop(scope: PinDesktopScope) {
       const tpl = OXSP_DOCK_TEMPLATES.find((t) => t.id === templateId);
       if (!tpl) return false;
       if (tpl.builtin && tpl.defaultConfig.kind === "react") {
-        return addDockCardAtCol(col, tpl.defaultConfig.componentId);
+        return addDockCardAtCol(
+          col,
+          resolveBuiltinDockWidget(tpl.defaultConfig.componentId),
+        );
       }
       return addSlotAtCol(col, tpl.defaultConfig, tpl.label);
     },
@@ -227,14 +234,14 @@ export function usePinDesktop(scope: PinDesktopScope) {
 
   const applyDrop = useCallback(
     (widget: PinWidgetId, toCol: number, zone: PinDropZone) => {
-      persistPage(applyPinDropIntent(layout, widget, toCol, zone));
+      persistPage(applyPinDropCommit({ layout, widget, toCol, zone, source: "canvas" }));
     },
     [persistPage, layout],
   );
 
   const placeAtDrop = useCallback(
     (widget: PinWidgetId, toCol: number, zone: PinDropZone) => {
-      persistPage(placePinWidgetAtDrop(layout, widget, toCol, zone));
+      persistPage(applyPinDropCommit({ layout, widget, toCol, zone, source: "dock" }));
     },
     [persistPage, layout],
   );

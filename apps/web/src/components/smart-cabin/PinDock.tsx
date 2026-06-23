@@ -34,6 +34,7 @@ type Props = {
   onDockDragEnd?: (widget: PinWidgetId, clientX: number, clientY: number) => void;
   onDockDragCancel?: () => void;
   onRemoveTab?: (widget: PinWidgetId) => void;
+  onSettings?: () => void;
 };
 
 const EXTENSION_TEMPLATES = OXSP_EXTENSION_TEMPLATES;
@@ -66,6 +67,7 @@ export function PinDock({
   onDockDragEnd,
   onDockDragCancel,
   onRemoveTab,
+  onSettings,
 }: Props) {
   const pendingRef = useRef<PendingDockDrag | null>(null);
   const draggingRef = useRef<PinWidgetId | null>(null);
@@ -414,8 +416,22 @@ export function PinDock({
         </div>
         <span className="pin-dock-meta">
           已 Pin <strong>{pinnedCount}</strong>
-          <span className="pin-dock-meta-edit"> · 左右滑动翻页 · 拖图标到槽位</span>
+          <span className="pin-dock-meta-edit"> · 拖图标到槽位</span>
         </span>
+        {onSettings ? (
+          <button
+            type="button"
+            className="pin-dock-settings"
+            title="打开设置"
+            aria-label="打开设置"
+            onClick={onSettings}
+          >
+            <span className="pin-dock-settings-icon" aria-hidden>
+              ⚙
+            </span>
+            <span className="pin-dock-settings-label">设置</span>
+          </button>
+        ) : null}
       </footer>
 
       {dragGhost &&

@@ -43,7 +43,7 @@ export function GoalDetailPage({
     <div className="main-view goal-detail-page">
       <header className="goal-detail-page-head">
         <button type="button" className="btn btn-ghost goal-detail-back" onClick={onBack}>
-          ← 返回看板
+          ← 返回任务台
         </button>
         {goal ? (
           <span className="goal-detail-page-subtitle">

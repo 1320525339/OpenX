@@ -50,13 +50,12 @@ async function main() {
   const taskMsg = "帮我实现一个用户登录 API，验收标准是接口返回 200";
   const createReply = await json<{
     refined?: { title: string };
-    suggestRefine?: boolean;
     message: string;
   }>("/api/coach/chat", {
     method: "POST",
     body: JSON.stringify({ conversationId: convId, message: taskMsg }),
   });
-  console.log("create intent:", createReply.refined?.title ?? "(no refined)", "suggest:", createReply.suggestRefine);
+  console.log("create intent:", createReply.refined?.title ?? "(no refined)");
 
   let messages = await listMessages(convId);
   const beforeCancel = refinedCount(messages);
@@ -103,7 +102,7 @@ async function main() {
   }
   console.log("refined count stable after cancel:", afterCancel);
 
-  const followUp = await json<{ refined?: unknown; suggestRefine?: boolean }>("/api/coach/chat", {
+  const followUp = await json<{ refined?: unknown }>("/api/coach/chat", {
     method: "POST",
     body: JSON.stringify({
       conversationId: convId,

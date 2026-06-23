@@ -115,6 +115,9 @@ export function buildDisplayThreadItems(records: CoachMessageRecord[]): ChatThre
     if (record.kind === "operator_action") {
       tsByKey.set(`operator-${record.id}`, record.timestamp);
     }
+    if (record.kind === "dispatch_permission") {
+      tsByKey.set(`dispatch-permission-${record.id}`, record.timestamp);
+    }
   }
   return injectChatDateSeparators(base, tsByKey);
 }
@@ -160,6 +163,12 @@ export type ChatThreadItem =
       recordId: number;
       clarify: import("@openx/shared").CoachClarifyPayload;
       linkedRefinedMessageId?: number;
+    }
+  | {
+      kind: "dispatch_permission";
+      key: string;
+      recordId: number;
+      dispatchPermission: import("@openx/shared").CoachDispatchPermissionPayload;
     };
 
 export function coachRecordsToThreadItems(
@@ -238,6 +247,15 @@ export function coachRecordsToThreadItems(
         recordId: record.id,
         clarify: record.clarify,
         linkedRefinedMessageId: record.linkedRefinedMessageId,
+      });
+      continue;
+    }
+    if (record.kind === "dispatch_permission") {
+      items.push({
+        kind: "dispatch_permission",
+        key: `dispatch-permission-${record.id}`,
+        recordId: record.id,
+        dispatchPermission: record.dispatchPermission,
       });
     }
   }

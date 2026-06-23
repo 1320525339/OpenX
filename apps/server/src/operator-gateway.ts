@@ -12,7 +12,7 @@ import {
   type OpenxApiCallResult,
 } from "./operator-api-client.js";
 import { getServerBaseUrl } from "./server-base-url.js";
-import { loadSettings } from "./settings-store.js";
+import { loadSettings, saveSettings } from "./settings-store.js";
 import type { Settings } from "@openx/shared";
 
 export type OperatorCallInput = {
@@ -98,6 +98,28 @@ function resolveRequestBody(
   return body;
 }
 
+export const OPERATOR_TIER_UPGRADE_PATH = "__operator__/tier-upgrade";
+
+export function proposeOperatorTierUpgrade(
+  requestedTier: OperatorTier,
+  input: { conversationId?: string; reason?: string; summary?: string },
+): OperatorCallOutcome {
+  const id = nanoid();
+  const action: PendingOperatorAction = {
+    id,
+    method: "PATCH",
+    path: OPERATOR_TIER_UPGRADE_PATH,
+    body: { operatorTier: requestedTier },
+    summary: input.summary ?? `申请将工头自控权限升级为 ${requestedTier}`,
+    reason: input.reason,
+    conversationId: input.conversationId,
+    createdAt: new Date().toISOString(),
+    status: "pending",
+  };
+  pendingActions.set(id, action);
+  return { kind: "pending", pendingActionId: id, action };
+}
+
 export async function operatorCallApi(
   tier: OperatorTier,
   input: OperatorCallInput,
@@ -176,6 +198,23 @@ export async function operatorCallApi(
 export async function confirmOperatorAction(id: string): Promise<PendingOperatorAction | undefined> {
   const action = pendingActions.get(id);
   if (!action || action.status !== "pending") return undefined;
+
+  if (action.path === OPERATOR_TIER_UPGRADE_PATH) {
+    const requestedTier = (action.body as { operatorTier?: OperatorTier })?.operatorTier;
+    if (requestedTier) {
+      const settings = loadSettings();
+      saveSettings({ ...settings, operatorTier: requestedTier });
+    }
+    action.status = "confirmed";
+    action.result = {
+      ok: true,
+      status: 200,
+      path: action.path,
+      method: action.method,
+    };
+    recordAudit("admin", action.method, action.path, true);
+    return action;
+  }
 
   const result = await callOpenxApi({
     baseUrl: getServerBaseUrl(),

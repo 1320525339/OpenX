@@ -8,10 +8,10 @@ import { loadSettings } from "./settings-store.js";
 import { resolveWorkspaceRoot } from "./workspace-path.js";
 import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
 import {
-  appendProjectMemorySection,
-  readProjectMemory,
-  syncProjectMemoryIndex,
-} from "./memory-store.js";
+  appendRuntimeMemorySection,
+  ensureRuntimeMemoryInitialized,
+  readRuntimeMemory,
+} from "./knowledge-store.js";
 
 export type DreamDistillResult = {
   ok: boolean;
@@ -69,7 +69,8 @@ export function distillProjectMemory(projectId: string): DreamDistillResult {
 
   const lessons = collectRecentLessons(projectId);
   if (lessons.length === 0) {
-    const existing = readProjectMemory(workspaceRoot, projectId);
+    ensureRuntimeMemoryInitialized(workspaceRoot, projectId);
+    const existing = readRuntimeMemory(workspaceRoot, projectId);
     return {
       ok: true,
       projectId,
@@ -80,11 +81,16 @@ export function distillProjectMemory(projectId: string): DreamDistillResult {
   }
 
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-  const body = [`更新时间：${stamp}`, ...lessons].join("\n");
-  appendProjectMemorySection(workspaceRoot, projectId, "蒸馏经验", body);
+  const body = [
+    `更新时间：${stamp}`,
+    `条目数：${lessons.length}`,
+    "",
+    "### 失败 / 返工 / 审查",
+    ...lessons,
+  ].join("\n");
+  appendRuntimeMemorySection(workspaceRoot, projectId, "蒸馏经验", body);
 
-  const memory = readProjectMemory(workspaceRoot, projectId) ?? "";
-  syncProjectMemoryIndex(projectId, memory);
+  const memory = readRuntimeMemory(workspaceRoot, projectId) ?? "";
 
   return {
     ok: true,

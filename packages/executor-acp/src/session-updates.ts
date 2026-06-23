@@ -1,11 +1,29 @@
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { ACP_RUNTIMES, type AcpRuntimeId } from "@openx/shared";
 import type { RunEventEmitter, ExecutorContext } from "@openx/executor-core";
+import {
+  extractDeliverableFromTool,
+  extractPathFromToolArgs,
+  mergeDeliverable,
+  readWorkspaceFileBaseline,
+  toolFileDiffFromDeliverable,
+} from "@openx/executor-core";
+import type { GoalDeliverable } from "@openx/shared";
+
+export type AcpPendingTool = {
+  tool: string;
+  path?: string;
+  previousContent?: string;
+  args: unknown;
+};
 
 export type AcpSessionState = {
   assistantText: string;
   toolCount: number;
   toolNames: Map<string, string>;
+  pendingTools: Map<string, AcpPendingTool>;
+  /** ACP 文件变更交付物积累（从 tool_call 事件提取） */
+  deliverables: GoalDeliverable[];
 };
 
 function extractToolUpdateText(update: SessionUpdate & { sessionUpdate: "tool_call_update" }): string | undefined {
@@ -27,6 +45,10 @@ function extractToolUpdateText(update: SessionUpdate & { sessionUpdate: "tool_ca
   return undefined;
 }
 
+function extractRawOutput(update: SessionUpdate & { sessionUpdate: "tool_call_update" }): unknown {
+  return (update as { rawOutput?: unknown }).rawOutput;
+}
+
 export async function handleAcpSessionUpdate(
   runtimeId: AcpRuntimeId,
   update: SessionUpdate,
@@ -34,9 +56,10 @@ export async function handleAcpSessionUpdate(
     callbacks: ExecutorContext["callbacks"];
     state: AcpSessionState;
     run: RunEventEmitter | null;
+    workspaceRoot?: string;
   },
 ): Promise<void> {
-  const { callbacks, state, run } = ctx;
+  const { callbacks, state, run, workspaceRoot } = ctx;
   const config = ACP_RUNTIMES[runtimeId];
 
   switch (update.sessionUpdate) {
@@ -71,6 +94,17 @@ export async function handleAcpSessionUpdate(
       const argsPreview = update.rawInput
         ? JSON.stringify(update.rawInput).slice(0, 120)
         : undefined;
+      const path = extractPathFromToolArgs(update.rawInput);
+      const previousContent =
+        path && workspaceRoot
+          ? readWorkspaceFileBaseline(workspaceRoot, path)
+          : undefined;
+      state.pendingTools.set(update.toolCallId, {
+        tool,
+        path,
+        previousContent,
+        args: update.rawInput,
+      });
       await run?.toolStart(tool, argsPreview, update.toolCallId);
       await callbacks.onLog(
         "info",
@@ -80,13 +114,33 @@ export async function handleAcpSessionUpdate(
         Math.min(92, 75 + state.toolCount * 2),
         `执行 ${tool}…`,
       );
+      const deliv = extractDeliverableFromTool(tool, update.rawInput, undefined, false, {
+        previousContent,
+      });
+      if (deliv) {
+        mergeDeliverable(state.deliverables, deliv);
+      }
       break;
     }
     case "tool_call_update": {
       const tool = state.toolNames.get(update.toolCallId) ?? update.title ?? "tool";
+      const pending = state.pendingTools.get(update.toolCallId);
       if (update.status === "completed") {
-        await run?.toolEnd(tool, false, update.toolCallId);
+        const rawOutput = extractRawOutput(update);
+        const resultPreview = extractToolUpdateText(update)?.slice(0, 160);
+        const item = extractDeliverableFromTool(
+          tool,
+          pending?.args ?? (pending?.path ? { path: pending.path } : undefined),
+          rawOutput,
+          false,
+          { previousContent: pending?.previousContent },
+        );
+        if (item) mergeDeliverable(state.deliverables, item);
+        const fileDiff = toolFileDiffFromDeliverable(item);
+        state.pendingTools.delete(update.toolCallId);
+        await run?.toolEnd(tool, false, update.toolCallId, resultPreview, fileDiff);
       } else if (update.status === "failed") {
+        state.pendingTools.delete(update.toolCallId);
         await run?.toolEnd(tool, true, update.toolCallId);
       } else {
         const text = extractToolUpdateText(update);

@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePaginatedLogs, type StripLogEntry } from "../lib/use-paginated-logs";
+import { VirtualList, type VirtualListHandle } from "./VirtualList";
 
-type LogEntry = {
-  goalId: string;
-  level: string;
-  message: string;
-  timestamp: string;
-};
+type LogEntry = StripLogEntry;
 
 type SseStatus = "connected" | "reconnecting" | "disconnected";
 
@@ -41,20 +38,27 @@ export function LogStrip({
   const [scope, setScope] = useState<"selected" | "all">("selected");
   const [levelFilter, setLevelFilter] = useState<(typeof LEVELS)[number]>("all");
   const [pauseScroll, setPauseScroll] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualListRef = useRef<VirtualListHandle>(null);
+
+  const paginated = usePaginatedLogs(logs, {
+    goalId: scope === "selected" ? selectedGoalId : null,
+    enabled: expanded,
+  });
 
   const scoped =
     scope === "selected" && selectedGoalId
-      ? logs.filter((l) => l.goalId === selectedGoalId)
-      : logs;
+      ? paginated.logs.filter((l) => l.goalId === selectedGoalId)
+      : paginated.logs;
 
-  const filtered =
-    levelFilter === "all"
-      ? scoped
-      : scoped.filter((l) => l.level.toLowerCase() === levelFilter);
+  const filtered = useMemo(
+    () =>
+      levelFilter === "all"
+        ? scoped
+        : scoped.filter((l) => l.level.toLowerCase() === levelFilter),
+    [levelFilter, scoped],
+  );
 
   const latest = filtered[filtered.length - 1];
-  const display = filtered.slice(-120);
 
   const contextLabel =
     scope === "selected" && selectedGoalTitle
@@ -65,10 +69,21 @@ export function LogStrip({
 
   useEffect(() => {
     if (!expanded || pauseScroll) return;
-    const el = scrollRef.current;
+    const el = virtualListRef.current?.getScrollElement();
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [display.length, expanded, pauseScroll]);
+  }, [filtered.length, expanded, pauseScroll]);
+
+  const handleLoadOlder = useCallback(async () => {
+    const el = virtualListRef.current?.getScrollElement();
+    const prevScrollHeight = el?.scrollHeight ?? 0;
+    const prevScrollTop = el?.scrollTop ?? 0;
+    await paginated.loadOlder();
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.scrollTop = el.scrollHeight - prevScrollHeight + prevScrollTop;
+    });
+  }, [paginated.loadOlder]);
 
   const sseLabel =
     sseStatus === "connected"
@@ -140,22 +155,35 @@ export function LogStrip({
       </div>
 
       {expanded && (
-        <div
-          ref={scrollRef}
-          className={`log-strip-body vertical${pauseScroll ? " paused" : ""}`}
-        >
-          {display.length === 0 ? (
+        <div className={`log-strip-body vertical${pauseScroll ? " paused" : ""}`}>
+          {paginated.error ? (
+            <p className="log-strip-empty log-strip-error">
+              加载历史日志失败：{paginated.error}{" "}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void paginated.reload()}>
+                重试
+              </button>
+            </p>
+          ) : null}
+          {filtered.length === 0 ? (
             <span className="log-strip-empty">还没有新的进展…</span>
           ) : (
-            display.map((l, i) => (
-              <span
-                key={`${l.timestamp}-${i}`}
-                className={`log-strip-line ${l.level.toLowerCase()}`}
-              >
-                <LogLine entry={l} />
-              </span>
-            ))
+            <VirtualList
+              ref={virtualListRef}
+              items={filtered}
+              estimateSize={22}
+              className="log-strip-virtual"
+              onReachStart={paginated.hasMore ? handleLoadOlder : undefined}
+              getItemKey={(entry, index) => `${entry.goalId}:${entry.timestamp}:${index}`}
+              renderItem={(entry) => (
+                <span className={`log-strip-line ${entry.level.toLowerCase()}`}>
+                  <LogLine entry={entry} />
+                </span>
+              )}
+            />
           )}
+          {paginated.loading ? (
+            <span className="log-strip-empty">加载历史日志…</span>
+          ) : null}
         </div>
       )}
     </footer>

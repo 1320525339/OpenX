@@ -70,16 +70,32 @@ describe("island-queue", () => {
     expect(isIslandSeen("1")).toBe(true);
   });
 
-  it("dedupes same goal kind while showing", () => {
+  it("dedupes same goal kind while showing without re-showing", () => {
     const shown: DynamicIslandPayload[] = [];
+    const updated: DynamicIslandPayload[] = [];
     bindIslandQueueHandlers({
       show: (p) => shown.push(p),
+      update: (p) => updated.push(p),
       dismiss: () => {},
     });
     requestIsland({ ...payload("a1"), goalId: "g1", kind: "goal.awaiting_review" });
     requestIsland({ ...payload("a2"), goalId: "g1", kind: "goal.awaiting_review" });
-    expect(shown).toHaveLength(2);
-    expect(shown[1]!.id).toBe("a2");
+    expect(shown).toHaveLength(1);
+    expect(updated).toHaveLength(1);
+    expect(updated[0]!.id).toBe("a2");
+  });
+
+  it("skips goal kind already dismissed via dedupe key", () => {
+    const shown: string[] = [];
+    bindIslandQueueHandlers({
+      show: (p) => shown.push(p.id),
+      dismiss: () => {},
+    });
+    const card = { ...payload("a1"), goalId: "g1", kind: "goal.awaiting_review" as const };
+    requestIsland(card);
+    completeIslandDisplay("a1");
+    requestIsland({ ...card, id: "a2" });
+    expect(shown).toEqual(["a1"]);
   });
 
   it("marks replay as seen during catchup without showing", () => {

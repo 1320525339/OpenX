@@ -1,17 +1,30 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
-import { ConversationWorkspace } from "./components/ConversationWorkspace";
+import { useEffect, useMemo, useRef, useState, Suspense, lazy, useCallback, type PointerEvent } from "react";
 import { GoalDetailPage } from "./components/GoalDetailPage";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { ToolsPanel } from "./components/ToolsPanel";
 import { NewGoalModal } from "./components/NewGoalModal";
 import { BroadcastTicker } from "./components/BroadcastTicker";
 import { LogStrip } from "./components/LogStrip";
 import { SideNav } from "./components/SideNav";
 import { TopBar } from "./components/TopBar";
-import { HomeDashboard } from "./components/HomeDashboard";
-import { ProjectPage } from "./components/ProjectPage";
-import { ConsolePage } from "./components/ConsolePage";
 import { PaneDivider } from "./components/PaneDivider";
+import { DesktopBootScreen } from "./components/DesktopBootScreen";
+import { DesktopTitleBar } from "./components/DesktopTitleBar";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { ToolsPanel } from "./components/ToolsPanel";
+
+const HomeDashboard = lazy(() =>
+  import("./components/HomeDashboard").then((m) => ({ default: m.HomeDashboard })),
+);
+const ProjectPage = lazy(() =>
+  import("./components/ProjectPage").then((m) => ({ default: m.ProjectPage })),
+);
+const ConsolePage = lazy(() =>
+  import("./components/ConsolePage").then((m) => ({ default: m.ConsolePage })),
+);
+const ConversationWorkspace = lazy(() =>
+  import("./components/ConversationWorkspace").then((m) => ({
+    default: m.ConversationWorkspace,
+  })),
+);
 import type { IslandAction } from "@openx/shared";
 import { canMutateGoal, SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
 import { islandFromSimpleMessage } from "./lib/island-payload";
@@ -24,6 +37,11 @@ import { setGoalAccessContext } from "./lib/goal-access-context";
 import { getRunState } from "./lib/run-state";
 import { api } from "./api";
 import { pickWorkspaceDirectory } from "./lib/workspace";
+import { useDesktopBootstrap } from "./lib/use-desktop-bootstrap";
+import { listenDesktopNewGoal, updateTrayStatus } from "./lib/desktop-bridge";
+import { useViewSettledCleanup } from "./lib/use-view-settled-cleanup";
+import { isThemeTransitionActive } from "./lib/use-theme-ripple";
+import { ThemeRippleProvider } from "./lib/theme-ripple-context";
 import "./styles/app.css";
 import "./styles/panels.css";
 import "./styles/settings-model.css";
@@ -38,6 +56,10 @@ import "./styles/theme-overrides.css";
 import "./styles/typography.css";
 import "./styles/smart-cabin.css";
 import "./styles/pin-desktop.css";
+
+function ViewFallback() {
+  return <div className="loading-view">加载中…</div>;
+}
 
 function AppContent() {
   const {
@@ -65,6 +87,39 @@ function AppContent() {
     consoleBadgeCount,
   } = useAppState();
 
+  const { bootState, isDesktop } = useDesktopBootstrap();
+
+  const trimRuntimeCache = useCallback(() => {
+    if (isThemeTransitionActive()) return;
+    dispatch({ type: "trim_runtime_cache" });
+  }, []);
+
+  useViewSettledCleanup(state.view, trimRuntimeCache);
+
+  const runningGoals = useMemo(
+    () => state.goals.filter((g) => g.status === "running").length,
+    [state.goals],
+  );
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    void updateTrayStatus({
+      serverReady: bootState === "ready",
+      runningGoals,
+    });
+  }, [isDesktop, bootState, runningGoals]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    void listenDesktopNewGoal(() => {
+      dispatch({ type: "set_show_new_goal", show: true });
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [isDesktop, dispatch]);
+
   const shellRef = useRef<HTMLDivElement>(null);
   const {
     value: sidebarWidth,
@@ -89,6 +144,13 @@ function AppContent() {
     goalId: string;
     tick: number;
   } | null>(null);
+  const pendingOpenNewGoalRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingOpenNewGoalRef.current || !state.selectedConversationId) return;
+    pendingOpenNewGoalRef.current = false;
+    dispatch({ type: "set_show_new_goal", show: true });
+  }, [state.selectedConversationId, dispatch]);
 
   const locateGoalInTasks = (goalId: string) => {
     dispatch({ type: "set_selected", id: goalId });
@@ -245,6 +307,31 @@ function AppContent() {
 
   const openNewGoal = () => {
     if (!state.selectedConversationId) {
+      pendingOpenNewGoalRef.current = true;
+      void api
+        .getSystemConsole()
+        .then((data) => {
+          dispatch({ type: "upsert_project", project: data.project });
+          dispatch({ type: "upsert_conversation", conversation: data.conversation });
+          dispatch({
+            type: "open_console",
+            projectId: data.project.id,
+            conversationId: data.conversation.id,
+          });
+        })
+        .catch((err) => {
+          pendingOpenNewGoalRef.current = false;
+          requestIsland(
+            islandFromSimpleMessage(
+              "new-goal-no-conversation",
+              `打开调度台会话失败：${err instanceof Error ? err.message : String(err)}`,
+              { severity: "error" },
+            ),
+          );
+        });
+      return;
+    }
+    if (!state.selectedConversationId) {
       requestIsland(
         islandFromSimpleMessage(
           "new-goal-no-conversation",
@@ -281,7 +368,18 @@ function AppContent() {
       });
   };
 
+  if (isDesktop && bootState !== "ready") {
+    return (
+      <DesktopBootScreen
+        state={bootState === "error" ? "error" : "booting"}
+        onRetry={() => window.location.reload()}
+      />
+    );
+  }
+
   return (
+    <div className={isDesktop ? "desktop-app-root" : undefined}>
+      {isDesktop ? <DesktopTitleBar /> : null}
     <div
       ref={shellRef}
       className={`app-shell app-minimal app-shell-split${sidebarOpen ? " sidebar-open" : " sidebar-collapsed"}`}
@@ -372,6 +470,7 @@ function AppContent() {
               </button>
             </div>
           ) : (
+            <Suspense fallback={<ViewFallback />}>
             <>
               {state.detailGoalId &&
                 (state.view === "conversation" || state.view === "console") && (
@@ -485,6 +584,7 @@ function AppContent() {
                     conversationTitle={
                       conversationTitleMap[state.selectedConversationId]
                     }
+                    projectId={conversationProjectIdMap[state.selectedConversationId]}
                     goals={conversationGoals}
                     selectedGoal={selected}
                     selectedId={state.selectedId}
@@ -563,8 +663,6 @@ function AppContent() {
                       settings={settingsState}
                       workspaceResolved={settings.systemWorkspaceResolved}
                       executors={state.executors}
-                      projectId={state.selectedProjectId}
-                      goals={state.goals}
                       onRefreshExecutors={refreshExecutors}
                       onReloadSettings={async () => {
                         const s = await api.getSettings();
@@ -585,8 +683,8 @@ function AppContent() {
                           type: "set_coach_runtime",
                           runtime: status?.coach ?? null,
                         });
+                        return saved;
                       }}
-                      onWorkspaceSave={saveSystemWorkspace}
                     />
                   ) : (
                     <ToolsPanel
@@ -626,6 +724,7 @@ function AppContent() {
                 </div>
               )}
             </>
+            </Suspense>
           )}
         </main>
 
@@ -662,13 +761,16 @@ function AppContent() {
         />
       )}
     </div>
+    </div>
   );
 }
 
 export function App() {
   return (
     <AppProvider>
-      <AppContent />
+      <ThemeRippleProvider>
+        <AppContent />
+      </ThemeRippleProvider>
     </AppProvider>
   );
 }

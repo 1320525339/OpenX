@@ -28,6 +28,8 @@ import {
   updateGoal,
   appendLog,
   listLogs,
+  listGoalsPage,
+  countGoalsByDisplay,
   buildGoalFeedback,
   listChildGoals,
   listReviewRoundEntries,
@@ -44,6 +46,7 @@ import {
   dispatchGoal,
   detectExecutors,
   cancelRunning,
+  resumeCrewAfterUserDecision,
 } from "../orchestrator.js";
 import { narrateGoalChange } from "../narration.js";
 import { recommendExecutorForGoal, resolveGoalExecutorId } from "../executor-recommend-service.js";
@@ -79,16 +82,50 @@ goalsRoutes.get("/", (c) => {
   const status = c.req.query("status") as Goal["status"] | undefined;
   const conversationId = c.req.query("conversationId");
   const projectId = c.req.query("projectId");
+  const displayFilter = c.req.query("displayFilter");
+  const limitRaw = c.req.query("limit");
+  const offsetRaw = c.req.query("offset");
   const filter: ListGoalsFilter = {};
   if (status) filter.status = status;
   if (conversationId) filter.conversationId = conversationId;
   if (projectId) filter.projectId = projectId;
+  if (displayFilter) filter.displayFilter = displayFilter;
+  if (limitRaw != null || offsetRaw != null) {
+    const limit = Math.min(Math.max(Number(limitRaw ?? 80) || 80, 1), 500);
+    const offset = Math.max(Number(offsetRaw ?? 0) || 0, 0);
+    const page = listGoalsPage(filter, { limit, offset });
+    return c.json(page);
+  }
   const goals = Object.keys(filter).length > 0 ? listGoals(filter) : listGoals();
   return c.json({ goals });
 });
 
+goalsRoutes.get("/counts", (c) => {
+  const conversationId = c.req.query("conversationId");
+  const projectId = c.req.query("projectId");
+  const filter: ListGoalsFilter = {};
+  if (conversationId) filter.conversationId = conversationId;
+  if (projectId) filter.projectId = projectId;
+  return c.json({ counts: countGoalsByDisplay(filter) });
+});
+
 goalsRoutes.post("/", async (c) => {
-  const input = CreateGoalSchema.parse(await c.req.json());
+  const rawBody = await c.req.json();
+  const parsedInput = CreateGoalSchema.safeParse(rawBody);
+  if (!parsedInput.success) {
+    return c.json(
+      {
+        error: "Invalid goal payload",
+        issues: parsedInput.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          code: issue.code,
+          message: issue.message,
+        })),
+      },
+      400,
+    );
+  }
+  const input = parsedInput.data;
   if (!getConversationById(input.conversationId)) {
     return c.json({ error: "Conversation not found" }, 404);
   }
@@ -326,6 +363,18 @@ goalsRoutes.get("/:id/crew-messages", (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   return c.json({ messages: listCrewExchanges(goal.id) });
+});
+
+goalsRoutes.post("/:id/crew/resume", async (c) => {
+  const goalId = c.req.param("id");
+  const body = (await c.req.json().catch(() => ({}))) as { message?: string };
+  const message = typeof body.message === "string" ? body.message : "";
+  const result = await resumeCrewAfterUserDecision(goalId, message);
+  if (!result.ok) {
+    return c.json({ error: result.error ?? "续跑失败" }, 400);
+  }
+  const goal = getGoalById(goalId);
+  return c.json({ ok: true, goal });
 });
 
 goalsRoutes.post("/:id/trigger-review", async (c) => {

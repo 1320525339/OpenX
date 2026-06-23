@@ -581,65 +581,6 @@
   word-break: break-all;
 }
 
-.operator-workflow-section .operator-workflow-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  margin-top: 0.5rem;
-}
-
-.operator-workflow-vars {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.operator-workflow-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.operator-workflow-steps {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  overflow: hidden;
-}
-
-.operator-workflow-step {
-  display: grid;
-  grid-template-columns: minmax(6rem, 28%) 1fr;
-  gap: 0.5rem;
-  padding: 0.45rem 0.6rem;
-  font-size: var(--text-sm);
-  border-bottom: 1px solid var(--border);
-}
-
-.operator-workflow-step:last-child {
-  border-bottom: 0;
-}
-
-.operator-workflow-step.ok {
-  background: color-mix(in srgb, var(--green, #2d6a4f) 8%, transparent);
-}
-
-.operator-workflow-step.fail {
-  background: color-mix(in srgb, var(--red, #c1121f) 8%, transparent);
-}
-
-.operator-workflow-step-id {
-  font-family: var(--font-mono, monospace);
-  color: var(--text-dim);
-}
-
-.operator-workflow-step-detail {
-  color: var(--text);
-  word-break: break-word;
-}
-
 .provider-model-name {
   font-size: var(--text-xs);
   color: var(--text-dim);

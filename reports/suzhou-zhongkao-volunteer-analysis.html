@@ -1,0 +1,1225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>苏州中考志愿填报分析报告</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #5c6674;
+      --line: #d9dee7;
+      --blue: #2366d1;
+      --green: #16765d;
+      --orange: #b35c00;
+      --red: #b42318;
+      --violet: #6f4bb4;
+      --steel: #31465f;
+      --soft-blue: #e9f1ff;
+      --soft-green: #eaf7f1;
+      --soft-orange: #fff3e4;
+      --soft-red: #fff0ee;
+      --soft-violet: #f2edff;
+      --shadow: 0 12px 30px rgba(20, 31, 48, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+      line-height: 1.62;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 22px 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
+      gap: 20px;
+      align-items: stretch;
+      margin-bottom: 20px;
+    }
+
+    .hero-main,
+    .summary-panel,
+    .section,
+    .card,
+    .notice,
+    .source-box {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-main {
+      padding: 28px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--blue);
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .kicker::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.22;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 14px 0 0;
+      color: var(--muted);
+      max-width: 860px;
+    }
+
+    .summary-panel {
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .metric {
+      border-left: 4px solid var(--blue);
+      padding-left: 12px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.3;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0 24px;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--steel);
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .section {
+      margin-top: 20px;
+      padding: 22px;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 23px;
+      line-height: 1.28;
+      letter-spacing: 0;
+    }
+
+    .section-note {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag-blue {
+      background: var(--soft-blue);
+      color: var(--blue);
+    }
+
+    .tag-green {
+      background: var(--soft-green);
+      color: var(--green);
+    }
+
+    .tag-orange {
+      background: var(--soft-orange);
+      color: var(--orange);
+    }
+
+    .tag-red {
+      background: var(--soft-red);
+      color: var(--red);
+    }
+
+    .tag-violet {
+      background: var(--soft-violet);
+      color: var(--violet);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      padding: 16px;
+      box-shadow: none;
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      line-height: 1.3;
+    }
+
+    .card p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .notice {
+      padding: 16px;
+      box-shadow: none;
+      border-left: 5px solid var(--orange);
+      margin: 12px 0 0;
+    }
+
+    .notice strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef2f7;
+      color: #2d3748;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .rank {
+      width: 44px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .school {
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .split-list {
+      display: grid;
+      gap: 8px;
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .split-list li {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+    }
+
+    .num {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--soft-blue);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .score-band {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      padding: 12px 0;
+    }
+
+    .score-band:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .score-band strong {
+      font-size: 18px;
+    }
+
+    .bar {
+      height: 10px;
+      border-radius: 999px;
+      background: #e9edf3;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--green), var(--blue));
+    }
+
+    .risk-low {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .risk-mid {
+      color: var(--orange);
+      font-weight: 700;
+    }
+
+    .risk-high {
+      color: var(--red);
+      font-weight: 700;
+    }
+
+    .footer-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      min-height: 40px;
+      padding: 8px 14px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #e8ecf3;
+      color: #243246;
+    }
+
+    .source-box {
+      padding: 16px;
+      box-shadow: none;
+      margin-top: 20px;
+    }
+
+    .source-box p {
+      margin: 7px 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      .hero,
+      .grid-2,
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .section-title {
+        display: block;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .page {
+        max-width: none;
+        padding: 0;
+      }
+
+      .nav,
+      .footer-actions {
+        display: none;
+      }
+
+      .hero-main,
+      .summary-panel,
+      .section,
+      .card,
+      .notice,
+      .source-box {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-main">
+        <div class="kicker">苏州市区中考志愿填报决策报告</div>
+        <h1>540-580 分段，家长想赌普通高中时，志愿应如何取舍</h1>
+        <p class="subtitle">
+          考生为工业园区青剑湖实验中学男生，家住工业园区金色湖滨附近。当前志愿系统显示已确认。本报告只做决策分析，不连接报考系统，不提交或修改任何志愿。
+        </p>
+      </div>
+      <aside class="summary-panel" aria-label="关键信息">
+        <div class="metric">
+          <strong>当前状态：已确认</strong>
+          <span>如需调整，必须在系统允许的时间内先取消确认。</span>
+        </div>
+        <div class="metric">
+          <strong>家庭目标：赌一把正式高中</strong>
+          <span>可行，但要接受第一批落空后进入第二批的可能。</span>
+        </div>
+        <div class="metric">
+          <strong>底线策略：第二批必须改强</strong>
+          <span>如果普高没中，第二批就是最终去向。</span>
+        </div>
+      </aside>
+    </section>
+
+    <nav class="nav" aria-label="页面导航">
+      <a href="#verdict">总判断</a>
+      <a href="#current">当前志愿</a>
+      <a href="#official-590">正式推荐表</a>
+      <a href="#plan-a">普高优先方案</a>
+      <a href="#plan-b">稳妥方案</a>
+      <a href="#batch-analysis">逐批分析</a>
+      <a href="#ai-impact">AI 行业影响</a>
+      <a href="#actions">修改清单</a>
+    </nav>
+
+    <section class="section" id="verdict">
+      <div class="section-title">
+        <div>
+          <h2>一、总判断</h2>
+          <p class="section-note">家长想赌普通高中可以理解，但志愿顺序要反映真实优先级。</p>
+        </div>
+        <span class="tag tag-orange">核心是排序，不是只看能否填满</span>
+      </div>
+
+      <div class="grid-3">
+        <article class="card">
+          <h3>如果坚持“正式高中优先”</h3>
+          <p>第一批第二阶段应把桃坞、六中、田家炳综合高中班放在 5+2 前面。这样一旦分数够普高或综合高中，就先录高中路线。</p>
+        </article>
+        <article class="card">
+          <h3>这会牺牲什么</h3>
+          <p>如果分数刚好够 5+2，却也够前面的低位普高，系统会先录前面的高中志愿。5+2 的本科通道优先级会被让出。</p>
+        </article>
+        <article class="card">
+          <h3>必须守住的底线</h3>
+          <p>不要用宠物、汽车营销、跨境电商这类窄专业或高替代风险专业做默认保底。第二批要保机电、电气、通信、计算机网络、工业互联网。</p>
+        </article>
+      </div>
+
+      <div class="notice">
+        <strong>给家长的直白建议</strong>
+        如果家庭心理目标是“能进普高就进普高”，那当前第一批第二阶段的顺序需要调整；如果家庭目标是“尽量保本科通道和未来技术就业”，则应把 8032、8031、8001 放到更靠前。
+      </div>
+    </section>
+
+    <section class="section" id="current">
+      <div class="section-title">
+        <div>
+          <h2>二、当前系统已填内容</h2>
+          <p class="section-note">以下为页面只读核对到的填报结果。</p>
+        </div>
+        <span class="tag tag-blue">状态：已确认</span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>批次</th>
+              <th>当前填报</th>
+              <th>简要判断</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>跨区招生志愿</td>
+              <td>0639、0616、0636、0625、0624、0607、0620、0618、0630、0635</td>
+              <td>多数为高位普高。按 540-580 估分，录取概率偏低，但只要这些学校都愿意去，保留问题不大。</td>
+            </tr>
+            <tr>
+              <td>提前批</td>
+              <td>苏州中学指标生、统招、师范、特长、国际课程均为不报考</td>
+              <td>合理。该分段不应在提前批消耗精力，国际课程也不适合作为默认路线。</td>
+            </tr>
+            <tr>
+              <td>第一批第一阶段</td>
+              <td>0607、0624、0618、0630、0635、0612</td>
+              <td>指标生阶段属于冲刺。保留可以，但不要对录取抱主要期待。</td>
+            </tr>
+            <tr>
+              <td>第一批第二阶段</td>
+              <td>A 0607；B 0630；C 0635；D 8001；E 8031；F 8032；G 0610；H 0612；I 0641；J 0651</td>
+              <td>这是最需要调整的批次。若赌普高，0610/0612/0641 应放在 5+2 前；0651 宠物不建议保留。</td>
+            </tr>
+            <tr>
+              <td>第二批第二阶段</td>
+              <td>A 2299 园区工技校；B 2298 建设交通；C 2291 苏高职。三校专业服从均为是，其他院校不服从。</td>
+              <td>学校大方向可用，但 B/C 学校顺序和专业顺序需要优化。汽车营销、跨境电商不适合作为保底专业。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="official-590">
+      <div class="section-title">
+        <div>
+          <h2>三、正式推荐填报表：按 590 冲刺</h2>
+          <p class="section-note">前提假设：考生最终分数可冲到 590 左右，且 2026 年同类项目录取线相比 2025 年上浮不超过 5 分。此表按家长“赌正式高中”意愿排序。</p>
+        </div>
+        <span class="tag tag-orange">普高优先版</span>
+      </div>
+
+      <div class="notice">
+        <strong>填报原则</strong>
+        第一批第二阶段先放正式高中和综合高中，体现“能上高中先上高中”；随后放 5+2 本科通道；不建议用宠物、营销、电商类项目做第一批或第二批保底。
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>跨区招生录取志愿</h2>
+          <p class="section-note">建议保持当前。按 590 判断，跨区录取概率很低，但若这些学校都愿意去，保留不影响后续投档。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>志愿</th>
+              <th>代码</th>
+              <th>学校名称</th>
+              <th>推荐意见</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="rank">A</td><td>0639</td><td class="school">西安交通大学苏州附属中学（斜塘校区）</td><td>保留，梦想项。</td></tr>
+            <tr><td class="rank">B</td><td>0616</td><td class="school">苏州高新区第一中学（本部）</td><td>保留，梦想项。</td></tr>
+            <tr><td class="rank">C</td><td>0636</td><td class="school">苏州大学附属中学（胜浦校区）</td><td>保留，梦想项。</td></tr>
+            <tr><td class="rank">D</td><td>0625</td><td class="school">南京航空航天大学苏州附属中学（星湖街校区）</td><td>保留，梦想项。</td></tr>
+            <tr><td class="rank">E</td><td>0624</td><td class="school">苏州高新区第一中学（科技城校区）</td><td>保留，梦想项。</td></tr>
+            <tr><td class="rank">F</td><td>0607</td><td class="school">南京航空航天大学苏州附属中学（唯亭校区）</td><td>保留，正式高中冲刺。</td></tr>
+            <tr><td class="rank">G</td><td>0620</td><td class="school">吴县中学（本部）</td><td>保留，冲刺。</td></tr>
+            <tr><td class="rank">H</td><td>0618</td><td class="school">江苏省苏州第十中学校（金阊校区）</td><td>保留，冲刺。</td></tr>
+            <tr><td class="rank">I</td><td>0630</td><td class="school">吴县中学（景山校区）</td><td>保留，冲刺。</td></tr>
+            <tr><td class="rank">J</td><td>0635</td><td class="school">吴县中学（浒关校区）</td><td>保留，跨区里相对更现实。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>提前批志愿</h2>
+          <p class="section-note">建议维持当前不报考，避免被不适合的提前批路径截流。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>推荐选择</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>苏州中学指标生</td><td>不报考</td><td>分数段不匹配。</td></tr>
+            <tr><td>苏州中学统招、人大附中苏州学校统招</td><td>不报考</td><td>分数段不匹配。</td></tr>
+            <tr><td>师范教育类</td><td>不报考</td><td>不作为男生当前优先路线。</td></tr>
+            <tr><td>普通高中专业特长类</td><td>不报考</td><td>无明确特长匹配，不建议填。</td></tr>
+            <tr><td>国际（境外）课程类</td><td>不报考</td><td>费用、路径和后续转轨风险较高。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>第一批志愿（第一阶段）普通高中指标生志愿</h2>
+          <p class="section-note">可维持当前。该阶段为冲刺，不作为主要录取预期。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>志愿</th>
+              <th>代码</th>
+              <th>学校名称</th>
+              <th>定位</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="rank">A</td><td>0607</td><td class="school">南京航空航天大学苏州附属中学（唯亭校区）</td><td>冲刺。</td></tr>
+            <tr><td class="rank">B</td><td>0624</td><td class="school">苏州高新区第一中学（科技城校区）</td><td>冲刺。</td></tr>
+            <tr><td class="rank">C</td><td>0618</td><td class="school">江苏省苏州第十中学校（金阊校区）</td><td>冲刺。</td></tr>
+            <tr><td class="rank">D</td><td>0630</td><td class="school">吴县中学（景山校区）</td><td>冲刺。</td></tr>
+            <tr><td class="rank">E</td><td>0635</td><td class="school">吴县中学（浒关校区）</td><td>相对更现实的冲刺。</td></tr>
+            <tr><td class="rank">F</td><td>0612</td><td class="school">苏州市第六中学校（江苏省苏州艺术高级中学）</td><td>低位正式高中冲刺。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>第一批志愿（第二阶段）正式推荐顺序</h2>
+          <p class="section-note">这是最关键的修改项。按 590 冲刺，应把正式高中和综合高中放在 5+2 前面。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>志愿</th>
+              <th>代码</th>
+              <th>学校名称</th>
+              <th>定位与分析</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rank">A</td>
+              <td>0607</td>
+              <td class="school">南京航空航天大学苏州附属中学（唯亭校区）</td>
+              <td>梦想项。正式高中，但按 590 很难，放前面不影响后续。</td>
+            </tr>
+            <tr>
+              <td class="rank">B</td>
+              <td>0630</td>
+              <td class="school">吴县中学（景山校区）</td>
+              <td>梦想项。分数压力大，保留是为了满足“赌正式高中”。</td>
+            </tr>
+            <tr>
+              <td class="rank">C</td>
+              <td>0635</td>
+              <td class="school">吴县中学（浒关校区）</td>
+              <td>正式高中冲刺项，比前两项更接近，但 590 仍偏难。</td>
+            </tr>
+            <tr>
+              <td class="rank">D</td>
+              <td>0610</td>
+              <td class="school">苏州市桃坞高级中学校</td>
+              <td>核心冲刺。2025 参考线 590，若 2026 上浮小于 5 分，590 附近仍有博弈价值。</td>
+            </tr>
+            <tr>
+              <td class="rank">E</td>
+              <td>0612</td>
+              <td class="school">苏州市第六中学校（江苏省苏州艺术高级中学）</td>
+              <td>核心冲刺。2025 参考线 585，若上浮 5 分以内，590 是关键压线区。</td>
+            </tr>
+            <tr>
+              <td class="rank">F</td>
+              <td>0641</td>
+              <td class="school">苏州市田家炳实验高级中学综合高中班（新市路220号）</td>
+              <td>高中向重点保底。2025 参考线 579，590 假设下较有价值。</td>
+            </tr>
+            <tr>
+              <td class="rank">G</td>
+              <td>8032</td>
+              <td class="school">苏高职 - 苏州城市学院“5+2”机电一体化技术</td>
+              <td>优质后手。若高中未中，机电 5+2 是最值得保留的本科通道。</td>
+            </tr>
+            <tr>
+              <td class="rank">H</td>
+              <td>8031</td>
+              <td class="school">苏高职 - 苏州城市学院“5+2”现代通信技术</td>
+              <td>优质后手。通信方向和 AI 时代基础设施需求匹配。</td>
+            </tr>
+            <tr>
+              <td class="rank">I</td>
+              <td>8001</td>
+              <td class="school">建设交通 - 苏州城市学院“5+2”城市轨道车辆应用技术</td>
+              <td>稳定后手。行业较窄，但比营销、电商类稳。</td>
+            </tr>
+            <tr>
+              <td class="rank">J</td>
+              <td>留空或仅填真正愿意项目</td>
+              <td class="school">不建议填 0651 宠物养护与经营</td>
+              <td>宠物专业太窄，被第一批录取会挡住第二批强工科专业。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>第二批志愿（第一阶段）五年制高职、技师学院艺术类提前志愿</h2>
+          <p class="section-note">建议不报考。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>推荐选择</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>五年制高职、技师学院艺术类提前志愿</td><td>不报考</td><td>与男生技术路线不匹配，且艺术设计类受 AI 出图工具冲击较大。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>第二批志愿（第二阶段）正式推荐顺序</h2>
+          <p class="section-note">若第一批未录取，这里就是最终保险。学校和专业都应偏硬技术。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>志愿</th>
+              <th>学校代码</th>
+              <th>学校名称</th>
+              <th>专业 A-E 推荐</th>
+              <th>专业服从</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rank">A</td>
+              <td>2299</td>
+              <td class="school">江苏联合职业技术学院苏州工业园区分院</td>
+              <td>
+                A 04 电气自动化技术；B 01 机电一体化技术；C 05 工业互联网应用；D 09 物联网应用技术；E 10 计算机应用技术。若系统无法选择 09/10，则用 07 新能源汽车技术替补。
+              </td>
+              <td>建议选“是”，前提是能接受园区工技校内调剂。</td>
+            </tr>
+            <tr>
+              <td class="rank">B</td>
+              <td>2291</td>
+              <td class="school">江苏联合职业技术学院苏州分院（苏州高等职业技术学校）</td>
+              <td>
+                A 10 计算机网络技术；B 02 机电一体化技术；C 03 智能控制技术；D 08 物联网应用技术；E 12 现代通信技术或 11 云计算技术应用。
+              </td>
+              <td>建议选“否”，除非能接受艺术、电商、服装等调剂。</td>
+            </tr>
+            <tr>
+              <td class="rank">C</td>
+              <td>2298</td>
+              <td class="school">江苏联合职业技术学院苏州建设交通分院</td>
+              <td>
+                A 10 新能源汽车检测与维修技术；B 08 无人机应用技术；C 05 工程造价；D 17 大数据技术；E 14 智能物流技术。
+              </td>
+              <td>建议选“否”，避免调剂到汽车营销、跨境电商、旅游或艺术类。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="notice">
+        <strong>其他院校是否服从</strong>
+        正式推荐选择“不服从”。原因是其他院校和专业不可控，可能把学生调到不符合家庭预期、通勤远或行业弱的方向。
+      </div>
+    </section>
+
+    <section class="section" id="plan-a">
+      <div class="section-title">
+        <div>
+          <h2>四、方案 A：家长赌普通高中优先</h2>
+          <p class="section-note">适合家庭明确认为“普通高中/综合高中优先于 5+2”。</p>
+        </div>
+        <span class="tag tag-green">符合家长期望</span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>建议顺序</th>
+              <th>代码</th>
+              <th>学校或项目</th>
+              <th>定位</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rank">A</td>
+              <td>0607</td>
+              <td class="school">南航苏州附中（唯亭校区）</td>
+              <td><span class="tag tag-red">大冲</span></td>
+              <td>正式普高，园区位置可接受，但 540-580 段录取难度很高。</td>
+            </tr>
+            <tr>
+              <td class="rank">B</td>
+              <td>0630</td>
+              <td class="school">吴县中学（景山校区）</td>
+              <td><span class="tag tag-red">大冲</span></td>
+              <td>仍属于冲刺普高，排序靠前体现“只要够就上高中”。</td>
+            </tr>
+            <tr>
+              <td class="rank">C</td>
+              <td>0635</td>
+              <td class="school">吴县中学（浒关校区）</td>
+              <td><span class="tag tag-orange">冲刺</span></td>
+              <td>相对前两项更现实，但估分 580 以下仍不稳。</td>
+            </tr>
+            <tr>
+              <td class="rank">D</td>
+              <td>0610</td>
+              <td class="school">苏州市桃坞高级中学校</td>
+              <td><span class="tag tag-orange">核心冲刺</span></td>
+              <td>如果家长坚持正式高中，应放在 5+2 前面。</td>
+            </tr>
+            <tr>
+              <td class="rank">E</td>
+              <td>0612</td>
+              <td class="school">苏州市第六中学校</td>
+              <td><span class="tag tag-orange">核心冲刺</span></td>
+              <td>艺术高中属性要了解清楚，但它是普通高中路径的重要低位选择。</td>
+            </tr>
+            <tr>
+              <td class="rank">F</td>
+              <td>0641</td>
+              <td class="school">田家炳实验高级中学综合高中班</td>
+              <td><span class="tag tag-green">最现实高中向</span></td>
+              <td>2025 参考线为 579，是 540-580 段最值得盯紧的高中向选择。</td>
+            </tr>
+            <tr>
+              <td class="rank">G</td>
+              <td>8032</td>
+              <td class="school">苏高职 - 苏州城市学院 5+2 机电一体化</td>
+              <td><span class="tag tag-blue">优质后手</span></td>
+              <td>家长赌高中后，5+2 仍要保留。机电方向抗 AI 替代能力强。</td>
+            </tr>
+            <tr>
+              <td class="rank">H</td>
+              <td>8031</td>
+              <td class="school">苏高职 - 苏州城市学院 5+2 现代通信</td>
+              <td><span class="tag tag-blue">优质后手</span></td>
+              <td>通信、网络、物联网基础设施方向仍有长期需求。</td>
+            </tr>
+            <tr>
+              <td class="rank">I</td>
+              <td>8001</td>
+              <td class="school">建设交通 - 苏州城市学院 5+2 城轨车辆</td>
+              <td><span class="tag tag-blue">后手</span></td>
+              <td>稳定但行业较窄，排在机电和通信后更合理。</td>
+            </tr>
+            <tr>
+              <td class="rank">J</td>
+              <td>不建议填 0651</td>
+              <td class="school">苏高职宠物养护与经营</td>
+              <td><span class="tag tag-red">谨慎</span></td>
+              <td>除非孩子明确喜欢宠物行业，否则不要让它截流第二批的强工科专业。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="notice">
+        <strong>方案 A 的代价</strong>
+        如果考分刚好够 8032/8031/8001，但也够前面的 0610/0612/0641，系统会先录前面的高中向志愿。这个方案把家庭意愿放在本科贯通确定性之前。
+      </div>
+    </section>
+
+    <section class="section" id="plan-b">
+      <div class="section-title">
+        <div>
+          <h2>五、方案 B：升学通道和行业确定性优先</h2>
+          <p class="section-note">这是我从专业、行业和本科通道角度更推荐的顺序。</p>
+        </div>
+        <span class="tag tag-violet">理性稳妥</span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>建议顺序</th>
+              <th>代码</th>
+              <th>项目</th>
+              <th>分析</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rank">A</td>
+              <td>8032</td>
+              <td class="school">苏高职 5+2 机电一体化</td>
+              <td>最推荐。硬技术、设备、自动化、现场工程属性强，AI 更多是工具，不是替代者。</td>
+            </tr>
+            <tr>
+              <td class="rank">B</td>
+              <td>8031</td>
+              <td class="school">苏高职 5+2 现代通信</td>
+              <td>网络、通信、物联网底层能力更抗周期，但需要数学和持续学习。</td>
+            </tr>
+            <tr>
+              <td class="rank">C</td>
+              <td>8001</td>
+              <td class="school">建设交通 5+2 城轨车辆</td>
+              <td>稳定，路径清晰，但行业比机电和通信窄。</td>
+            </tr>
+            <tr>
+              <td class="rank">D-F</td>
+              <td>0607 / 0630 / 0635</td>
+              <td class="school">普通高中冲刺项</td>
+              <td>仍可保留，但不让高概率优质 5+2 被后置。</td>
+            </tr>
+            <tr>
+              <td class="rank">G-I</td>
+              <td>0610 / 0612 / 0641</td>
+              <td class="school">低位普高和综合高中</td>
+              <td>如果家庭愿意接受 5+2 优先，则这些放后。</td>
+            </tr>
+            <tr>
+              <td class="rank">J</td>
+              <td>不填或仅保留真愿意项目</td>
+              <td class="school">不要用不喜欢的职教高考班兜底</td>
+              <td>被第一批录取后，第二批不再投档，窄专业可能挡住更好的第二批选择。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="batch-analysis">
+      <div class="section-title">
+        <div>
+          <h2>六、逐批次分析</h2>
+          <p class="section-note">按当前填报逐项评估风险和修改价值。</p>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>跨区招生</h3>
+          <p>当前填满 10 个。2025 年六区跨区最低控制线为 603，估分 540-580 基本够不到。若所有学校都愿意去，可以保留；若有通勤或住宿不能接受的学校，应删除，不要因“反正录不上”乱填。</p>
+        </article>
+        <article class="card">
+          <h3>提前批</h3>
+          <p>当前均为不报考，判断正确。国际课程、师范、特长不适合作为本考生默认路线，避免提前批截流。</p>
+        </article>
+        <article class="card">
+          <h3>第一批第一阶段指标生</h3>
+          <p>当前填 0607、0624、0618、0630、0635、0612。该阶段是冲刺项，不是主要落点。保留没有问题，但心理预期要低。</p>
+        </article>
+        <article class="card">
+          <h3>第一批第二阶段</h3>
+          <p>这是决定“赌高中还是保 5+2”的关键批次。当前把 5+2 放在桃坞、六中、田家炳之前，实际含义是部分本科贯通项目优先于低位高中。若家长坚持高中优先，应调整。</p>
+        </article>
+      </div>
+
+      <div class="section-title" style="margin-top: 20px;">
+        <div>
+          <h2>第二批第二阶段建议</h2>
+          <p class="section-note">第二批是普高落空后的最终保险，不能随便填。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>当前学校</th>
+              <th>当前专业</th>
+              <th>建议调整</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="school">A 2299 园区工技校</td>
+              <td>电气自动化、工业互联网、新能源汽车、人工智能、机电一体化</td>
+              <td>建议改为：电气自动化、机电一体化、工业互联网、物联网或计算机应用、新能源汽车。</td>
+              <td>学校位置和园区产业匹配好。机电、电气、工业互联网比“人工智能技术应用”更稳，更适合中高职阶段打基础。</td>
+            </tr>
+            <tr>
+              <td class="school">B 2298 建设交通</td>
+              <td>汽车技术服务与营销、无人机、工程造价、跨境电商、新能源汽车检测维修</td>
+              <td>建议把 B 学校改为苏高职 2291；若保留建设交通，专业改为：新能源汽车检测维修、无人机、工程造价、大数据、智能物流。</td>
+              <td>汽车营销和跨境电商受 AI、平台和低价运营冲击大，不适合男生技术路线保底。</td>
+            </tr>
+            <tr>
+              <td class="school">C 2291 苏高职</td>
+              <td>人工智能、智能医疗装备、智能光电、现代通信、云计算</td>
+              <td>建议升为 B 学校。专业优先：计算机网络、机电一体化、智能控制、物联网、现代通信或云计算。</td>
+              <td>苏高职整体更适合信息和机电路线，建议在第二批里比建设交通更靠前。</td>
+            </tr>
+            <tr>
+              <td class="school">专业服从</td>
+              <td>A/B/C 均为“是”；其他院校不服从</td>
+              <td>A 园区工技校可保留“是”；B/C 若不能接受营销、电商、旅游、艺术类调剂，建议谨慎选择“是”。</td>
+              <td>服从提高录取概率，但可能被调到不想读的专业。其他院校不服从是合理的。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="ai-impact">
+      <div class="section-title">
+        <div>
+          <h2>七、AI 对候选专业的影响</h2>
+          <p class="section-note">优先选择“AI 增强人”的技术路线，避开“AI 直接替代人”的低门槛路线。</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>专业方向</th>
+              <th>AI 替代风险</th>
+              <th>推荐程度</th>
+              <th>分析</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="school">机电一体化 / 电气自动化</td>
+              <td><span class="risk-low">低</span></td>
+              <td><span class="tag tag-green">强推荐</span></td>
+              <td>涉及设备、控制、调试、现场维护。AI 可以辅助诊断，但不能替代现场工程能力。</td>
+            </tr>
+            <tr>
+              <td class="school">工业互联网 / 物联网</td>
+              <td><span class="risk-low">中低</span></td>
+              <td><span class="tag tag-green">强推荐</span></td>
+              <td>贴合园区制造业和数字化改造，既有 IT 又有设备场景，适合男生技术路线。</td>
+            </tr>
+            <tr>
+              <td class="school">现代通信 / 计算机网络 / 云计算</td>
+              <td><span class="risk-mid">中</span></td>
+              <td><span class="tag tag-blue">推荐</span></td>
+              <td>不能只学基础操作，要往网络运维、安全、云平台、通信工程方向走，才有抗替代能力。</td>
+            </tr>
+            <tr>
+              <td class="school">人工智能技术应用</td>
+              <td><span class="risk-mid">中</span></td>
+              <td><span class="tag tag-orange">谨慎推荐</span></td>
+              <td>名字热门，但中高职阶段容易学得浅。更建议先打机电、自动化、网络、数学和编程基础。</td>
+            </tr>
+            <tr>
+              <td class="school">新能源汽车检测维修 / 城轨车辆</td>
+              <td><span class="risk-low">中低</span></td>
+              <td><span class="tag tag-blue">推荐</span></td>
+              <td>有实体设备和运维场景。城轨较稳定但行业窄，新能源检测比汽车营销更适合技术路线。</td>
+            </tr>
+            <tr>
+              <td class="school">工程造价 / 大数据 / 智能物流</td>
+              <td><span class="risk-mid">中</span></td>
+              <td><span class="tag tag-orange">可选</span></td>
+              <td>工程造价会被 AI 算量和软件冲击，但懂现场、合同和项目沟通仍有价值。大数据和物流要看学校资源。</td>
+            </tr>
+            <tr>
+              <td class="school">跨境电商 / 汽车营销 / 电子商务</td>
+              <td><span class="risk-high">高</span></td>
+              <td><span class="tag tag-red">不建议保底</span></td>
+              <td>内容生成、客服、投放、文案、基础运营都在被 AI 和平台工具压缩，普通学生竞争压力大。</td>
+            </tr>
+            <tr>
+              <td class="school">宠物养护与经营</td>
+              <td><span class="risk-low">低</span></td>
+              <td><span class="tag tag-red">不建议默认填</span></td>
+              <td>AI 替代风险不高，但专业太窄，升学和行业上限不如机电、通信、工业互联网。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="actions">
+      <div class="section-title">
+        <div>
+          <h2>八、建议修改清单</h2>
+          <p class="section-note">如果还在填报期内，建议按家庭最终取舍执行。</p>
+        </div>
+        <span class="tag tag-red">修改前先确认截止时间</span>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>家长赌普高版必须改</h3>
+          <ul class="split-list">
+            <li><span class="num">1</span><span>第一批第二阶段把 0610、0612、0641 放到 8032、8031、8001 前面。</span></li>
+            <li><span class="num">2</span><span>8032 应排在 8031 和 8001 前面，机电优先于通信和城轨。</span></li>
+            <li><span class="num">3</span><span>删除或慎填 0651 宠物养护与经营，除非孩子明确接受宠物行业。</span></li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>第二批保底必须改</h3>
+          <ul class="split-list">
+            <li><span class="num">1</span><span>建议第二批学校顺序改为：A 2299 园区工技校，B 2291 苏高职，C 2298 建设交通。</span></li>
+            <li><span class="num">2</span><span>2298 删除或后置汽车营销、跨境电商，优先新能源检测、无人机、工程造价、大数据、智能物流。</span></li>
+            <li><span class="num">3</span><span>2291 优先计算机网络、机电一体化、智能控制、物联网、现代通信、云计算。</span></li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <div>
+          <h2>分数情景推演</h2>
+          <p class="section-note">按 2025 分数线作参考，2026 以实际投档为准。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="score-band">
+          <strong>590+</strong>
+          <div>
+            <span class="tag tag-green">第一批机会明显增加</span>
+            <p class="section-note">可重点看低位普高、5+2。若家长要高中，普高排前；若看本科通道，5+2 排前。</p>
+            <div class="bar"><span style="width: 84%;"></span></div>
+          </div>
+        </div>
+        <div class="score-band">
+          <strong>580-589</strong>
+          <div>
+            <span class="tag tag-orange">最关键博弈区</span>
+            <p class="section-note">田家炳综合、六中、5+2 都可能成为焦点。志愿顺序会直接决定走高中还是 5+2。</p>
+            <div class="bar"><span style="width: 64%;"></span></div>
+          </div>
+        </div>
+        <div class="score-band">
+          <strong>560-579</strong>
+          <div>
+            <span class="tag tag-orange">第一批不稳，第二批关键</span>
+            <p class="section-note">若不填不喜欢的第一批职教高考班，大概率进入第二批，必须把五年制高职专业排强。</p>
+            <div class="bar"><span style="width: 42%;"></span></div>
+          </div>
+        </div>
+        <div class="score-band">
+          <strong>540-559</strong>
+          <div>
+            <span class="tag tag-red">第二批主战场</span>
+            <p class="section-note">不要再纠结高位普高，重点保一个强学校强专业，后续靠专转本、职教高考或技能路线翻盘。</p>
+            <div class="bar"><span style="width: 28%;"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-actions">
+        <button type="button" onclick="window.print()">打印给家长看</button>
+        <button type="button" class="secondary" onclick="window.scrollTo({ top: 0, behavior: 'smooth' })">回到顶部</button>
+      </div>
+    </section>
+
+    <section class="source-box">
+      <h2>参考口径</h2>
+      <p>1. 苏州市教育局 2026 年苏州市区高中阶段学校招生工作通知：<a href="https://www.suzhou.gov.cn/szsrmzf/bmwj/202605/4a9271ac8d7049f8ac0e6f310e79bc57.shtml" target="_blank" rel="noreferrer">官方通知</a></p>
+      <p>2. 苏州市 2026 年中招志愿填报流程：<a href="https://www.suzhou.gov.cn/szsrmzf/mszx/202606/23dcb501872840dca7e30d077e7ea434.shtml" target="_blank" rel="noreferrer">填报流程</a></p>
+      <p>3. 2025 年苏州市教育考试院各批次录取分数线图片作为参考。2026 年最终录取以当年投档结果为准。</p>
+      <p>4. 行业分析依据通用技术趋势、AI 自动化影响和本地产业匹配判断，不代表学校就业承诺。</p>
+    </section>
+  </main>
+</body>
+</html>

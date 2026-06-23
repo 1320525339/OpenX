@@ -6,7 +6,7 @@ import {
 } from "./coach-thread.js";
 
 describe("coachRecordsToChatTurns", () => {
-  it("skips execution and operator_action by default", () => {
+  it("skips execution by default but includes operator_action as tool use", () => {
     const records = [
       {
         id: 1,
@@ -45,10 +45,15 @@ describe("coachRecordsToChatTurns", () => {
     ];
     expect(coachRecordsToChatTurns(records)).toEqual([
       { role: "user", text: "你好" },
+      {
+        role: "coach",
+        text: '[工具调用 openx_call_api #3] {"pendingActionId":"a1","method":"POST","path":"/api/goals","summary":"创建目标","status":"pending"}',
+        toolName: "openx_call_api",
+      },
     ]);
   });
 
-  it("includes execution and operator_action when requested", () => {
+  it("includes execution snapshots when requested", () => {
     const records = [
       {
         id: 1,
@@ -80,7 +85,6 @@ describe("coachRecordsToChatTurns", () => {
     expect(
       coachRecordsToChatTurns(records, {
         includeExecutionSnapshots: true,
-        includeOperatorActions: true,
       }),
     ).toEqual([
       {
@@ -89,7 +93,8 @@ describe("coachRecordsToChatTurns", () => {
       },
       {
         role: "coach",
-        text: "[操作待确认] 删除目标",
+        text: '[工具调用 openx_call_api #2] {"pendingActionId":"a1","method":"DELETE","path":"/api/goals/g1","summary":"删除目标","status":"pending"}',
+        toolName: "openx_call_api",
       },
     ]);
   });

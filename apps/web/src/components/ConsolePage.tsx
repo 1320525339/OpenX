@@ -3,11 +3,11 @@ import type { BatchGoalsAction, CliProfile, CoachMessageRecord, Conversation, Go
 import { goalMatchesDisplayFilter } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
-import { buildConsoleAgentRows, type ConsoleConnection } from "../lib/console-agents";
 import { usePinDesktop } from "../lib/use-pin-desktop";
 import { usePinDockDrag } from "../lib/use-pin-dock-drag";
 import type { PinWidgetId } from "../lib/pin-desktop";
 import { extWidgetId } from "../lib/oxsp-catalog";
+import type { ConsoleConnection } from "../lib/console-agents";
 import { ChatPanel } from "./ChatPanel";
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { PreviewRail } from "./PreviewRail";
@@ -16,8 +16,7 @@ import { PinDesktopCanvas } from "./smart-cabin/PinDesktopCanvas";
 import { PinDesktopPager } from "./smart-cabin/PinDesktopPager";
 import { OxspSlotRenderer } from "./smart-cabin/OxspSlotRenderer";
 import { PinDock } from "./smart-cabin/PinDock";
-import { SmartStrip } from "./smart-cabin/SmartStrip";
-import { TaskIndexCard } from "./smart-cabin/TaskIndexCard";
+import { TaskDetailPanel } from "./TaskDetailPanel";
 
 type ConsoleData = {
   project: Project;
@@ -87,6 +86,8 @@ type Props = {
   conversationTitles?: Record<string, string>;
   projectTitles?: Record<string, string>;
   conversationProjectIds?: Record<string, string>;
+  logs: { goalId: string; level: string; message: string; timestamp: string }[];
+  onSettings?: () => void;
 };
 
 export function ConsolePage(props: Props) {
@@ -123,6 +124,8 @@ export function ConsolePage(props: Props) {
     conversationTitles,
     projectTitles,
     conversationProjectIds,
+    logs,
+    onSettings,
   } = props;
 
   const [consoleData, setConsoleData] = useState<ConsoleData | null>(null);
@@ -185,28 +188,22 @@ export function ConsolePage(props: Props) {
     [allConsoleGoals, statusFilter],
   );
 
-  const connections = consoleData?.connections ?? [];
-  const agentRows = useMemo(
-    () => buildConsoleAgentRows(executors, cliProfiles, connections),
-    [executors, cliProfiles, connections],
-  );
-  const executorOnlineCount = agentRows.filter((r) => r.statusTone === "ok").length;
-
   const consoleChatGoals = useMemo(
     () => goals.filter((g) => g.conversationId === conversationId),
     [goals, conversationId],
   );
 
-  const awaitingReviewGoals = useMemo(
-    () => allConsoleGoals.filter((g) => g.status === "awaiting_review"),
-    [allConsoleGoals],
-  );
-
   const selectedRun = selectedGoal ? runs[selectedGoal.id] : undefined;
+
+  const selectedGoals = useMemo(
+    () => allConsoleGoals.filter((g) => selectedIds.has(g.id)),
+    [allConsoleGoals, selectedIds],
+  );
 
   const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
     const chatPanelProps = {
       conversationId,
+      projectId: conversationProjectIds?.[conversationId],
       goals: consoleChatGoals,
       selectedGoal,
       runs,
@@ -231,18 +228,6 @@ export function ConsolePage(props: Props) {
         </div>
       ),
       tasks: (
-        <div className="flexible-widget-fill">
-          <TaskIndexCard
-            goals={allConsoleGoals}
-            filter={statusFilter}
-            onFilterChange={onFilterChange}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            totalCount={allConsoleGoals.length}
-          />
-        </div>
-      ),
-      kanban: (
         <div className="flexible-widget-fill console-task-stage">
           <GoalsWorkspace
             goals={allConsoleFiltered}
@@ -268,18 +253,38 @@ export function ConsolePage(props: Props) {
             conversationProjectIds={conversationProjectIds}
             goalAccess={{ type: "console" }}
             goalActions={goalActions}
-            defaultViewMode="kanban"
-            embedKanbanOnly
+            embedInPin
+            logs={logs}
           />
         </div>
       ),
       detail: (
+        <div className="flexible-widget-fill workspace-pane workspace-pane-detail">
+          <TaskDetailPanel
+            goal={selectedGoal}
+            allGoals={allConsoleGoals}
+            editMode={editMode}
+            selectedGoals={selectedGoals}
+            logs={logs}
+            run={selectedRun}
+            onApprove={goalActions.onApprove}
+            onRework={goalActions.onRework}
+            onStart={goalActions.onStart}
+            onOpenDetail={onOpenGoalDetail}
+            surface="pin"
+            conversationTitles={conversationTitles}
+          />
+        </div>
+      ),
+      evidence: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-preview">
           <PreviewRail
             goal={selectedGoal}
             run={selectedRun}
-            goals={consoleChatGoals}
+            goals={allConsoleGoals}
+            logs={logs}
             onSelectGoal={onSelect}
+            surface="evidence"
           />
         </div>
       ),
@@ -319,6 +324,7 @@ export function ConsolePage(props: Props) {
     executors,
     goalActions,
     locateRequest,
+    logs,
     onBatchAction,
     onClearSelection,
     onEditModeChange,
@@ -334,6 +340,7 @@ export function ConsolePage(props: Props) {
     projectTitles,
     runs,
     selectedGoal,
+    selectedGoals,
     selectedId,
     selectedIds,
     selectedRun,
@@ -344,17 +351,6 @@ export function ConsolePage(props: Props) {
   return (
     <HyperPinDesktop
       className="cursor-workspace console-smart-cabin hyper-pin-desktop"
-      strip={
-        <SmartStrip
-          title="调度台"
-          subtitle={consoleData?.conversation.title ?? "系统对话"}
-          selectedGoal={selectedGoal}
-          awaitingReviewCount={awaitingReviewGoals.length}
-          executorOnlineCount={executorOnlineCount}
-          executorTotalCount={agentRows.length}
-          totalGoals={allConsoleGoals.length}
-        />
-      }
       canvas={
         <PinDesktopPager
           pageIndex={activePage}
@@ -378,6 +374,8 @@ export function ConsolePage(props: Props) {
             onPinWidgetAtCol={addDockCardAtCol}
             onAddTemplateAtCol={addSlotFromTemplate}
             isDockWidgetPinned={isPinned}
+            pageIndex={activePage}
+            pageCount={pageCount}
           />
         </PinDesktopPager>
       }
@@ -393,6 +391,7 @@ export function ConsolePage(props: Props) {
           onDockDragEnd={onDockDragEnd}
           onDockDragCancel={onDockDragCancel}
           onRemoveTab={unpin}
+          onSettings={onSettings}
         />
       }
     />

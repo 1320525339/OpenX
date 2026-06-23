@@ -8,6 +8,14 @@ import { dirname, join } from "node:path";
 import type { GoalDeliverable } from "@openx/shared";
 import type { ExecutorContext } from "@openx/executor-core";
 
+declare global {
+  namespace NodeJS {
+    interface Process {
+      pkg?: unknown;
+    }
+  }
+}
+
 type ChildOutMsg =
   | { type: "progress"; progress: number; message?: string }
   | { type: "log"; level: string; message: string }
@@ -17,7 +25,14 @@ type ChildOutMsg =
   | { type: "error"; message: string };
 
 function childScriptPath(): string {
+  if (process.pkg) {
+    return join(dirname(process.execPath), "pi-child-runner.cjs");
+  }
   return join(dirname(fileURLToPath(import.meta.url)), "pi-child-runner.ts");
+}
+
+function forkExecArgv(): string[] {
+  return process.pkg ? [] : ["--import", "tsx"];
 }
 
 const activeChildren = new Map<string, ChildProcess>();
@@ -42,7 +57,7 @@ export function runPiInWorker(ctx: ExecutorContext): Promise<void> {
     let child: ChildProcess;
     try {
       child = fork(childScriptPath(), [], {
-        execArgv: ["--import", "tsx"],
+        execArgv: forkExecArgv(),
         stdio: ["pipe", "pipe", "inherit", "ipc"],
         env: { ...process.env, OPENX_PI_CHILD: "1" },
       });

@@ -27,6 +27,8 @@ export type BuildExecutionPromptOptions = {
   agentRole?: string;
   workspaceRoot?: string;
   llmContext?: Partial<LlmContextSettings> | null;
+  /** 项目用户 + 运行知识（L2/L3） */
+  projectKnowledge?: string;
 };
 
 /** 执行 prompt 各区块默认模板（{{var}} 占位符） */
@@ -86,6 +88,15 @@ export function buildExecutionPrompt(
       llmContext,
     );
     if (block) parts.push(block);
+  }
+
+  if (options?.projectKnowledge?.trim()) {
+    parts.push(
+      clipPromptText(
+        `【项目知识库】\n${options.projectKnowledge.trim()}`,
+        3_000,
+      ),
+    );
   }
 
   if (options?.agentRole?.trim()) {

@@ -154,6 +154,14 @@ describe("buildExecutionPrompt", () => {
 
   });
 
+  it("includes project knowledge block when provided", () => {
+    const prompt = buildExecutionPrompt(minimalGoal(), [], undefined, {
+      projectKnowledge: "## 项目用户知识\n### 约束\n不要修改 vendors",
+    });
+    expect(prompt).toContain("【项目知识库】");
+    expect(prompt).toContain("不要修改 vendors");
+  });
+
 });
 
 

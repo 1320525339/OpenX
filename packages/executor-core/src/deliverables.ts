@@ -44,7 +44,8 @@ export function extractPathFromToolArgs(args: unknown): string | undefined {
   ]);
 }
 
-function extractPreviewFromPayload(payload: unknown): string | undefined {
+function extractPreviewFromPayload(payload: unknown, depth = 0): string | undefined {
+  if (depth > 5) return undefined;
   const rec = asRecord(payload);
   if (!rec) {
     if (typeof payload === "string" && payload.trim()) return payload.trim();
@@ -62,7 +63,7 @@ function extractPreviewFromPayload(payload: unknown): string | undefined {
   ]);
   if (direct) return direct;
   const nested = asRecord(rec.result) ?? asRecord(rec.data);
-  if (nested) return extractPreviewFromPayload(nested);
+  if (nested) return extractPreviewFromPayload(nested, depth + 1);
   return undefined;
 }
 

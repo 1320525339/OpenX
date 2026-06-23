@@ -37,4 +37,14 @@ describe("llm providers", () => {
       getLlmProvider("opencode-zen").defaultModel,
     );
   });
+
+  it("keeps custom google gemini model ids", () => {
+    expect(getLlmProvider("google").envVar).toBe("GOOGLE_API_KEY");
+    expect(
+      inferProviderIdFromCoach({
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      }),
+    ).toBe("google");
+    expect(pickModelForProvider("google", "gemini-3-flash")).toBe("gemini-3-flash");
+  });
 });

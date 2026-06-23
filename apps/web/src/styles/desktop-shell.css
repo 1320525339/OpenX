@@ -1,0 +1,172 @@
+/* 桌面壳：无边框标题栏、启动屏、主题涟漪 */
+
+:root {
+  --desktop-titlebar-h: 36px;
+  --desktop-window-radius: 12px;
+}
+
+html[data-desktop="true"] body {
+  border-radius: var(--desktop-window-radius);
+  overflow: hidden;
+}
+
+.desktop-app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.desktop-app-root > .app-shell-split,
+.desktop-app-root > .app-main-column {
+  flex: 1;
+  min-height: 0;
+}
+
+.desktop-titlebar {
+  flex: 0 0 var(--desktop-titlebar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.5rem 0 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  user-select: none;
+}
+
+.desktop-titlebar-brand {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.desktop-titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.desktop-titlebar-btn {
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.desktop-titlebar-btn:hover {
+  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+  color: var(--text);
+}
+
+.desktop-titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.desktop-boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.desktop-boot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 2rem 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  min-width: 280px;
+}
+
+.desktop-boot-logo {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.desktop-boot-title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.desktop-boot-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.desktop-boot-spinner {
+  width: 28px;
+  height: 28px;
+  margin-top: 0.35rem;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent, #3b82f6);
+  border-radius: 50%;
+  animation: desktop-boot-spin 0.8s linear infinite;
+}
+
+.desktop-boot-retry {
+  margin-top: 0.5rem;
+}
+
+@keyframes desktop-boot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.theme-ripple-layer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  image-rendering: auto;
+}
+
+html[data-low-memory="true"] .theme-ripple-layer {
+  filter: blur(0.5px);
+}
+
+.desktop-settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.tasks-virtual-scroll {
+  min-height: 0;
+  flex: 1;
+}
+
+.tasks-virtual-list {
+  height: 100%;
+  overflow: auto;
+}
+
+.log-strip-virtual {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.desktop-memory-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

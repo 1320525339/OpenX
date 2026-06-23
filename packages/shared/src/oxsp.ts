@@ -28,8 +28,25 @@ export const OxspBrowserConfigSchema = z.object({
   sessionId: z.string().optional(),
 });
 
-export const OxspReactComponentIdSchema = z.enum(["chat", "tasks", "kanban", "detail"]);
-export type OxspReactComponentId = z.infer<typeof OxspReactComponentIdSchema>;
+export type OxspReactComponentId = "chat" | "tasks" | "detail" | "evidence";
+
+export const OxspReactComponentIdSchema = z.preprocess(
+  (value) => (value === "kanban" ? "tasks" : value),
+  z.enum(["chat", "tasks", "detail", "evidence"]),
+) as z.ZodType<OxspReactComponentId>;
+
+export function resolveOxspReactComponentId(componentId: string): OxspReactComponentId {
+  if (componentId === "kanban") return "tasks";
+  if (
+    componentId === "chat" ||
+    componentId === "tasks" ||
+    componentId === "detail" ||
+    componentId === "evidence"
+  ) {
+    return componentId;
+  }
+  return "chat";
+}
 
 export const OxspReactConfigSchema = z.object({
   kind: z.literal("react"),
@@ -87,26 +104,26 @@ export const OXSP_DOCK_TEMPLATES: OxspDockTemplate[] = [
   },
   {
     id: "tasks",
-    label: "任务",
+    label: "任务台",
     icon: "📋",
     kind: "react",
     defaultConfig: { kind: "react", componentId: "tasks" },
     builtin: true,
   },
   {
-    id: "kanban",
-    label: "看板",
-    icon: "📊",
-    kind: "react",
-    defaultConfig: { kind: "react", componentId: "kanban" },
-    builtin: true,
-  },
-  {
     id: "detail",
-    label: "详细任务",
+    label: "任务详情",
     icon: "📄",
     kind: "react",
     defaultConfig: { kind: "react", componentId: "detail" },
+    builtin: true,
+  },
+  {
+    id: "evidence",
+    label: "交付证据",
+    icon: "📦",
+    kind: "react",
+    defaultConfig: { kind: "react", componentId: "evidence" },
     builtin: true,
   },
   {

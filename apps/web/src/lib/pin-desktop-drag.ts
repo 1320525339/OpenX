@@ -1,4 +1,4 @@
-import { MAX_PIN_COLUMNS, type PinWidgetId } from "./pin-desktop";
+import { MAX_PIN_COLUMNS } from "./pin-desktop";
 
 export const PIN_DRAG_MOVE_THRESHOLD = 4;
 
@@ -29,79 +29,4 @@ export function columnFromPointer(
     if (clientX >= colStart(col)) return col;
   }
   return 0;
-}
-
-export type ResizePreview = {
-  previewWidth: number;
-  commitWide: boolean;
-  hideNeighbor: boolean;
-  oneWidth: number;
-  twoWidth: number;
-  cellLeft: number;
-  snapX: number;
-  rightEdge: number;
-};
-
-/** 拉伸预览：宽度跟手，过邻列中线才吞并邻卡 */
-export function computeResizePreview(params: {
-  col: number;
-  clientX: number;
-  gridRect: DOMRect;
-  gapPx?: number;
-  adjacentWidget: PinWidgetId | null;
-  edge?: "left" | "right";
-  anchorRight?: number;
-}): ResizePreview | null {
-  const { col, clientX, gridRect, adjacentWidget } = params;
-  const gapPx = params.gapPx ?? 8;
-  const edge = params.edge ?? "right";
-  if (col < 0 || col > 1) return null;
-
-  const { colWidth, colStart, colMid } = columnGeometry(gridRect, gapPx);
-  const adjacentCol = col + 1;
-  if (adjacentCol >= MAX_PIN_COLUMNS) return null;
-
-  const cellLeft = colStart(col);
-  const oneWidth = colWidth;
-  const twoWidth = colWidth * 2 + gapPx;
-  const snapX = colMid(adjacentCol);
-  const anchorRight = params.anchorRight ?? cellLeft + twoWidth;
-
-  let previewWidth: number;
-  if (edge === "left") {
-    previewWidth = Math.max(oneWidth, Math.min(twoWidth, anchorRight - clientX));
-  } else {
-    previewWidth = Math.max(oneWidth, Math.min(twoWidth, clientX - cellLeft));
-  }
-
-  const rightEdge = cellLeft + previewWidth;
-  const commitWide = rightEdge >= snapX;
-  const hideNeighbor = commitWide && adjacentWidget != null;
-
-  return {
-    previewWidth,
-    commitWide,
-    hideNeighbor,
-    oneWidth,
-    twoWidth,
-    cellLeft,
-    snapX,
-    rightEdge,
-  };
-}
-
-/** @deprecated 用 computeResizePreview */
-export function resolveWideFromResizePointer(
-  col: number,
-  clientX: number,
-  gridRect: DOMRect,
-  gapPx = 8,
-): boolean {
-  return computeResizePreview({
-    col,
-    clientX,
-    gridRect,
-    gapPx,
-    adjacentWidget: "chat",
-  })?.commitWide ?? false;
 }

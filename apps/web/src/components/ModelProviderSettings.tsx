@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Settings, ProviderConfig, LlmProviderId } from "@openx/shared";
 import { listConfiguredModelRefs, providerConfigFromTemplate } from "@openx/shared";
 import { api, type LlmTemplateInfo, type ModelRuntime } from "../api";
+import { mergeServerSettingsIntoDraft } from "../lib/settings-draft";
 
 type Props = {
   settings: Settings;
@@ -119,7 +120,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
         : await api.createModelProvider(slug, config);
       const coachRef = `${slug}/big-pickle`;
       onChange({
-        ...result.settings,
+        ...mergeServerSettingsIntoDraft(settings, result.settings),
         model: {
           coach: coachRef,
           pi: coachRef,
@@ -205,7 +206,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
         editor.mode === "add"
           ? await api.createModelProvider(editor.slug, editor.config)
           : await api.updateModelProvider(editor.slug, editor.config);
-      onChange(result.settings);
+      onChange(mergeServerSettingsIntoDraft(settings, result.settings));
       setEditor(null);
       await onReload();
       refreshStatus();
@@ -221,7 +222,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
     setBusy(true);
     try {
       const result = await api.deleteModelProvider(slug);
-      onChange(result.settings);
+      onChange(mergeServerSettingsIntoDraft(settings, result.settings));
       await onReload();
       refreshStatus();
     } finally {

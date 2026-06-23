@@ -327,6 +327,11 @@
   --island-inset: rgba(255, 255, 255, 0.06);
   --island-accent: #0a84ff;
   --island-danger: #ff453a;
+  z-index: 13000;
+}
+
+html[data-desktop="true"] .dynamic-island-portal {
+  top: calc(var(--desktop-titlebar-h, 36px) + 0.5rem);
 }
 
 .dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast {
@@ -379,6 +384,10 @@
   padding: 0 0.65rem 0 0.75rem;
 }
 
+.dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.collapsed.can-expand .dynamic-island-head {
+  cursor: pointer;
+}
+
 .dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded .dynamic-island-head {
   align-items: flex-start;
   min-height: 0;
@@ -389,6 +398,8 @@
 .dynamic-island-portal.app-minimal .dynamic-island-compact {
   align-items: center;
   gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .dynamic-island-portal.app-minimal .dynamic-island.dynamic-island-toast.expanded .dynamic-island-compact {

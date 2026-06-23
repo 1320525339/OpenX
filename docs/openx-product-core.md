@@ -67,14 +67,16 @@ Coach、Pi 与未来 Agent **共用** `providers` 渠道池；各角色通过 `m
 ## 4. 执行协议（ExecutorAdapter）
 
 ```text
-run({ goal, workspaceRoot, settings, callbacks, priorLogs?, isRework? })
-  → onProgress / onLog / onComplete / onFail
+run({ goal, workspaceRoot, settings, callbacks, priorLogs?, isRework?, sandboxConfig?, mcpServers? })
+  → onProgress / onLog / onComplete / onFail / onCrewQuestion
 ```
 
 - 返工时 `buildExecutionPrompt()` 注入 `reworkReason`、上轮摘要、近期日志
 - 新 CLI = 新 Adapter，不改 Server 主流程
+- **安全沙箱 (Sandbox)**：支持将执行环境隔离到 Docker 容器或 Dev Container 中，防止直接污染宿主机
+- **统一控制面 (Unified Control Plane)**：工头统一解析并下发 MCP Servers，以实现对各异构执行器（Pi, Connect, ACP）的工具链标准化管理
 
-## 4. 外部 Agent 接入（Connect 子集）
+## 5. 外部 Agent 接入（Connect 子集）
 
 借 `vendors/mission-control/docs/cli-integration.md`：
 

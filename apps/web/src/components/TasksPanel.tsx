@@ -1,23 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useHorizontalPanScroll } from "../lib/use-horizontal-pan-scroll";
 import type { BatchGoalsAction, Goal } from "@openx/shared";
 import {
   canMutateGoal,
-  goalDisplayHint,
-  goalDisplayLabel,
-  goalDisplayOutcome,
   goalMatchesDisplayFilter,
   type GoalAccessActor,
 } from "@openx/shared";
-import { EXECUTOR_AUTO, CONNECT_ANY_EXECUTOR_ID } from "@openx/shared";
-import { connectClaimStatus, executorDisplayLabel } from "../lib/executors";
 import { goalsEligibleForAction } from "../lib/goal-batch";
-import { buildGoalContext, formatDispatchSummary, truncate } from "../lib/goal-detail";
 import { buildGoalTreeList } from "../lib/goal-list";
-import { GoalTaskExpandBody, goalResultTeaser } from "./GoalTaskExpandBody";
-import { GoalTaskActions, goalHasTaskActions } from "./GoalTaskActions";
-import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
-
+import {
+  countPinDeskFilter,
+  matchesPinDeskSearch,
+  PIN_DESK_FILTERS,
+  sortPinDeskGoals,
+  type PinDeskSort,
+} from "../lib/task-desk-pin";
+import { GoalTaskCard } from "./GoalTaskCard";
+import type { GoalTaskActionHandlers } from "./GoalTaskActions";
+import { VirtualList, type VirtualListHandle } from "./VirtualList";
 const FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "全部" },
   { key: "incomplete", label: "未完成" },
@@ -57,15 +57,57 @@ type Props = {
   conversationProjectIds?: Record<string, string>;
   /** 当前操作者权限（调度台可改全部；对话内仅本对话可改） */
   goalAccess?: GoalAccessActor;
+  filterCounts?: {
+    all: number;
+    incomplete: number;
+    failed: number;
+    done: number;
+    rework: number;
+  };
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  loadError?: string | null;
+  onRetryLoad?: () => void;
+  /** Pin 桌面：调度台紧凑任务台样式 */
+  embedInPin?: boolean;
+  logs?: { goalId: string; level: string; message: string; timestamp: string }[];
 };
 
-function countForFilter(goals: Goal[], key: string): number {
+function countForFilter(
+  goals: Goal[],
+  key: string,
+  counts?: Props["filterCounts"],
+): number {
+  if (counts) {
+    if (key === "all") return counts.all;
+    if (key === "incomplete") return counts.incomplete;
+    if (key === "failed") return counts.failed;
+    if (key === "done") return counts.done;
+    if (key === "rework") return counts.rework;
+  }
   return goals.filter((g) => goalMatchesDisplayFilter(g, key)).length;
 }
 
-function executorLabel(executorId: Goal["executorId"]): string {
-  if (executorId === EXECUTOR_AUTO) return "自动";
-  return executorDisplayLabel(executorId);
+function buildActionHandlers(
+  g: Goal,
+  editable: boolean,
+  onStart: (id: string) => Promise<void>,
+  onApprove: (id: string) => Promise<void>,
+  onRework: (id: string) => Promise<void>,
+  onOpenDetail?: (id: string) => void,
+): GoalTaskActionHandlers {
+  if (editable) {
+    return {
+      onStart,
+      onApprove,
+      onRework,
+      onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
+    };
+  }
+  return {
+    onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
+  };
 }
 
 export function TasksPanel({
@@ -94,18 +136,108 @@ export function TasksPanel({
   projectTitles,
   conversationProjectIds,
   goalAccess = { type: "console" },
+  filterCounts,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+  loadError = null,
+  onRetryLoad,
+  embedInPin = false,
+  logs = [],
 }: Props) {
   const [batchBusy, setBatchBusy] = useState(false);
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+  const [pinSearch, setPinSearch] = useState("");
+  const [pinSort, setPinSort] = useState<PinDeskSort>("default");
   const listRef = useRef<HTMLDivElement | null>(null);
+  const virtualListRef = useRef<VirtualListHandle>(null);
   const { ref: filterTabsRef, panning: filterTabsPanning } =
     useHorizontalPanScroll<HTMLDivElement>();
 
   const canEditGoal = (goal: Goal) => canMutateGoal(goalAccess, goal);
 
+  const displayGoals = useMemo(() => {
+    let list = goals;
+    if (embedInPin && pinSearch.trim()) {
+      list = list.filter((g) => matchesPinDeskSearch(g, pinSearch));
+    }
+    if (embedInPin) {
+      list = sortPinDeskGoals(list, pinSort);
+    }
+    return list;
+  }, [embedInPin, goals, pinSearch, pinSort]);
+
+  const treeGoals = buildGoalTreeList(displayGoals, {
+    contextGoals: allGoals,
+    preserveOrder: Boolean(onLoadMore) || embedInPin,
+  });
+  const useVirtualList = treeGoals.length > 12 && !expandedGoalId && !editMode && !embedInPin;
+
+  const renderGoalEntry = ({ goal: g, depth }: (typeof treeGoals)[number]) => {
+    const editable = canEditGoal(g);
+    const selected = editMode ? selectedIds.has(g.id) : selectedId === g.id;
+    const expanded = !editMode && !embedInPin && expandedGoalId === g.id;
+    const handlers = buildActionHandlers(g, editable, onStart, onApprove, onRework, onOpenDetail);
+    const handleCardClick = () => {
+      if (editMode) {
+        if (!editable) return;
+        onToggleSelect(g.id);
+        return;
+      }
+      onSelect(g.id);
+      if (!embedInPin) {
+        setExpandedGoalId((prev) => (prev === g.id ? null : g.id));
+      }
+    };
+
+    const latestLog = embedInPin
+      ? logs.filter((l) => l.goalId === g.id).slice(-1)[0]
+      : undefined;
+
+    return (
+      <GoalTaskCard
+        goal={g}
+        depth={depth}
+        allGoals={allGoals}
+        selected={selected}
+        expanded={expanded}
+        editMode={editMode}
+        editable={editable}
+        selectedIds={selectedIds}
+        onToggleSelect={onToggleSelect}
+        handlers={handlers}
+        onCardClick={handleCardClick}
+        showConnectClaimStatus={showConnectClaimStatus}
+        conversationTitles={conversationTitles}
+        projectTitles={projectTitles}
+        conversationProjectIds={conversationProjectIds}
+        pinVariant={embedInPin}
+        latestLogMessage={latestLog?.message}
+      />
+    );
+  };
+
   useEffect(() => {
     if (!locateRequest) return;
+
+    if (useVirtualList) {
+      const idx = treeGoals.findIndex((t) => t.goal.id === locateRequest.goalId);
+      if (idx >= 0) {
+        virtualListRef.current?.scrollToIndex(idx, { align: "center" });
+        requestAnimationFrame(() => {
+          const el = virtualListRef.current
+            ?.getScrollElement()
+            ?.querySelector<HTMLElement>(`[data-goal-id="${locateRequest.goalId}"]`);
+          if (!el) return;
+          el.classList.add("locate-flash");
+          setTimeout(() => el.classList.remove("locate-flash"), 1800);
+        });
+      }
+      return;
+    }
+
     setExpandedGoalId(locateRequest.goalId);
+
     const el = listRef.current?.querySelector<HTMLElement>(
       `[data-goal-id="${locateRequest.goalId}"]`,
     );
@@ -114,7 +246,7 @@ export function TasksPanel({
     el.classList.add("locate-flash");
     const timer = setTimeout(() => el.classList.remove("locate-flash"), 1800);
     return () => clearTimeout(timer);
-  }, [locateRequest]);
+  }, [locateRequest, treeGoals, useVirtualList]);
 
   const selectedGoals = allGoals.filter(
     (g) => selectedIds.has(g.id) && canEditGoal(g),
@@ -124,8 +256,10 @@ export function TasksPanel({
   const approveN = goalsEligibleForAction(selectedGoals, "approve").length;
   const deleteN = selectedIds.size;
   const allVisibleSelected =
-    goals.length > 0 &&
-    goals.filter(canEditGoal).every((g) => selectedIds.has(g.id));
+    displayGoals.length > 0 &&
+    displayGoals.filter(canEditGoal).every((g) => selectedIds.has(g.id));
+
+  const activeFilters = embedInPin ? PIN_DESK_FILTERS : FILTERS;
 
   const runBatch = async (action: BatchGoalsAction) => {
     if (selectedIds.size === 0 || batchBusy) return;
@@ -160,20 +294,69 @@ export function TasksPanel({
     onEditModeChange(false);
   };
 
-  const treeGoals = buildGoalTreeList(goals);
-
   return (
-    <section className={`mech-panel tasks-panel${editMode ? " tasks-panel-editing" : ""}`}>
+    <section
+      className={`mech-panel tasks-panel${editMode ? " tasks-panel-editing" : ""}${embedInPin ? " tasks-panel-pin" : ""}`}
+    >
       <div className="mech-panel-body panel-stack">
-        <div className="tasks-toolbar">
+        {embedInPin ? (
+          <div className="tasks-desk-head">
+            <div
+              ref={filterTabsRef}
+              className={`filter-row filter-tabs tasks-desk-tabs${filterTabsPanning ? " is-panning" : ""}`}
+              role="tablist"
+              aria-label="任务台筛选"
+            >
+              {activeFilters.map(({ key, label }) => {
+                const n = countPinDeskFilter(allGoals, key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === key}
+                    className={`filter-chip${filter === key ? " active" : ""}`}
+                    onClick={() => onFilterChange(key)}
+                  >
+                    {label}
+                    {n > 0 ? ` (${n})` : ""}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="tasks-desk-tools">
+              <select
+                className="tasks-desk-sort"
+                value={pinSort}
+                onChange={(e) => setPinSort(e.target.value as PinDeskSort)}
+                aria-label="排序"
+              >
+                <option value="default">默认排序</option>
+                <option value="updated">最近更新</option>
+                <option value="orderNo">工单号</option>
+              </select>
+              <input
+                type="search"
+                className="tasks-desk-search"
+                placeholder="搜索任务标题或 WO 编号"
+                value={pinSearch}
+                onChange={(e) => setPinSearch(e.target.value)}
+                aria-label="搜索任务"
+              />
+            </div>
+          </div>
+        ) : null}
+
+        <div className={`tasks-toolbar${embedInPin ? " tasks-toolbar-pin-edit" : ""}`}>
+          {!embedInPin ? (
           <div
             ref={filterTabsRef}
             className={`filter-row filter-tabs${filterTabsPanning ? " is-panning" : ""}`}
             role="tablist"
             aria-label="目标筛选"
           >
-            {FILTERS.map(({ key, label }) => {
-              const n = countForFilter(allGoals, key);
+            {activeFilters.map(({ key, label }) => {
+              const n = countForFilter(allGoals, key, filterCounts);
               return (
                 <button
                   key={key}
@@ -189,6 +372,7 @@ export function TasksPanel({
               );
             })}
           </div>
+          ) : null}
           {editMode ? (
             <button type="button" className="btn-text tasks-edit-toggle" onClick={exitEditMode}>
               完成
@@ -204,180 +388,58 @@ export function TasksPanel({
           )}
         </div>
 
-        <div ref={listRef} className="panel-scroll" style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-          {goals.length === 0 && (
+        <div
+          ref={listRef}
+          className={`panel-scroll${useVirtualList ? " tasks-virtual-scroll" : ""}`}
+          style={
+            useVirtualList
+              ? undefined
+              : { display: "flex", flexDirection: "column", gap: "0.4rem" }
+          }
+        >
+          {goals.length === 0 && !loadError && (
             <p className="empty-hint">
-              {filter === "all"
-                ? "还没有目标。说出你想推进的事，OpenX 会帮你整理。"
+              {filter === "all" || embedInPin
+                ? embedInPin
+                  ? "当前筛选下暂无任务。"
+                  : "还没有目标。说出你想推进的事，OpenX 会帮你整理。"
                 : "这里暂时没有目标。"}
             </p>
           )}
-          {treeGoals.map(({ goal: g, depth }) => {
-            const selected = editMode ? selectedIds.has(g.id) : selectedId === g.id;
-            const expanded = !editMode && expandedGoalId === g.id;
-            const editable = canEditGoal(g);
-            const { parent, dependencies } = buildGoalContext(allGoals, g);
-            const resultTeaser = goalResultTeaser(g);
-            const actionHandlers = editable
-              ? {
-                  onStart,
-                  onApprove,
-                  onRework,
-                  onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
-                }
-              : {
-                  onOpenDetail: onOpenDetail ? () => onOpenDetail(g.id) : undefined,
-                };
-            const showCollapsedActions =
-              !editMode && !expanded && goalHasTaskActions(g, actionHandlers);
-
-            const handleCardClick = () => {
-              if (editMode) {
-                if (!editable) return;
-                onToggleSelect(g.id);
-                return;
-              }
-              onSelect(g.id);
-              setExpandedGoalId((prev) => (prev === g.id ? null : g.id));
-            };
-
-            return (
-              <div
-                key={g.id}
-                data-goal-id={g.id}
-                role="button"
-                tabIndex={0}
-                className={`goal-card${selected ? " selected" : ""}${expanded ? " expanded" : ""}${g.status === "awaiting_review" ? " awaiting_review" : ""}${editMode ? " edit-mode" : ""}${depth > 0 ? " goal-card-child" : ""}${!editable ? " goal-card-readonly" : ""}`}
-                style={depth > 0 ? { marginLeft: `${depth * 0.75}rem` } : undefined}
-                onClick={handleCardClick}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter") return;
-                  handleCardClick();
-                }}
-              >
-                {g.orderNo > 0 ? (
-                  <div className="goal-card-order-banner">
-                    <WorkOrderIdBadge orderNo={g.orderNo} />
-                  </div>
-                ) : null}
-                <div className="goal-card-head">
-                  {editMode ? (
-                    <label
-                      className="goal-card-check"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        disabled={!editable}
-                        checked={selectedIds.has(g.id)}
-                        onChange={() => onToggleSelect(g.id)}
-                      />
-                    </label>
-                  ) : (
-                    <div
-                      className="progress-ring"
-                      style={{ ["--goal-progress" as string]: `${g.progress}%` }}
-                    >
-                      {g.progress}%
-                    </div>
-                  )}
-                  <div className="goal-card-body">
-                    <div className="goal-card-title-row">
-                      <strong className="goal-card-title">{g.title}</strong>
-                      {conversationTitles?.[g.conversationId] ? (
-                        <span className="goal-card-conv" title="所属对话">
-                          {conversationTitles[g.conversationId]}
-                        </span>
-                      ) : null}
-                      {conversationProjectIds &&
-                      projectTitles?.[conversationProjectIds[g.conversationId]] ? (
-                        <span className="goal-card-project" title="所属项目">
-                          {projectTitles[conversationProjectIds[g.conversationId]]}
-                        </span>
-                      ) : null}
-                      {!editable ? (
-                        <span className="goal-card-readonly-tag">只读</span>
-                      ) : null}
-                      <span
-                        className={`status-pill outcome-${goalDisplayOutcome(g)}${g.status === "awaiting_review" ? " awaiting_review" : ""}`}
-                      >
-                        {goalDisplayLabel(g)}
-                      </span>
-                      {goalDisplayHint(g) ? (
-                        <span className="status-hint">{goalDisplayHint(g)}</span>
-                      ) : null}
-                      <span className="executor-tag">{executorLabel(g.executorId)}</span>
-                      {!editMode && (
-                        <span
-                          className={`goal-card-chevron${expanded ? " open" : ""}`}
-                          aria-hidden
-                        />
-                      )}
-                      {showConnectClaimStatus ? (
-                        (() => {
-                          const claim = connectClaimStatus(g);
-                          return claim ? (
-                            <span
-                              className={`status-pill ${g.executorId === CONNECT_ANY_EXECUTOR_ID ? "draft" : "running"}`}
-                            >
-                              {claim}
-                            </span>
-                          ) : null;
-                        })()
-                      ) : null}
-                    </div>
-                    {!editMode && !expanded && g.status === "running" && (
-                      <div className="progress-bar">
-                        <span style={{ width: `${g.progress}%` }} />
-                      </div>
-                    )}
-                    {!editMode && !expanded && resultTeaser && (
-                      <p className="goal-card-result-teaser">{truncate(resultTeaser, 140)}</p>
-                    )}
-                    {editMode && (
-                      <p className="goal-card-meta">
-                        进度 {g.progress}%
-                        {g.parentGoalId ? " · 子目标" : ""}
-                      </p>
-                    )}
-                    {!expanded && formatDispatchSummary(g) && (
-                      <p className="goal-card-dispatch">{formatDispatchSummary(g)}</p>
-                    )}
-                    {(parent || dependencies.length > 0) && !editMode && !expanded && (
-                      <p className="goal-card-meta">
-                        {parent ? `子任务 · ${parent.title}` : "子任务"}
-                        {dependencies.length > 0
-                          ? ` · 等待 ${dependencies.map((d) => d.title).join("、")}`
-                          : ""}
-                      </p>
-                    )}
-
-                    {showCollapsedActions && (
-                      <div
-                        className="goal-task-actions-slot"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <GoalTaskActions
-                          goal={g}
-                          handlers={actionHandlers}
-                          compact
-                        />
-                      </div>
-                    )}
-
-                    {!editMode && expanded && (
-                      <div
-                        className="goal-card-expand-wrap"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <GoalTaskExpandBody goal={g} handlers={actionHandlers} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {displayGoals.length === 0 && goals.length > 0 && embedInPin && !loadError ? (
+            <p className="empty-hint">没有匹配搜索条件的任务。</p>
+          ) : null}
+          {loadError ? (
+            <p className="empty-hint tasks-load-error">
+              加载失败：{loadError}
+              {onRetryLoad ? (
+                <>
+                  {" "}
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={onRetryLoad}>
+                    重试
+                  </button>
+                </>
+              ) : null}
+            </p>
+          ) : null}
+          {useVirtualList ? (
+            <VirtualList
+              ref={virtualListRef}
+              items={treeGoals}
+              estimateSize={120}
+              className="tasks-virtual-list"
+              onReachEnd={hasMore ? onLoadMore : undefined}
+              getItemKey={(entry) => entry.goal.id}
+              renderItem={(entry) => (
+                <div style={{ paddingBottom: "0.4rem" }}>{renderGoalEntry(entry)}</div>
+              )}
+            />
+          ) : (
+          treeGoals.map((entry) => (
+            <div key={entry.goal.id}>{renderGoalEntry(entry)}</div>
+          ))
+          )}
+          {loadingMore ? <p className="empty-hint">加载更多目标…</p> : null}
         </div>
 
         {editMode ? (

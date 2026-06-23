@@ -1,10 +1,14 @@
 import { CLARIFY_TOOL_NAME } from "./coach-clarify.js";
+import { DISPATCH_PERMISSION_TOOL_NAME } from "./coach-dispatch-permission.js";
 import type { CoachMessageRecord } from "./coach-messages.js";
 import {
+  OPERATOR_ACTION_TOOL_NAME,
   WORK_ORDER_TOOL_NAME,
   type CoachToolResultPayload,
+  type OperatorActionToolResult,
   type WorkOrderToolResult,
 } from "./coach-messages.js";
+import type { DispatchPermissionToolResult } from "./coach-dispatch-permission.js";
 import type { CoachChatTurn } from "./coach.js";
 import { isWorkOrderDismissMessage } from "./coach-intent.js";
 
@@ -82,9 +86,66 @@ function formatClarifyToolResult(
   });
 }
 
+function formatDispatchPermissionToolUse(
+  record: Extract<CoachMessageRecord, { kind: "dispatch_permission" }>,
+): string {
+  const { dispatchPermission, id } = record;
+  return `[工具调用 ${DISPATCH_PERMISSION_TOOL_NAME} #${id}] ${JSON.stringify({
+    requestedMode: dispatchPermission.requestedMode,
+    reason: dispatchPermission.reason,
+    status: dispatchPermission.status,
+  })}`;
+}
+
+function formatDispatchPermissionToolResult(result: DispatchPermissionToolResult): string {
+  return JSON.stringify({
+    tool: result.toolName,
+    dispatchPermissionMessageId: result.dispatchPermissionMessageId,
+    outcome: result.outcome,
+    requestedMode: result.requestedMode,
+    appliedMode: result.appliedMode,
+    reason: result.reason,
+  });
+}
+
+function formatOperatorActionToolResult(result: OperatorActionToolResult): string {
+  return JSON.stringify({
+    tool: result.toolName,
+    operatorMessageId: result.operatorMessageId,
+    pendingActionId: result.pendingActionId,
+    outcome: result.outcome,
+    method: result.method,
+    path: result.path,
+    summary: result.summary,
+    apiOk: result.apiOk,
+    apiStatus: result.apiStatus,
+    apiError: result.apiError,
+  });
+}
+
+function formatOperatorActionToolUse(
+  record: Extract<CoachMessageRecord, { kind: "operator_action" }>,
+): string {
+  const { operatorAction, id } = record;
+  return `[工具调用 ${OPERATOR_ACTION_TOOL_NAME} #${id}] ${JSON.stringify({
+    pendingActionId: operatorAction.pendingActionId,
+    method: operatorAction.method,
+    path: operatorAction.path,
+    summary: operatorAction.summary,
+    reason: operatorAction.reason,
+    status: operatorAction.status,
+  })}`;
+}
+
 function formatCoachToolResult(result: CoachToolResultPayload): string {
   if (result.toolName === CLARIFY_TOOL_NAME) {
     return formatClarifyToolResult(result);
+  }
+  if (result.toolName === OPERATOR_ACTION_TOOL_NAME) {
+    return formatOperatorActionToolResult(result);
+  }
+  if (result.toolName === DISPATCH_PERMISSION_TOOL_NAME) {
+    return formatDispatchPermissionToolResult(result);
   }
   return formatWorkOrderToolResult(result);
 }
@@ -131,10 +192,19 @@ export function coachRecordsToChatTurns(
       });
       continue;
     }
-    if (row.kind === "operator_action" && options?.includeOperatorActions) {
+    if (row.kind === "operator_action") {
       turns.push({
         role: "coach",
-        text: `[操作待确认] ${row.operatorAction.summary}`,
+        text: formatOperatorActionToolUse(row),
+        toolName: OPERATOR_ACTION_TOOL_NAME,
+      });
+      continue;
+    }
+    if (row.kind === "dispatch_permission") {
+      turns.push({
+        role: "coach",
+        text: formatDispatchPermissionToolUse(row),
+        toolName: DISPATCH_PERMISSION_TOOL_NAME,
       });
     }
   }

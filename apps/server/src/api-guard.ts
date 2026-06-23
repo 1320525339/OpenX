@@ -3,12 +3,19 @@ import type { Context, Next } from "hono";
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://tauri.localhost",
+  "https://tauri.localhost",
 ]);
 
 const STATE_CHANGING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function originAllowed(origin: string): boolean {
-  return ALLOWED_ORIGINS.has(origin);
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  // Tauri 自定义协议 (e.g. https://com.openx.desktop.localhost)
+  if (origin.endsWith(".tauri.localhost")) return true;
+  // file:// 协议（桌面应用 WebView）
+  if (origin === "null" || origin === "file://") return true;
+  return false;
 }
 
 function refererAllowed(referer: string): boolean {

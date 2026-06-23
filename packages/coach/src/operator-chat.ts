@@ -15,13 +15,15 @@ import type {
   OperatorToolCallResult,
   OperatorToolGateway,
 } from "./operator-tools.js";
+import type { CoachDispatchPermissionPayload } from "@openx/shared";
+import { KNOWLEDGE_SAVE_TOOL_DESCRIPTION, KNOWLEDGE_SAVE_TOOL_NAME, KnowledgeSaveToolInputSchema } from "./knowledge-tools.js";
 import { buildChatUserPrompt } from "./prompts.js";
 
 const MAX_OPERATOR_STEPS = 8;
 
 function extractOperatorAction(results: OperatorToolCallResult[]): OperatorActionProposal | undefined {
   for (const tr of results) {
-    if (tr.name !== "openx_call_api") continue;
+    if (tr.name !== "openx_call_api" && tr.name !== "request_admin_access") continue;
     const r = tr.result as { kind?: string; pendingActionId?: string; action?: OperatorActionProposal };
     if (r?.kind === "pending" && r.pendingActionId) {
       const a = r.action;
@@ -33,6 +35,26 @@ function extractOperatorAction(results: OperatorToolCallResult[]): OperatorActio
         reason: a?.reason,
       };
     }
+  }
+  return undefined;
+}
+
+export function extractDispatchPermissionProposal(
+  results: OperatorToolCallResult[],
+): CoachDispatchPermissionPayload | undefined {
+  for (const tr of results) {
+    if (tr.name !== "propose_dispatch_permission") continue;
+    const r = tr.result as {
+      kind?: string;
+      requestedMode?: "read_only" | "ask_write" | "full";
+      reason?: string;
+    };
+    if (!r?.requestedMode) continue;
+    return {
+      requestedMode: r.requestedMode,
+      reason: r.reason,
+      status: "pending",
+    };
   }
   return undefined;
 }
@@ -104,6 +126,69 @@ export async function coachOperatorChatReply(
         return result;
       },
     }),
+    propose_dispatch_permission: tool({
+      description:
+        "向用户申请变更对话派单权限（施工队只读侦察 / 写前确认 / 完全授权）",
+      inputSchema: z.object({
+        requestedMode: z.enum(["read_only", "ask_write", "full"]),
+        reason: z.string().optional(),
+      }),
+      execute: async ({
+        requestedMode,
+        reason,
+      }: {
+        requestedMode: "read_only" | "ask_write" | "full";
+        reason?: string;
+      }) => {
+        const result = { kind: "proposal", requestedMode, reason };
+        toolResults.push({
+          name: "propose_dispatch_permission",
+          args: { requestedMode, reason },
+          result,
+        });
+        return result;
+      },
+    }),
+    ...(gateway.tier !== "admin" && gateway.requestAdminAccess
+      ? {
+          request_admin_access: tool({
+            description:
+              "向用户申请将工头自控权限（operatorTier）升级为 admin，以便执行修改设置等敏感操作",
+            inputSchema: z.object({
+              reason: z.string().describe("为何需要 admin 权限"),
+              summary: z.string().optional().describe("卡片上展示的简短说明"),
+            }),
+            execute: async ({
+              reason,
+              summary,
+            }: {
+              reason: string;
+              summary?: string;
+            }) => {
+              const result = await gateway.requestAdminAccess!({ reason, summary });
+              toolResults.push({
+                name: "request_admin_access",
+                args: { reason, summary },
+                result,
+              });
+              return result;
+            },
+          }),
+        }
+      : {}),
+    ...(gateway.saveKnowledge && gateway.knowledgeProjectId
+      ? {
+          [KNOWLEDGE_SAVE_TOOL_NAME]: tool({
+            description: KNOWLEDGE_SAVE_TOOL_DESCRIPTION,
+            inputSchema: KnowledgeSaveToolInputSchema,
+            execute: async (args: z.infer<typeof KnowledgeSaveToolInputSchema>) => {
+              const result = await gateway.saveKnowledge!(args);
+              toolResults.push({ name: KNOWLEDGE_SAVE_TOOL_NAME, args, result });
+              return result;
+            },
+          }),
+        }
+      : {}),
   };
 
   const historyPrompt = buildChatUserPrompt(message, chatHistory);

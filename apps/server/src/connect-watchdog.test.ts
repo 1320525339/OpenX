@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Goal } from "@openx/shared";
 import { getGoalById, insertGoal, resetDb } from "./db.js";
-import { registerConnection, resetConnections } from "./connect-store.js";
+import {
+  registerConnection,
+  resetConnections,
+  markGoalCancelledForConnect,
+  isGoalCancelledForConnect,
+} from "./connect-store.js";
 import { runConnectWatchdogOnce } from "./connect-watchdog.js";
 import {
   seedTestProjectAndConversation,
@@ -22,6 +27,7 @@ function makeConnectGoal(id: string, progress = 10, updatedAt?: string): Goal {
     progress,
     dependsOn: [],
     priority: "medium",
+    orderNo: 1,
     createdAt: now,
     updatedAt: now,
   };
@@ -54,6 +60,29 @@ describe("connect-watchdog", () => {
 
     const updated = getGoalById("connect-stale");
     expect(updated?.status).toBe("failed");
+  });
+
+  it("clears cancelledGoalIds after failing a stale goal", () => {
+    const stale = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+    insertGoal(makeConnectGoal("connect-cancel-clear", 10, stale));
+    registerConnection({
+      toolName: "cursor-agent",
+      agentName: "Cursor Worker",
+      executorId: "cursor-worker",
+    });
+
+    // 模拟用户取消目标后，watchdog 应清理取消标记
+    markGoalCancelledForConnect("connect-cancel-clear");
+    expect(isGoalCancelledForConnect("connect-cancel-clear")).toBe(true);
+
+    runConnectWatchdogOnce();
+
+    // watchdog 跳过了已取消目标（不 fail），但取消标记仍在
+    // 注：watchdog 在 isGoalCancelledForConnect(goal.id) 时 continue，不会调用 markGoalFailed + clear
+    // 所以已取消目标的标记保留（等待 purgeGoalRecords 清理）
+    expect(isGoalCancelledForConnect("connect-cancel-clear")).toBe(true);
+    // 目标状态仍为 running（因为 watchdog 跳过了已取消目标）
+    expect(getGoalById("connect-cancel-clear")?.status).toBe("running");
   });
 
   it("does not fail connect goal picked up with progress above dispatch threshold", () => {

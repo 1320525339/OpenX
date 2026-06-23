@@ -3,9 +3,13 @@ import type {
   ConnectBootstrapStatus,
   Conversation,
   CreateGoalInput,
+  CreateKnowledgeSourceInput,
   CreateProjectInput,
   Goal,
   GoalRunState,
+  KnowledgeContextSelection,
+  KnowledgeEntry,
+  KnowledgeSourceRef,
   Project,
   ProviderConfig,
   RefinedGoal,
@@ -522,6 +526,7 @@ export const api = {
       goalId?: string;
       skillIds?: string[];
       mcpIds?: string[];
+      knowledge?: KnowledgeContextSelection;
       agentId?: string;
       forceRefine?: boolean;
       skipRefine?: boolean;
@@ -544,6 +549,7 @@ export const api = {
         goalId: opts.goalId,
         skillIds: opts.skillIds,
         mcpIds: opts.mcpIds,
+        knowledge: opts.knowledge,
         agentId: opts.agentId,
         forceRefine: opts.forceRefine,
         skipRefine: opts.skipRefine,
@@ -719,6 +725,58 @@ export const api = {
     }>(`/api/projects/${encodeURIComponent(projectId)}/memory/distill`, {
       method: "POST",
     }),
+
+  getGlobalKnowledge: () =>
+    request<{ scope: "global"; entries: KnowledgeEntry[] }>("/api/knowledge/global"),
+
+  getGlobalKnowledgeSources: () =>
+    request<{ scope: "global"; sources: KnowledgeSourceRef[] }>("/api/knowledge/sources"),
+
+  createGlobalKnowledgeSource: (body: CreateKnowledgeSourceInput) =>
+    request<{ source: KnowledgeSourceRef }>("/api/knowledge/sources", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  reindexGlobalKnowledgeSource: (sourceId: string) =>
+    request<{ source: KnowledgeSourceRef }>(
+      `/api/knowledge/sources/${encodeURIComponent(sourceId)}/reindex`,
+      { method: "POST" },
+    ),
+
+  deleteGlobalKnowledgeSource: (sourceId: string) =>
+    request<{ ok: boolean }>(`/api/knowledge/sources/${encodeURIComponent(sourceId)}`, {
+      method: "DELETE",
+    }),
+
+  getProjectKnowledge: (projectId: string) =>
+    request<{
+      projectId: string;
+      entries: KnowledgeEntry[];
+      sources: KnowledgeSourceRef[];
+      runtime: { memory: string; sections: string[] };
+    }>(`/api/projects/${encodeURIComponent(projectId)}/knowledge`),
+
+  createProjectKnowledgeSource: (projectId: string, body: CreateKnowledgeSourceInput) =>
+    request<{ source: KnowledgeSourceRef }>(
+      `/api/projects/${encodeURIComponent(projectId)}/knowledge/sources`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
+
+  reindexProjectKnowledgeSource: (projectId: string, sourceId: string) =>
+    request<{ source: KnowledgeSourceRef }>(
+      `/api/projects/${encodeURIComponent(projectId)}/knowledge/sources/${encodeURIComponent(sourceId)}/reindex`,
+      { method: "POST" },
+    ),
+
+  deleteProjectKnowledgeSource: (projectId: string, sourceId: string) =>
+    request<{ ok: boolean }>(
+      `/api/projects/${encodeURIComponent(projectId)}/knowledge/sources/${encodeURIComponent(sourceId)}`,
+      { method: "DELETE" },
+    ),
 
   confirmOperatorAction: (id: string, messageId?: number) =>
     request<{ ok: boolean; action: unknown }>(`/api/operator/actions/${id}/confirm`, {

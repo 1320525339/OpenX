@@ -13,7 +13,11 @@
     "e2e:connect": "node scripts/e2e-connect-auto.mjs",
     "e2e:acp": "node scripts/e2e-acp-run.mjs --mock",
     "e2e:acp-dispatch": "node scripts/e2e-acp-dispatch.mjs",
-    "e2e:self": "node scripts/e2e-self-bootstrap.mjs"
+    "e2e:self": "node scripts/e2e-self-bootstrap.mjs",
+    "desktop:dev": "pnpm --filter @openx/desktop build:server && pnpm --filter @openx/desktop dev",
+    "desktop:build": "pnpm --filter @openx/desktop build:server && pnpm --filter @openx/desktop build",
+    "desktop:build:debug": "pnpm --filter @openx/desktop build:server && pnpm --filter @openx/desktop build:debug",
+    "vendors:zvec": "node scripts/fetch-vendor-zvec.mjs"
   },
   "engines": {
     "node": ">=20"

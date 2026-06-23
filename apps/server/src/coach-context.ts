@@ -8,6 +8,7 @@ import {
   type CoachChatContext,
   type CoachGoalBrief,
   type Goal,
+  type KnowledgeContextSelection,
 } from "@openx/shared";
 import {
   buildGoalFeedback,
@@ -23,7 +24,8 @@ import { listConnections } from "./connect-store.js";
 import { resolveWorkspaceRoot } from "./workspace-path.js";
 import { buildExecutorSkillsMap } from "./executor-recommend-service.js";
 import { gatherContextPack, shouldGatherProjectContext } from "./context-pack.js";
-import { loadProjectMemoryContext } from "./memory-store.js";
+import { loadKnowledgeContextForCoach, loadKnowledgeContextForCoachAsync } from "./knowledge-store.js";
+import { buildKnowledgeCatalogSummary } from "./knowledge-sources.js";
 import { COACH_MCP_CATALOG } from "@openx/shared";
 import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
 import { resolveCoachAgent } from "./agents-service.js";
@@ -133,6 +135,10 @@ export function buildCoachChatContext(
     mcpIds?: string[];
     clientTimezone?: string;
     clientLocale?: string;
+    permissionMode?: "read_only" | "ask_write" | "full";
+  },
+  overrides?: {
+    projectMemory?: string;
   },
 ): CoachChatContext {
   const settings = loadSettings();
@@ -165,18 +171,32 @@ export function buildCoachChatContext(
       : resolveSystemWorkspaceRoot(settings);
 
   let contextPack: CoachChatContext["contextPack"];
-  let projectMemory: string | undefined;
-  if (isSystemMain) {
+  let projectMemory: string | undefined = overrides?.projectMemory;
+  if (projectMemory === undefined) {
+    if (isSystemMain) {
+      contextPack = buildSystemContextPack(settings);
+      projectMemory = loadKnowledgeContextForCoach({
+        isSystemMain: true,
+        workspaceRoot,
+        query: opts?.message,
+      });
+    } else {
+      if (conversation) {
+        projectMemory = loadKnowledgeContextForCoach({
+          isSystemMain: false,
+          projectId: conversation.projectId,
+          workspaceRoot,
+          query: opts?.message,
+        });
+      }
+      if (opts?.message && shouldGatherProjectContext(opts.message)) {
+        contextPack = gatherContextPack(workspaceRoot) ?? undefined;
+      }
+    }
+  } else if (isSystemMain) {
     contextPack = buildSystemContextPack(settings);
-  } else {
-    if (opts?.message) {
-      projectMemory = conversation
-        ? loadProjectMemoryContext(workspaceRoot, conversation.projectId, opts.message)
-        : undefined;
-    }
-    if (opts?.message && shouldGatherProjectContext(opts.message)) {
-      contextPack = gatherContextPack(workspaceRoot) ?? undefined;
-    }
+  } else if (opts?.message && shouldGatherProjectContext(opts.message)) {
+    contextPack = gatherContextPack(workspaceRoot) ?? undefined;
   }
 
   const enabledMcps = opts?.mcpIds?.length
@@ -213,6 +233,7 @@ export function buildCoachChatContext(
     agentName: coachAgent.name,
     agentRolePrompt: coachAgent.rolePrompt,
     operatorTier: settings.operatorTier ?? "off",
+    dispatchPermissionMode: opts?.permissionMode,
     llmContextSettings: mergedLlmContext,
     projectName: project?.name,
   };
@@ -228,4 +249,55 @@ export function buildCoachChatContext(
   });
 
   return partial;
+}
+
+/** Coach 对话上下文（知识检索走混合/向量） */
+export async function buildCoachChatContextAsync(
+  conversationId: string,
+  goalId?: string,
+  opts?: {
+    message?: string;
+    mcpIds?: string[];
+    clientTimezone?: string;
+    clientLocale?: string;
+    knowledgeSelection?: KnowledgeContextSelection;
+    permissionMode?: "read_only" | "ask_write" | "full";
+  },
+): Promise<CoachChatContext> {
+  const settings = loadSettings();
+  const isSystemMain = conversationId === SYSTEM_MAIN_CONVERSATION_ID;
+  const conversation = getConversationById(conversationId);
+  const projectDir = getWorkspaceDirForConversation(conversationId);
+  const workspaceRoot = isSystemMain
+    ? resolveSystemWorkspaceRoot(settings)
+    : projectDir
+      ? resolveWorkspaceRoot(projectDir)
+      : resolveSystemWorkspaceRoot(settings);
+
+  const catalog = buildKnowledgeCatalogSummary({
+    isSystemMain,
+    projectId: conversation?.projectId,
+    selection: opts?.knowledgeSelection,
+  });
+
+  let projectMemory: string | undefined;
+  projectMemory = await loadKnowledgeContextForCoachAsync({
+    isSystemMain,
+    projectId: conversation?.projectId,
+    workspaceRoot,
+    query: opts?.message,
+    knowledgeSelection: opts?.knowledgeSelection,
+    knowledgeCatalogSummary: catalog.summary,
+    scopeFlags: {
+      includeGlobal: catalog.includeGlobal,
+      includeProject: catalog.includeProject,
+      includeRuntime: catalog.includeRuntime,
+      globalSourceIds: catalog.globalSourceIds,
+      projectSourceIds: catalog.projectSourceIds,
+    },
+  });
+
+  const ctx = buildCoachChatContext(conversationId, goalId, opts, { projectMemory });
+  ctx.knowledgeSelectionSummary = catalog.summary;
+  return ctx;
 }

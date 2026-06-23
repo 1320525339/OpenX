@@ -12,11 +12,10 @@ const SERVER_FLUSH_MS = 300;
 
 
 type PersistedIslandQueue = {
-
   seenIds: string[];
-
+  /** 已关闭的 goal+kind 去重键，避免同状态补丁重复弹窗 */
+  seenDedupeKeys: string[];
   queue: DynamicIslandPayload[];
-
 };
 
 
@@ -28,6 +27,8 @@ let currentPayload: DynamicIslandPayload | null = null;
 let catchupMode = true;
 
 let showHandler: (payload: DynamicIslandPayload) => void = () => {};
+
+let updateHandler: (payload: DynamicIslandPayload) => void = () => {};
 
 let dismissHandler: () => void = () => {};
 
@@ -45,21 +46,17 @@ function loadStore(): PersistedIslandQueue {
 
     const raw = localStorage.getItem(STORAGE_KEY);
 
-    if (!raw) return { seenIds: [], queue: [] };
+    if (!raw) return { seenIds: [], seenDedupeKeys: [], queue: [] };
 
     const parsed = JSON.parse(raw) as PersistedIslandQueue;
 
     return {
-
       seenIds: Array.isArray(parsed.seenIds) ? parsed.seenIds : [],
-
+      seenDedupeKeys: Array.isArray(parsed.seenDedupeKeys) ? parsed.seenDedupeKeys : [],
       queue: Array.isArray(parsed.queue) ? parsed.queue : [],
-
     };
-
   } catch {
-
-    return { seenIds: [], queue: [] };
+    return { seenIds: [], seenDedupeKeys: [], queue: [] };
 
   }
 
@@ -76,11 +73,9 @@ function saveStore(data: PersistedIslandQueue): void {
       STORAGE_KEY,
 
       JSON.stringify({
-
         seenIds: data.seenIds.slice(-MAX_SEEN),
-
+        seenDedupeKeys: data.seenDedupeKeys.slice(-MAX_SEEN),
         queue: data.queue.slice(-MAX_QUEUE),
-
       }),
 
     );
@@ -149,18 +144,24 @@ async function flushServerMarks(): Promise<void> {
 
 
 
+function isDedupeSeen(key: string): boolean {
+  return loadStore().seenDedupeKeys.includes(key);
+}
+
+export function clearIslandSeenDedupe(key: string): void {
+  const data = loadStore();
+  data.seenDedupeKeys = data.seenDedupeKeys.filter((k) => k !== key);
+  saveStore(data);
+}
+
 export function bindIslandQueueHandlers(handlers: {
-
   show: (payload: DynamicIslandPayload) => void;
-
+  update?: (payload: DynamicIslandPayload) => void;
   dismiss: () => void;
-
 }): void {
-
   showHandler = handlers.show;
-
+  updateHandler = handlers.update ?? handlers.show;
   dismissHandler = handlers.dismiss;
-
 }
 
 
@@ -191,22 +192,24 @@ export function isIslandSeen(id: string): boolean {
 
 
 
-export function markIslandSeen(id: string): void {
-
+export function markIslandSeen(id: string, dedupeKey?: string | null): void {
   const data = loadStore();
 
   if (!data.seenIds.includes(id)) {
-
     data.seenIds = [...data.seenIds, id].slice(-MAX_SEEN);
-
+  }
+  if (dedupeKey && !data.seenDedupeKeys.includes(dedupeKey)) {
+    data.seenDedupeKeys = [...data.seenDedupeKeys, dedupeKey].slice(-MAX_SEEN);
   }
 
   data.queue = data.queue.filter((item) => item.id !== id);
+  if (dedupeKey) {
+    data.queue = data.queue.filter((item) => islandDedupeKey(item) !== dedupeKey);
+  }
 
   saveStore(data);
 
   scheduleServerMark(id);
-
 }
 
 
@@ -249,20 +252,22 @@ export async function hydrateIslandSeenFromServer(): Promise<void> {
 
 export function requestIsland(payload: DynamicIslandPayload): void {
   const normalized = withIslandDismissAction(payload);
+  const dedupe = islandDedupeKey(normalized);
+
   if (isIslandSeen(normalized.id)) return;
+  if (dedupe && isDedupeSeen(dedupe)) return;
   if (showingId === normalized.id) return;
 
   // SSE 历史重放期间静默标记已读，避免一进页面弹出旧通知
   if (catchupMode) {
-    markIslandSeen(normalized.id);
+    markIslandSeen(normalized.id, dedupe);
     return;
   }
 
-  const dedupe = islandDedupeKey(normalized);
   if (dedupe && currentPayload && islandDedupeKey(currentPayload) === dedupe) {
     currentPayload = normalized;
     showingId = normalized.id;
-    showHandler(normalized);
+    updateHandler(normalized);
     return;
   }
 
@@ -315,10 +320,10 @@ export function drainIslandQueue(): void {
 /** 用户关闭 / 自动消失 / 操作完成后调用 */
 
 export function completeIslandDisplay(payloadId?: string): void {
-
   const id = payloadId ?? showingId;
+  const dedupe = currentPayload ? islandDedupeKey(currentPayload) : null;
 
-  if (id) markIslandSeen(id);
+  if (id) markIslandSeen(id, dedupe);
 
   showingId = null;
   currentPayload = null;
@@ -326,7 +331,6 @@ export function completeIslandDisplay(payloadId?: string): void {
   dismissHandler();
 
   drainIslandQueue();
-
 }
 
 
@@ -339,6 +343,7 @@ export function resetIslandQueueForTests(): void {
   serverSyncDisabled = true;
 
   showHandler = () => {};
+  updateHandler = () => {};
 
   dismissHandler = () => {};
 

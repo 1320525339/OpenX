@@ -163,16 +163,23 @@ export function saveSkillSelection(next: Record<string, boolean>, skills: CoachS
   localStorage.setItem(SKILLS_BINDINGS_KEY, JSON.stringify(merged));
 }
 
-export function loadMcpSelection(): Record<string, boolean> {
+export function loadMcpSelection(catalog: CoachMcp[] = COACH_MCPS): Record<string, boolean> {
   const stored = readJson<Record<string, boolean>>(MCPS_KEY, {});
-  return COACH_MCPS.reduce<Record<string, boolean>>((acc, mcp) => {
+  return catalog.reduce<Record<string, boolean>>((acc, mcp) => {
     acc[mcp.id] = stored[mcp.id] ?? false;
     return acc;
   }, {});
 }
 
 export function saveMcpSelection(next: Record<string, boolean>) {
-  localStorage.setItem(MCPS_KEY, JSON.stringify(next));
+  const stored = readJson<Record<string, boolean>>(MCPS_KEY, {});
+  localStorage.setItem(MCPS_KEY, JSON.stringify({ ...stored, ...next }));
+}
+
+export function enabledSelectionIds(map: Record<string, boolean>): string[] {
+  return Object.entries(map)
+    .filter(([, on]) => on)
+    .map(([id]) => id);
 }
 
 export function loadAgentSelection(catalog: CoachAgent[] = COACH_AGENTS): string {

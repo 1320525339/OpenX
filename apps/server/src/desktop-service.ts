@@ -6,7 +6,6 @@ import {
   normalizeOxspUrl,
   oxspSlotLabel,
   OXSP_DOCK_TEMPLATES,
-  OXSP_EXTENSION_TEMPLATES,
   dockExtensionTemplates,
   removeOxspSlot,
   resolveTemplateConfig,
@@ -162,7 +161,11 @@ export async function runOxspSlotCommand(
       const raw = body.url ?? "";
       const url = normalizeOxspUrl(raw);
       if (!url) throw new Error("INVALID_URL");
-      if (slot.config.kind === "browser" || slot.config.kind === "web") {
+      if (slot.config.kind === "web") {
+        catalog = updateOxspSlot(catalog, slotId, {
+          config: { kind: "web", url },
+        });
+      } else if (slot.config.kind === "browser") {
         const sessionId = slot.config.sessionId ?? slotId;
         await navigateBrowserSession(sessionId, url);
         catalog = updateOxspSlot(catalog, slotId, {

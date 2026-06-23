@@ -11,3 +11,6 @@ dist/
 vendors/
 apps/server/Test/
 *.tsbuildinfo
+.dbg/
+debug-goals-post-disconnect.md
+apps/server/nul

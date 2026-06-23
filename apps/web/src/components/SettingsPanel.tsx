@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Settings } from "@openx/shared";
-import { OPERATOR_TIER_LABELS, OperatorTierSchema, type Goal } from "@openx/shared";
+import { OPERATOR_TIER_LABELS, OperatorTierSchema } from "@openx/shared";
 
-import type { ExecutorInfo } from "../api";
+import type { ExecutorInfo, SettingsResponse } from "../api";
+import { settingsDraftDirty } from "../lib/settings-draft";
 
 import { ModelProviderSettings } from "./ModelProviderSettings";
 import { BriefTemplateSettings } from "./BriefTemplateSettings";
-import { OperatorWorkflowPanel } from "./OperatorWorkflowPanel";
 import { WorkspacePicker } from "./WorkspacePicker";
 import { ThemePreferenceControl } from "./ThemePreferenceControl";
+import { DesktopSettingsSection } from "./DesktopSettingsSection";
 import { useTheme } from "../lib/use-theme";
+import { useThemeRippleContext } from "../lib/theme-ripple-context";
 
 
 
@@ -22,17 +24,11 @@ type Props = {
 
   executors: ExecutorInfo[];
 
-  onSave: (s: Settings) => Promise<void>;
-
-  onWorkspaceSave?: (path: string) => Promise<void>;
+  onSave: (s: Settings) => Promise<SettingsResponse>;
 
   onRefreshExecutors: () => Promise<void>;
 
   onReloadSettings: () => Promise<void>;
-
-  projectId?: string | null;
-
-  goals?: Goal[];
 
 };
 
@@ -48,15 +44,9 @@ export function SettingsPanel({
 
   onSave,
 
-  onWorkspaceSave,
-
   onRefreshExecutors: _onRefreshExecutors,
 
   onReloadSettings,
-
-  projectId,
-
-  goals,
 
 }: Props) {
 
@@ -65,17 +55,20 @@ export function SettingsPanel({
   const [saving, setSaving] = useState(false);
 
   const [savedFlash, setSavedFlash] = useState(false);
+  const dirtyRef = useRef(false);
   const { preference: themePreference, setPreference: setThemePreference } = useTheme();
+  const themeRipple = useThemeRippleContext();
 
-
+  const dirty = settingsDraftDirty(settings, local);
 
   useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
 
+  useEffect(() => {
+    if (!settings || dirtyRef.current) return;
     setLocal(settings);
-
   }, [settings]);
-
-
 
   if (!local) {
 
@@ -93,34 +86,17 @@ export function SettingsPanel({
 
 
 
-  const dirty =
-
-    settings && local
-
-      ? JSON.stringify(local) !== JSON.stringify(settings)
-
-      : false;
-
-
-
   const save = async () => {
-
     setSaving(true);
-
     try {
-
-      await onSave(local);
-
+      const saved = await onSave(local);
+      dirtyRef.current = false;
+      setLocal(saved);
       setSavedFlash(true);
-
       setTimeout(() => setSavedFlash(false), 2500);
-
     } finally {
-
       setSaving(false);
-
     }
-
   };
 
 
@@ -137,7 +113,10 @@ export function SettingsPanel({
 
             settings={local}
 
-            onChange={setLocal}
+            onChange={(next) => {
+              dirtyRef.current = true;
+              setLocal(next);
+            }}
 
             onReload={onReloadSettings}
 
@@ -150,9 +129,12 @@ export function SettingsPanel({
             <h4 className="settings-section-title">偏好</h4>
 
             <ThemePreferenceControl
-              value={themePreference}
+              value={themeRipple?.preference ?? themePreference}
               onChange={setThemePreference}
+              onChangeWithRipple={themeRipple?.changeWithRipple}
             />
+
+            <DesktopSettingsSection />
 
             <div className="mech-switch">
 
@@ -164,49 +146,50 @@ export function SettingsPanel({
 
                 checked={local.notifyOnComplete}
 
-                onChange={(e) => setLocal({ ...local, notifyOnComplete: e.target.checked })}
+                onChange={(e) => {
+                  dirtyRef.current = true;
+                  setLocal((prev) =>
+                    prev ? { ...prev, notifyOnComplete: e.target.checked } : prev,
+                  );
+                }}
 
               />
 
             </div>
 
-            {onWorkspaceSave ? (
-
+            {workspaceResolved !== undefined ? (
               <>
-
                 <label className="field-label">系统工作目录</label>
-
                 <WorkspacePicker
-
                   variant="settings"
-
                   value={settings?.systemWorkspaceRoot ?? local.systemWorkspaceRoot}
-
                   resolvedPath={workspaceResolved}
-
                   onSave={async (path) => {
-
-                    setLocal({ ...local, systemWorkspaceRoot: path });
-
-                    await onWorkspaceSave(path);
-
+                    const next = { ...local, systemWorkspaceRoot: path };
+                    dirtyRef.current = true;
+                    setLocal(next);
+                    const saved = await onSave(next);
+                    dirtyRef.current = false;
+                    setLocal(saved);
+                    setSavedFlash(true);
+                    setTimeout(() => setSavedFlash(false), 2500);
                   }}
-
                 />
-
                 <p className="settings-hint settings-hint-tight">
-
                   调度台、系统任务、Skills 与 MCP 均使用此目录；各项目任务仍以项目目录为准。
-
                 </p>
-
               </>
-
             ) : null}
 
           </section>
 
-          <BriefTemplateSettings settings={local} onChange={setLocal} />
+          <BriefTemplateSettings
+            settings={local}
+            onChange={(next) => {
+              dirtyRef.current = true;
+              setLocal(next);
+            }}
+          />
 
           <section className="settings-section">
             <h4 className="settings-section-title">施工队</h4>
@@ -231,7 +214,10 @@ export function SettingsPanel({
                       name="operatorTier"
                       value={tier}
                       checked={(local.operatorTier ?? "off") === tier}
-                      onChange={() => setLocal({ ...local, operatorTier: tier })}
+                      onChange={() => {
+                        dirtyRef.current = true;
+                        setLocal((prev) => (prev ? { ...prev, operatorTier: tier } : prev));
+                      }}
                     />
                     <span className="settings-operator-tier-label">{meta.label}</span>
                     <span className="settings-operator-tier-desc">{meta.description}</span>
@@ -245,13 +231,6 @@ export function SettingsPanel({
               </p>
             ) : null}
           </section>
-
-          <OperatorWorkflowPanel
-            savedSettings={settings}
-            draftSettings={local}
-            projectId={projectId}
-            goals={goals}
-          />
 
         </div>
 

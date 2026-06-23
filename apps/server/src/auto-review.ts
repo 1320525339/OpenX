@@ -38,7 +38,7 @@ import {
 import { recordForemanReviewVerdict } from "./foreman-review.js";
 import { routeParentReviewFail } from "./sub-goals.js";
 import { buildReviewPacket, recordReviewRound } from "./review-context.js";
-import { appendProjectMemorySection } from "./memory-store.js";
+import { appendProjectMemorySection } from "./knowledge-store.js";
 import {
   formatVerifyEvidenceBlock,
   runReviewVerification,

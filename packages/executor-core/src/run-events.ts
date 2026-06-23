@@ -75,6 +75,7 @@ export class RunEventEmitter {
     isError?: boolean,
     toolCallId?: string,
     resultPreview?: string,
+    fileDiff?: import("@openx/shared").ToolFileDiff,
   ) {
     await this.flushText();
     await this.flushThinking();
@@ -84,6 +85,7 @@ export class RunEventEmitter {
       isError,
       toolCallId,
       resultPreview,
+      fileDiff,
       timestamp: ts(),
     });
   }

@@ -1,4 +1,5 @@
 import type { CoachChatContext, CoachIntent } from "./coach.js";
+import { DISPATCH_PERMISSION_LABELS, type DispatchPermissionMode } from "./dispatch-context.js";
 import { classifyCoachIntent } from "./coach-intent.js";
 import { buildApiCatalogResponse } from "./api-catalog.js";
 import { OPERATOR_TIER_LABELS, type OperatorTier } from "./operator-tier.js";
@@ -34,6 +35,8 @@ export type LlmRuntimeSnapshot = {
   executorsSummary: string;
   operatorTier: OperatorTier;
   operatorCapabilities: string;
+  dispatchPermissionMode: DispatchPermissionMode | "default";
+  dispatchPermissionLabel: string;
   playbookSummary: string;
   intentHint: string;
   audienceLabel: string;
@@ -84,6 +87,12 @@ export function buildLlmRuntimeSnapshot(
   }).format(now);
 
   const tier = input.context.operatorTier ?? "off";
+  const dispatchMode = input.context.dispatchPermissionMode ?? "default";
+  const dispatchLabel =
+    dispatchMode === "default"
+      ? "默认（完全授权）"
+      : (DISPATCH_PERMISSION_LABELS[dispatchMode as Exclude<typeof dispatchMode, "default">]
+          ?.label ?? dispatchMode);
   const catalog = buildApiCatalogResponse();
   const playbook = buildOperatorPlaybook(input.baseUrl);
   const audience = predictAudienceProfile(
@@ -119,6 +128,8 @@ export function buildLlmRuntimeSnapshot(
     executorsSummary: input.context.executors?.join("、") ?? "pi",
     operatorTier: tier,
     operatorCapabilities: formatOperatorCapabilities(tier),
+    dispatchPermissionMode: dispatchMode,
+    dispatchPermissionLabel: dispatchLabel,
     playbookSummary: playbook.concepts.slice(0, 4).join("\n"),
     intentHint: intent ?? "（无当前消息）",
     audienceLabel: audience.label,

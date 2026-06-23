@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { normalizeLayout } from "./pin-desktop.js";
+import { normalizeLayout, setPinSpan, setWidgetSpan, columnSpan, extensionSlotColumn } from "./pin-desktop.js";
 import {
   applySeamResizeCommit,
   buildPinSeams,
   computeSeamResizePreview,
   defaultSeamBoundaryX,
   isSeamVisuallyPlaced,
+  pickSeamCommitPreview,
   resolveSeamBoundaryX,
   resolveSeamPointerX,
   seamAffectsWidget,
-  seamForWidgetLeftEdge,
-  seamForWidgetRightEdge,
   seamLineLeftPx,
 } from "./pin-desktop-seam.js";
 
@@ -45,14 +44,14 @@ describe("pin-desktop-seam", () => {
 
   it("finds dual seam between wide-left and third-column card", () => {
     const layout = normalizeLayout({
-      cols: ["chat", null, "kanban"],
+      cols: ["chat", null, "evidence"],
       wide: [true, false, false],
     });
     const seam = buildPinSeams(layout)[0];
     expect(seam).toMatchObject({
       boundary: 1,
       leftWidget: "chat",
-      rightWidget: "kanban",
+      rightWidget: "evidence",
       pairRightCol: 2,
       dual: true,
     });
@@ -85,7 +84,7 @@ describe("pin-desktop-seam", () => {
 
   it("single card expands into empty neighbor column", () => {
     const layout = normalizeLayout({
-      cols: ["chat", null, "kanban"],
+      cols: ["chat", null, "evidence"],
       wide: [false, false, false],
     });
     const seam = buildPinSeams(layout)[0];
@@ -98,7 +97,7 @@ describe("pin-desktop-seam", () => {
 
   it("wide card shrinks before third column snap", () => {
     const layout = normalizeLayout({
-      cols: ["chat", null, "kanban"],
+      cols: ["chat", null, "evidence"],
       wide: [true, false, false],
     });
     const seam = buildPinSeams(layout)[0];
@@ -108,26 +107,26 @@ describe("pin-desktop-seam", () => {
     expect(wideDefault).toBeCloseTo(297.3, 0);
   });
 
-  it("commits wide on left column after seam crosses midpoint", () => {
+  it("prefers middle-column expand on boundary-0 when third column is empty", () => {
     const layout = normalizeLayout({
-      cols: ["chat", "tasks", "kanban"],
+      cols: ["chat", "tasks", null],
       wide: [false, false, false],
     });
     const seam = buildPinSeams(layout)[0];
     const next = applySeamResizeCommit(layout, seam, true);
-    expect(next.cols).toEqual(["chat", null, "kanban"]);
-    expect(next.wide[0]).toBe(true);
+    expect(next.cols).toEqual(["chat", "tasks", null]);
+    expect(next.wide[1]).toBe(true);
   });
 
   it("finds seam when only third column is pinned beside empty middle", () => {
     const layout = normalizeLayout({
-      cols: [null, null, "kanban"],
+      cols: [null, null, "evidence"],
       wide: [false, false, false],
     });
     const seam = buildPinSeams(layout)[0];
     expect(seam).toMatchObject({
       boundary: 1,
-      leftWidget: "kanban",
+      leftWidget: "evidence",
       pairRightCol: 2,
       rightWidget: null,
     });
@@ -135,12 +134,12 @@ describe("pin-desktop-seam", () => {
 
   it("expands third column card into empty middle slot", () => {
     const layout = normalizeLayout({
-      cols: [null, null, "kanban"],
+      cols: [null, null, "evidence"],
       wide: [false, false, false],
     });
     const seam = buildPinSeams(layout)[0];
     const next = applySeamResizeCommit(layout, seam, true);
-    expect(next.cols).toEqual([null, "kanban", null]);
+    expect(next.cols).toEqual([null, "evidence", null]);
     expect(next.wide[1]).toBe(true);
   });
 
@@ -150,11 +149,11 @@ describe("pin-desktop-seam", () => {
       leftCol: 1,
       leftWidget: "tasks" as const,
       pairRightCol: 2,
-      rightWidget: "kanban" as const,
+      rightWidget: "evidence" as const,
       dual: true,
     };
     const layout = normalizeLayout({
-      cols: ["chat", "tasks", "kanban"],
+      cols: ["chat", "tasks", "evidence"],
       wide: [false, false, false],
     });
     const gridRect = {
@@ -256,7 +255,6 @@ describe("pin-desktop-seam", () => {
         null,
       ),
     ).toBe(true);
-    expect(seamForWidgetRightEdge(layout, "detail")).toEqual(seam);
   });
 
   it("shrinks lone wide card back to one column", () => {
@@ -292,7 +290,6 @@ describe("pin-desktop-seam", () => {
         null,
       ),
     ).toBe(true);
-    expect(seamForWidgetRightEdge(layout, "tasks")).toEqual(seam);
   });
 
   it("expands middle column into empty right slot", () => {
@@ -311,9 +308,208 @@ describe("pin-desktop-seam", () => {
     const next = applySeamResizeCommit(layout, seam, preview);
     expect(next.cols).toEqual(["chat", "tasks", null]);
     expect(next.wide[1]).toBe(true);
+    expect(extensionSlotColumn(next)).toBe(null);
   });
 
-  it("hides dual seam when right widget is already wide", () => {
+  it("expands third-column card into middle wide without leaving extension slot", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", null, "tasks"],
+      wide: [false, false, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 360,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitLeftWide).toBe(true);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["chat", "tasks", null]);
+    expect(next.wide).toEqual([false, true, false]);
+    expect(extensionSlotColumn(next)).toBe(null);
+  });
+
+  it("expands middle column via boundary-0 when third column is empty", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", "tasks", null],
+      wide: [false, false, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.boundary === 0)!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 260,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["chat", "tasks", null]);
+    expect(next.wide).toEqual([false, true, false]);
+    expect(extensionSlotColumn(next)).toBe(null);
+  });
+
+  it("pickSeamCommitPreview keeps wide tier when release position snaps back", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", "tasks", null],
+      wide: [false, false, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
+    const startPreview = computeSeamResizePreview({
+      seam,
+      clientX: 300,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    const maxPreview = computeSeamResizePreview({
+      seam,
+      clientX: 360,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    const releasePreview = computeSeamResizePreview({
+      seam,
+      clientX: 300,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(maxPreview.commitLeftWide).toBe(true);
+    expect(releasePreview.commitLeftWide).toBe(false);
+    const commitPreview = pickSeamCommitPreview(
+      startPreview,
+      startPreview,
+      maxPreview,
+      releasePreview,
+    );
+    expect(commitPreview.commitLeftWide).toBe(true);
+    const next = applySeamResizeCommit(layout, seam, commitPreview);
+    expect(next.wide[1]).toBe(true);
+    expect(extensionSlotColumn(next)).toBe(null);
+  });
+
+  it("pickSeamCommitPreview keeps narrow tier when shrinking span-3 from fullscreen", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", null, null],
+      wide: [true, false, true],
+    });
+    const seam = buildPinSeams(layout)[0]!;
+    const startPreview = computeSeamResizePreview({
+      seam,
+      clientX: 390,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    const minPreview = computeSeamResizePreview({
+      seam,
+      clientX: 300,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    const releasePreview = computeSeamResizePreview({
+      seam,
+      clientX: 390,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(startPreview.commitSpan).toBe(3);
+    expect(minPreview.commitSpan).toBe(2);
+    expect(releasePreview.commitSpan).toBe(3);
+    const commitPreview = pickSeamCommitPreview(
+      startPreview,
+      minPreview,
+      startPreview,
+      releasePreview,
+    );
+    expect(commitPreview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, commitPreview);
+    expect(columnSpan(next, 0)).toBe(2);
+    expect(next.wide).toEqual([true, false, false]);
+  });
+
+  it("shrinks lone span-3 chat back to single column", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", null, null],
+      wide: [true, false, true],
+    });
+    const seam = buildPinSeams(layout)[0]!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 220,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(1);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["chat", null, null]);
+    expect(next.wide).toEqual([false, false, false]);
+    expect(columnSpan(next, 0)).toBe(1);
+    expect(extensionSlotColumn(next)).toBe(1);
+  });
+
+  it("shows shrink seam for lone span-3 card", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", null, null],
+      wide: [true, false, true],
+    });
+    const seam = buildPinSeams(layout)[0]!;
+    expect(
+      isSeamVisuallyPlaced(
+        seam,
+        layout,
+        { left: 100, right: 700, top: 0, bottom: 400 } as DOMRect,
+        null,
+      ),
+    ).toBe(true);
+  });
+
+  it("restores middle column when shrinking wide-left that displaced neighbor", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", null, "tasks"],
+      wide: [true, false, false],
+    });
+    const seam = buildPinSeams(layout)[0]!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 195,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(1);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["chat", "tasks", null]);
+    expect(next.wide).toEqual([false, false, false]);
+  });
+
+  it("commits chat expand from 1,2,2 layout to wide-left single-right", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", "tasks", null],
+      wide: [false, true, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.boundary === 0)!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 260,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["chat", null, "tasks"]);
+    expect(next.wide).toEqual([true, false, false]);
+  });
+
+  it("shows boundary-0 squeeze seam when right widget is already wide", () => {
     const layout = normalizeLayout({
       cols: ["detail", "tasks", null],
       wide: [false, true, false],
@@ -323,19 +519,10 @@ describe("pin-desktop-seam", () => {
       isSeamVisuallyPlaced(
         seam,
         layout,
-        { left: 100, right: 380, top: 0, bottom: 400 } as DOMRect,
-        { left: 390, right: 900, top: 0, bottom: 400 } as DOMRect,
+        { left: 100, right: 180, top: 0, bottom: 400 } as DOMRect,
+        { left: 188, right: 900, top: 0, bottom: 400 } as DOMRect,
       ),
-    ).toBe(false);
-  });
-
-  it("maps wide card left edge to neighbor dual seam when present", () => {
-    const layout = normalizeLayout({
-      cols: ["detail", "tasks", null],
-      wide: [false, true, false],
-    });
-    const dualSeam = buildPinSeams(layout).find((s) => s.boundary === 0)!;
-    expect(seamForWidgetLeftEdge(layout, "tasks")).toEqual(dualSeam);
+    ).toBe(true);
   });
 
   it("squeezes wide right card when left neighbor expands", () => {
@@ -357,15 +544,13 @@ describe("pin-desktop-seam", () => {
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "right",
-      actingWidget: "detail",
     })!;
     expect(expandLeft.leftWidth).toBeGreaterThan(atRest.leftWidth);
     expect(expandLeft.rightWidth).toBeLessThan(atRest.rightWidth);
     expect(expandLeft.consumeRight).toBe(false);
   });
 
-  it("mirrors wide right card left-edge drag so moving left shrinks", () => {
+  it("shrinks wide-right card when seam moves left past midpoint", () => {
     const layout = normalizeLayout({
       cols: ["detail", "tasks", null],
       wide: [false, true, false],
@@ -384,11 +569,9 @@ describe("pin-desktop-seam", () => {
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "left",
-      actingWidget: "tasks",
     })!;
-    expect(dragLeft.rightWidth).toBeLessThan(atRest.rightWidth);
-    expect(dragLeft.leftWidth).toBeGreaterThan(atRest.leftWidth);
+    expect(dragLeft.rightWidth).toBeGreaterThan(atRest.rightWidth);
+    expect(dragLeft.leftWidth).toBeLessThan(atRest.leftWidth);
   });
 
   it("commits squeeze from narrow-left wide-right to wide-left narrow-right", () => {
@@ -423,8 +606,6 @@ describe("pin-desktop-seam", () => {
       pairRightCol: 2,
       dual: true,
     });
-    expect(seamForWidgetLeftEdge(layout, "tasks")).toEqual(seam);
-    expect(seamForWidgetRightEdge(layout, "detail")).toEqual(seam);
   });
 
   it("expands right card when wide-left shrinks from right edge", () => {
@@ -446,8 +627,6 @@ describe("pin-desktop-seam", () => {
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "right",
-      actingWidget: "detail",
     })!;
     expect(shrinkLeft.leftWidth).toBeLessThan(atRest.leftWidth);
     expect(shrinkLeft.rightWidth).toBeGreaterThan(atRest.rightWidth);
@@ -473,8 +652,6 @@ describe("pin-desktop-seam", () => {
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "right",
-      actingWidget: "detail",
     })!;
     expect(squeezeRight.boundaryX).toBeGreaterThan(atRest.boundaryX);
     expect(squeezeRight.leftWidth).toBeGreaterThan(atRest.leftWidth);
@@ -496,16 +673,81 @@ describe("pin-desktop-seam", () => {
     })!;
     expect(preview.consumeRight).toBe(true);
     const next = applySeamResizeCommit(layout, seam, preview);
-    expect(next.cols).toEqual(["detail", null, null]);
-    expect(next.wide).toEqual([true, false, false]);
+    expect(next.cols).toEqual(["detail", null, "tasks"]);
+    expect(next.wide).toEqual([true, false, true]);
   });
 
-  it("commits reverse squeeze to wide-right narrow-left", () => {
+  it("commits span-3 when wide-left crosses full width with third column card", () => {
     const layout = normalizeLayout({
       cols: ["detail", null, "tasks"],
       wide: [true, false, false],
     });
     const seam = buildPinSeams(layout)[0];
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 400,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitLeftWide).toBe(true);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["detail", null, "tasks"]);
+    expect(next.wide).toEqual([true, false, true]);
+  });
+
+  it("shrinks span-3 to span-2 and restores third-column card", () => {
+    let layout = normalizeLayout({
+      cols: ["chat", null, "detail"],
+      wide: [true, false, false],
+    });
+    layout = setPinSpan(layout, 0, 3);
+    expect(layout.cols).toEqual(["chat", null, "detail"]);
+    expect(layout.wide).toEqual([true, false, true]);
+
+    const seam = buildPinSeams(layout)[0]!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 300,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.wide).toEqual([true, false, false]);
+    expect(next.cols).toEqual(["chat", null, "detail"]);
+  });
+
+  it("shrinks third-column-only card from span-2 back to column 3", () => {
+    let layout = normalizeLayout({
+      cols: [null, null, "evidence"],
+      wide: [false, false, false],
+    });
+    const expandSeam = buildPinSeams(layout)[0]!;
+    layout = applySeamResizeCommit(layout, expandSeam, true);
+    expect(layout.cols).toEqual([null, "evidence", null]);
+    expect(layout.wide).toEqual([false, true, false]);
+
+    const shrinkSeam = buildPinSeams(layout)[0]!;
+    const shrinkPreview = computeSeamResizePreview({
+      seam: shrinkSeam,
+      clientX: 140,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    const shrunk = applySeamResizeCommit(layout, shrinkSeam, shrinkPreview);
+    expect(shrunk.cols).toEqual([null, "evidence", null]);
+    expect(shrunk.wide).toEqual([false, false, false]);
+  });
+
+  it("shrinks 010 wide middle back to single column without jumping to col3", () => {
+    const layout = normalizeLayout({
+      cols: [null, "tasks", null],
+      wide: [false, true, false],
+    });
+    const seam = buildPinSeams(layout)[0]!;
     const preview = computeSeamResizePreview({
       seam,
       clientX: 220,
@@ -515,11 +757,240 @@ describe("pin-desktop-seam", () => {
     })!;
     expect(preview.commitLeftWide).toBe(false);
     const next = applySeamResizeCommit(layout, seam, preview);
-    expect(next.cols).toEqual(["detail", "tasks", null]);
-    expect(next.wide).toEqual([false, true, false]);
+    expect(next.cols).toEqual([null, "tasks", null]);
+    expect(next.wide).toEqual([false, false, false]);
+    expect(extensionSlotColumn(next)).toBe(0);
   });
 
-  it("mirrors right-widget right-edge drag so moving right expands", () => {
+  it("shrinks 110 wide middle back to chat and tasks side by side", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", "tasks", null],
+      wide: [false, true, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 220,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["chat", "tasks", null]);
+    expect(next.wide).toEqual([false, false, false]);
+  });
+
+  it("commits span-3 at third tier snap", () => {
+    const layout = normalizeLayout({
+      cols: ["detail", null, "tasks"],
+      wide: [true, false, false],
+    });
+    const seam = buildPinSeams(layout)[0];
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 360,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(3);
+    expect(preview.consumeRight).toBe(true);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["detail", null, "tasks"]);
+    expect(next.wide).toEqual([true, false, true]);
+  });
+
+  it("commits span-3 for wide-left with empty third column at third tier", () => {
+    const layout = normalizeLayout({
+      cols: ["detail", null, null],
+      wide: [true, false, false],
+    });
+    const seam = buildPinSeams(layout)[0];
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 370,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(3);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.wide).toEqual([true, false, true]);
+  });
+
+  it("keeps wide-left layout when seam release stays on same span tier", () => {
+    const layout = normalizeLayout({
+      cols: ["detail", null, "tasks"],
+      wide: [true, false, false],
+    });
+    const seam = buildPinSeams(layout)[0];
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 300,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["detail", null, "tasks"]);
+    expect(next.wide).toEqual([true, false, false]);
+  });
+
+  it("shrinks wide-left with third-column card back to one column", () => {
+    const layout = normalizeLayout({
+      cols: ["detail", null, "tasks"],
+      wide: [true, false, false],
+    });
+    const seam = buildPinSeams(layout)[0];
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 195,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(1);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["detail", "tasks", null]);
+    expect(next.wide).toEqual([false, false, false]);
+  });
+
+  it("expands first column progressively from span-1 through span-3", () => {
+    const start = normalizeLayout({
+      cols: ["evidence", null, null],
+      wide: [false, false, false],
+    });
+    const seam1 = buildPinSeams(start)[0]!;
+    expect(seam1.boundary).toBe(0);
+
+    const to2Preview = computeSeamResizePreview({
+      seam: seam1,
+      clientX: 280,
+      gridRect: rect,
+      gapPx: 8,
+      layout: start,
+    })!;
+    expect(to2Preview.commitSpan).toBe(2);
+    let layout = applySeamResizeCommit(start, seam1, to2Preview);
+    expect(columnSpan(layout, 0)).toBe(2);
+    expect(layout.cols).toEqual(["evidence", null, null]);
+
+    const seam2 = buildPinSeams(layout)[0]!;
+    expect(seam2.boundary).toBe(1);
+    const to3Preview = computeSeamResizePreview({
+      seam: seam2,
+      clientX: 380,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(to3Preview.commitSpan).toBe(3);
+    layout = applySeamResizeCommit(layout, seam2, to3Preview);
+    expect(columnSpan(layout, 0)).toBe(3);
+    expect(layout.wide).toEqual([true, false, true]);
+  });
+
+  it("expands single column card to wide then shrinks back", () => {
+    const start = normalizeLayout({
+      cols: ["chat", null, "detail"],
+      wide: [false, false, false],
+    });
+    const expandSeam = buildPinSeams(start).find((s) => s.boundary === 0)!;
+    const expanded = applySeamResizeCommit(start, expandSeam, true);
+    expect(expanded.wide).toEqual([true, false, false]);
+    expect(expanded.cols).toEqual(["chat", null, "detail"]);
+
+    const shrinkSeam = buildPinSeams(expanded)[0]!;
+    const shrinkPreview = computeSeamResizePreview({
+      seam: shrinkSeam,
+      clientX: 195,
+      gridRect: rect,
+      gapPx: 8,
+      layout: expanded,
+    })!;
+    const shrunk = applySeamResizeCommit(expanded, shrinkSeam, shrinkPreview);
+    expect(shrunk.wide).toEqual([false, false, false]);
+    expect(shrunk.cols).toEqual(["chat", "detail", null]);
+  });
+
+  it("shrinks span-3 back to span-2 at second tier", () => {
+    const layout = normalizeLayout({
+      cols: ["detail", null, null],
+      wide: [true, false, true],
+    });
+    const seam = buildPinSeams(layout)[0]!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 300,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["detail", null, null]);
+    expect(next.wide).toEqual([true, false, false]);
+  });
+
+  it("progresses span-3 through span-2 to span-1", () => {
+    let layout = normalizeLayout({
+      cols: ["chat", null, null],
+      wide: [true, false, true],
+    });
+    const seam3 = buildPinSeams(layout)[0]!;
+    layout = applySeamResizeCommit(
+      layout,
+      seam3,
+      computeSeamResizePreview({
+        seam: seam3,
+        clientX: 300,
+        gridRect: rect,
+        gapPx: 8,
+        layout,
+      })!,
+    );
+    expect(columnSpan(layout, 0)).toBe(2);
+
+    const seam2 = buildPinSeams(layout)[0]!;
+    const atRestX = defaultSeamBoundaryX(seam2, layout, rect, 8);
+    const commitPreview = pickSeamCommitPreview(
+      computeSeamResizePreview({
+        seam: seam2,
+        clientX: atRestX,
+        gridRect: rect,
+        gapPx: 8,
+        layout,
+      })!,
+      computeSeamResizePreview({
+        seam: seam2,
+        clientX: 220,
+        gridRect: rect,
+        gapPx: 8,
+        layout,
+      })!,
+      computeSeamResizePreview({
+        seam: seam2,
+        clientX: atRestX,
+        gridRect: rect,
+        gapPx: 8,
+        layout,
+      })!,
+      computeSeamResizePreview({
+        seam: seam2,
+        clientX: atRestX,
+        gridRect: rect,
+        gapPx: 8,
+        layout,
+      })!,
+    );
+    expect(commitPreview.commitSpan).toBe(1);
+    layout = applySeamResizeCommit(layout, seam2, commitPreview);
+    expect(columnSpan(layout, 0)).toBe(1);
+    expect(layout.wide).toEqual([false, false, false]);
+  });
+
+  it("expands right card when seam moves right past midpoint", () => {
     const layout = normalizeLayout({
       cols: ["chat", "tasks", null],
       wide: [false, false, false],
@@ -538,38 +1009,113 @@ describe("pin-desktop-seam", () => {
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "right",
-      actingWidget: "tasks",
     })!;
-    expect(dragRight.rightWidth).toBeGreaterThan(atRest.rightWidth);
+    expect(dragRight.leftWidth).toBeGreaterThan(atRest.leftWidth);
+    expect(dragRight.rightWidth).toBeLessThan(atRest.rightWidth);
   });
 
-  it("mirrors wide-card left-edge drag so moving right shrinks", () => {
+  it("snaps wide card seam drag to span tiers", () => {
     const layout = normalizeLayout({
       cols: ["detail", null, null],
       wide: [true, false, false],
     });
     const seam = buildPinSeams(layout)[0];
-    const atWide = computeSeamResizePreview({
+    const span2 = computeSeamResizePreview({
       seam,
-      clientX: 297,
+      clientX: 300,
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "right",
-      actingWidget: "detail",
     })!;
-    expect(atWide.commitLeftWide).toBe(true);
-    const dragLeftEdgeRight = computeSeamResizePreview({
+    expect(span2.commitSpan).toBe(2);
+    const span1 = computeSeamResizePreview({
       seam,
       clientX: 220,
       gridRect: rect,
       gapPx: 8,
       layout,
-      edge: "left",
-      actingWidget: "detail",
     })!;
-    expect(dragLeftEdgeRight.commitLeftWide).toBe(false);
+    expect(span1.commitSpan).toBe(1);
+  });
+
+  it("middle column alone can expand to full width span-3", () => {
+    const layout = normalizeLayout({
+      cols: [null, "tasks", null],
+      wide: [false, false, false],
+    });
+    const next = setWidgetSpan(layout, "tasks", 3);
+    expect(next.cols).toEqual(["tasks", null, null]);
+    expect(next.wide).toEqual([true, false, true]);
+    expect(columnSpan(next, 0)).toBe(3);
+  });
+
+  it("middle column alone expands to span-2 via seam drag", () => {
+    const layout = normalizeLayout({
+      cols: [null, "tasks", null],
+      wide: [false, false, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 360,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitSpan).toBe(2);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual([null, "tasks", null]);
+    expect(next.wide).toEqual([false, true, false]);
+    expect(columnSpan(next, 1)).toBe(2);
+  });
+
+  it("third column card can expand to full width span-3", () => {
+    const layout = normalizeLayout({
+      cols: [null, null, "evidence"],
+      wide: [false, false, false],
+    });
+    const next = setWidgetSpan(layout, "evidence", 3);
+    expect(next.cols).toEqual(["evidence", null, null]);
+    expect(columnSpan(next, 0)).toBe(3);
+  });
+
+  it("lone third column expands to span-2 via seam drag left", () => {
+    const layout = normalizeLayout({
+      cols: [null, null, "tasks"],
+      wide: [false, false, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 360,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitLeftWide).toBe(true);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual([null, "tasks", null]);
+    expect(next.wide).toEqual([false, true, false]);
+    expect(columnSpan(next, 1)).toBe(2);
+  });
+
+  it("lone third column expands to span-3 via seam drag when left columns empty", () => {
+    const layout = normalizeLayout({
+      cols: [null, null, "tasks"],
+      wide: [false, false, false],
+    });
+    const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
+    const preview = computeSeamResizePreview({
+      seam,
+      clientX: 130,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
+    expect(preview.commitLeftWide).toBe(true);
+    const next = applySeamResizeCommit(layout, seam, preview);
+    expect(next.cols).toEqual(["tasks", null, null]);
+    expect(columnSpan(next, 0)).toBe(3);
   });
 
   it("shows tasks right expand seam when third column is empty", () => {

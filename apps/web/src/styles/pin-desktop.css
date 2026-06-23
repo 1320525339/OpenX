@@ -765,6 +765,10 @@
   overflow: visible;
 }
 
+.pin-desktop-grid-logical.pin-desktop-resizing {
+  overflow: visible;
+}
+
 .pin-desktop-grid-fixed {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -792,6 +796,7 @@
 .pin-desktop-cell {
   min-height: 0;
   min-width: 0;
+  grid-row: 1;
 }
 
 .pin-desktop-cell-widget {
@@ -1018,12 +1023,14 @@ body.pin-desktop-body-dragging * {
 /* ── Pin Dock 底栏 ── */
 
 .pin-dock {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 0.75rem;
   padding: 0.4rem var(--workspace-grid-pad, 0.75rem);
+  min-height: 4.2rem;
   border-top: 1px solid var(--border);
   background: var(--surface-raised, var(--bg));
   z-index: 4;
@@ -1032,8 +1039,10 @@ body.pin-desktop-body-dragging * {
 .pin-dock-modes {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   flex-wrap: wrap;
+  max-width: min(100%, 46rem);
 }
 
 .pin-dock-btn-wrap {
@@ -1196,47 +1205,6 @@ body.pin-dock-body-dragging * {
   pointer-events: auto;
 }
 
-.pin-desktop-edge-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 10px;
-  z-index: 6;
-  cursor: col-resize;
-  touch-action: none;
-  pointer-events: auto;
-}
-
-.pin-desktop-edge-handle-left {
-  left: 0;
-  margin-left: -3px;
-}
-
-.pin-desktop-edge-handle-right {
-  right: 0;
-  margin-right: -3px;
-}
-
-.pin-desktop-edge-handle-left:hover,
-.pin-desktop-edge-handle-left:active,
-body.pin-desktop-body-resizing .pin-desktop-edge-handle-left {
-  background: linear-gradient(
-    90deg,
-    rgba(0, 113, 227, 0.18),
-    rgba(0, 113, 227, 0.04)
-  );
-}
-
-.pin-desktop-edge-handle-right:hover,
-.pin-desktop-edge-handle-right:active,
-body.pin-desktop-body-resizing .pin-desktop-edge-handle-right {
-  background: linear-gradient(
-    270deg,
-    rgba(0, 113, 227, 0.18),
-    rgba(0, 113, 227, 0.04)
-  );
-}
-
 .pin-desktop-seam::after {
   content: "";
   position: absolute;
@@ -1272,9 +1240,14 @@ body.pin-desktop-body-resizing * {
 }
 
 .pin-dock-meta {
+  position: absolute;
+  top: 50%;
+  right: 5.35rem;
+  transform: translateY(-50%);
   flex-shrink: 0;
   font-size: 0.68rem;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .pin-dock-meta strong {
@@ -1283,6 +1256,70 @@ body.pin-desktop-body-resizing * {
 
 .pin-dock-meta-edit {
   color: var(--accent, #0071e3);
+}
+
+.pin-dock-settings {
+  position: absolute;
+  top: 50%;
+  right: var(--workspace-grid-pad, 0.75rem);
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-height: 2rem;
+  padding: 0.28rem 0.58rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-inset, var(--bg));
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.pin-dock-settings:hover {
+  color: var(--accent, #0071e3);
+  border-color: var(--border-strong, var(--border));
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+}
+
+.pin-dock-settings-icon {
+  line-height: 1;
+}
+
+.pin-dock-settings-label {
+  font-weight: 600;
+}
+
+@media (max-width: 980px) {
+  .pin-dock-meta {
+    display: none;
+  }
+
+  .pin-dock-modes {
+    max-width: calc(100% - 4.4rem);
+  }
+}
+
+@media (max-width: 640px) {
+  .pin-dock {
+    justify-content: flex-start;
+    padding-right: 4.2rem;
+  }
+
+  .pin-dock-modes {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+
+  .pin-dock-settings-label {
+    display: none;
+  }
 }
 
 .pin-dock-add-wrap {

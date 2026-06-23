@@ -43,9 +43,9 @@ import {
   type ResolvedModelCredentials,
 
   CoachClarifyPayloadSchema,
-
+  CoachDispatchPermissionPayloadSchema,
   type CoachClarifyPayload,
-
+  type CoachDispatchPermissionPayload,
 } from "@openx/shared";
 
 import {
@@ -282,6 +282,12 @@ const AgentChatResponseLooseSchema = z.object({
   message: z.string(),
   intent: z.enum(["task", "progress", "consult", "chitchat", "rework"]).optional(),
   clarify: CoachClarifyLooseSchema.optional(),
+  dispatchPermission: z
+    .object({
+      requestedMode: z.enum(["read_only", "ask_write", "full"]),
+      reason: z.string().optional(),
+    })
+    .optional(),
   refined: z
 
     .object({
@@ -361,10 +367,28 @@ function parseClarify(raw?: z.infer<typeof CoachClarifyLooseSchema>): CoachClari
   });
 }
 
+function parseDispatchPermission(
+  raw: z.infer<typeof AgentChatResponseLooseSchema>["dispatchPermission"],
+): CoachDispatchPermissionPayload | undefined {
+  if (!raw?.requestedMode) return undefined;
+  return CoachDispatchPermissionPayloadSchema.parse({
+    ...raw,
+    status: "pending",
+  });
+}
+
 function parseAgentReply(raw: z.infer<typeof AgentChatResponseLooseSchema>): AgentChatResponse {
   const clarify = parseClarify(raw.clarify);
   if (clarify) {
     return { message: raw.message, intent: raw.intent ?? "consult", clarify };
+  }
+  const dispatchPermission = parseDispatchPermission(raw.dispatchPermission);
+  if (dispatchPermission) {
+    return {
+      message: raw.message,
+      intent: raw.intent ?? "consult",
+      dispatchPermission,
+    };
   }
   if (!raw.refined) return { message: raw.message, intent: raw.intent, clarify };
 
@@ -508,7 +532,7 @@ export async function coachChatStreamLlm(
 }
 
 export type CoachAgentReplyLlmOptions = {
-  promptMode?: "tool_continuation" | "clarify" | "clarify_continuation" | "structured";
+  promptMode?: "tool_continuation" | "clarify_continuation" | "structured";
 };
 
 export async function coachAgentReplyLlm(
@@ -552,11 +576,9 @@ export async function coachAgentReplyLlm(
         jsonMode:
           options?.promptMode === "tool_continuation"
             ? "tool_continuation"
-            : options?.promptMode === "clarify"
-              ? "clarify"
-              : options?.promptMode === "clarify_continuation"
-                ? "clarify_continuation"
-                : options?.promptMode === "structured"
+            : options?.promptMode === "clarify_continuation"
+              ? "clarify_continuation"
+              : options?.promptMode === "structured"
                   ? "structured"
                   : undefined,
       }),
@@ -617,6 +639,8 @@ export async function testLlmConnection(
 
 
 
+  const { signal, cancel } = coachLlmAbortSignal();
+
   try {
 
     const { object } = await generateObject({
@@ -629,6 +653,8 @@ export async function testLlmConnection(
 
       prompt: 'Reply with JSON: {"pong":"ok"}',
 
+      abortSignal: signal,
+
     });
 
     return { ok: true, message: object.pong };
@@ -638,6 +664,10 @@ export async function testLlmConnection(
     const formatted = formatCoachLlmError(err);
 
     return { ok: false, error: formatted ?? (err instanceof Error ? err.message : String(err)) };
+
+  } finally {
+
+    cancel();
 
   }
 

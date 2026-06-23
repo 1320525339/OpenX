@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { OxspSlotInstance, PinDesktopScope } from "@openx/shared";
 import { isExtWidgetId, isLegacyWebWidgetId } from "@openx/shared";
-import type { PinWidgetId } from "../../lib/pin-desktop";
+import { resolveBuiltinDockWidget, type PinWidgetId } from "../../lib/pin-desktop";
 import { findOxspSlot, type OxspSlotCatalog } from "../../lib/oxsp-catalog";
 import { OxspBrowserSlot } from "./OxspBrowserSlot";
 
@@ -25,7 +25,8 @@ export function OxspSlotRenderer({ widget, catalog, builtinWidgets, desktopScope
   }
 
   if (slot.config.kind === "react") {
-    return builtinWidgets[slot.config.componentId] ?? <p className="empty-hint">内置面板不可用</p>;
+    const componentId = resolveBuiltinDockWidget(slot.config.componentId);
+    return builtinWidgets[componentId] ?? <p className="empty-hint">内置面板不可用</p>;
   }
 
   if (slot.config.kind === "web") {

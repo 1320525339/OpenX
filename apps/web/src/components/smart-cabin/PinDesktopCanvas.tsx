@@ -14,7 +14,7 @@ import {
   PIN_WIDGET_LABELS,
   buildLogicalGridTemplate,
   buildPinSegments,
-  extensionSlotColumn,
+  extensionSlotColumns,
   normalizeLayout,
   pinnedWidgets,
   type PinDockWidgetId,
@@ -23,21 +23,24 @@ import {
 } from "../../lib/pin-desktop";
 import {
   createPinDropTargetTracker,
+  PIN_DROP_ZONE_DWELL_MS,
+  resolvePinDropColumn,
   type PinDropZone,
   type PinStackRow,
 } from "../../lib/pin-desktop-drop";
 import {
   PIN_DRAG_MOVE_THRESHOLD,
-  columnFromPointer,
   columnGeometry,
 } from "../../lib/pin-desktop-drag";
 import {
+  applySeamResizeCommit,
   buildPinSeams,
   computeSeamResizePreview,
   isSeamVisuallyPlaced,
+  pickMinSeamPreview,
+  pickPeakSeamPreview,
+  pickSeamCommitPreview,
   seamAffectsWidget,
-  seamForWidgetLeftEdge,
-  seamForWidgetRightEdge,
   seamLineLeftPx,
   seamVisualCellCols,
   type PinSeam,
@@ -61,6 +64,8 @@ type Props = {
   onPinWidgetAtCol?: (col: number, widget: PinDockWidgetId) => boolean;
   onAddTemplateAtCol?: (col: number, templateId: string) => boolean;
   isDockWidgetPinned?: (widget: PinDockWidgetId) => boolean;
+  pageIndex?: number;
+  pageCount?: number;
 };
 
 type DragSession = {
@@ -73,7 +78,7 @@ type DragSession = {
   y: number;
   width: number;
   height: number;
-  colspan: 1 | 2;
+  colspan: 1 | 2 | 3;
   overCol: number | null;
   overZone: PinDropZone | null;
 };
@@ -88,7 +93,7 @@ type PendingDrag = {
   offsetY: number;
   width: number;
   height: number;
-  colspan: 1 | 2;
+  colspan: 1 | 2 | 3;
 };
 
 type PendingSeamResize = {
@@ -96,12 +101,13 @@ type PendingSeamResize = {
   pointerId: number;
   startX: number;
   startY: number;
-  edge?: "left" | "right";
-  actingWidget?: PinWidgetId;
 };
 
 type SeamResizeSession = PendingSeamResize & {
   preview: SeamResizePreview;
+  startPreview: SeamResizePreview;
+  minPreview: SeamResizePreview;
+  maxPreview: SeamResizePreview;
 };
 
 const GRID_GAP_PX = 8;
@@ -121,6 +127,8 @@ export function PinDesktopCanvas({
   onPinWidgetAtCol,
   onAddTemplateAtCol,
   isDockWidgetPinned,
+  pageIndex = 0,
+  pageCount = 1,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   const cellRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -146,6 +154,18 @@ export function PinDesktopCanvas({
   const isResizing = seamResize != null;
 
   const displayLayout = layout;
+
+  const layoutForExtensionSlots = useMemo(() => {
+    const base =
+      seamResize == null
+        ? displayLayout
+        : applySeamResizeCommit(
+            normalizeLayout(displayLayout),
+            seamResize.seam,
+            seamResize.preview,
+          );
+    return normalizeLayout(base);
+  }, [displayLayout, seamResize]);
 
   const displaySegments = buildPinSegments(displayLayout);
   const normLayout = normalizeLayout(displayLayout);
@@ -233,7 +253,13 @@ export function PinDesktopCanvas({
       const grid = gridRef.current;
       if (!grid) return { col: 0, zone: "replace" as PinDropZone };
       const gridRect = grid.getBoundingClientRect();
-      const col = columnFromPointer(gridRect, clientX, GRID_GAP_PX);
+      const col = resolvePinDropColumn({
+        gridRect,
+        clientX,
+        layout: displayLayout,
+        gapPx: GRID_GAP_PX,
+        getCellRect,
+      });
       return dropTargetTrackerRef.current.resolve({
         gridRect,
         cellRect: getCellRect(col),
@@ -241,6 +267,7 @@ export function PinDesktopCanvas({
         clientY,
         layout: displayLayout,
         gapPx: GRID_GAP_PX,
+        targetCol: col,
       });
     },
     [displayLayout, getCellRect],
@@ -267,7 +294,7 @@ export function PinDesktopCanvas({
   );
 
   const onHeaderPointerDown = useCallback(
-    (col: number, widget: PinWidgetId, colspan: 1 | 2, e: ReactPointerEvent) => {
+    (col: number, widget: PinWidgetId, colspan: 1 | 2 | 3, e: ReactPointerEvent) => {
       if (e.button !== 0 || isResizing) return;
       if ((e.target as HTMLElement).closest("button")) return;
 
@@ -297,11 +324,7 @@ export function PinDesktopCanvas({
   );
 
   const onSeamPointerDown = useCallback(
-    (
-      seam: PinSeam,
-      e: ReactPointerEvent<HTMLDivElement>,
-      opts?: { edge?: "left" | "right"; actingWidget?: PinWidgetId },
-    ) => {
+    (seam: PinSeam, e: ReactPointerEvent<HTMLDivElement>) => {
       if (e.button !== 0 || isDragging) return;
 
       e.preventDefault();
@@ -313,8 +336,6 @@ export function PinDesktopCanvas({
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        edge: opts?.edge,
-        actingWidget: opts?.actingWidget,
       };
       setTrackPointer(true);
     },
@@ -331,8 +352,6 @@ export function PinDesktopCanvas({
         gridRect: grid.getBoundingClientRect(),
         gapPx: GRID_GAP_PX,
         layout: displayLayout,
-        edge: pending.edge,
-        actingWidget: pending.actingWidget,
       });
     },
     [displayLayout],
@@ -344,7 +363,13 @@ export function PinDesktopCanvas({
       if (!preview) return;
 
       pendingSeamRef.current = null;
-      const session: SeamResizeSession = { ...pending, preview };
+      const session: SeamResizeSession = {
+        ...pending,
+        preview,
+        startPreview: preview,
+        minPreview: preview,
+        maxPreview: preview,
+      };
       seamRef.current = session;
       setSeamResize(session);
       document.body.classList.add("pin-desktop-body-resizing");
@@ -360,7 +385,9 @@ export function PinDesktopCanvas({
       const preview = seamPreviewAt(session, clientX);
       if (!preview) return;
 
-      const next = { ...session, preview };
+      const minPreview = pickMinSeamPreview(session.minPreview, preview);
+      const maxPreview = pickPeakSeamPreview(session.maxPreview, preview);
+      const next = { ...session, preview, minPreview, maxPreview };
       seamRef.current = next;
       setSeamResize(next);
     },
@@ -368,16 +395,24 @@ export function PinDesktopCanvas({
   );
 
   const endSeamResize = useCallback(
-    (session: SeamResizeSession | null, moved: boolean) => {
+    (session: SeamResizeSession | null, moved: boolean, clientX?: number) => {
       pendingSeamRef.current = null;
       seamRef.current = null;
       setSeamResize(null);
       document.body.classList.remove("pin-desktop-body-resizing");
       if (session && moved && onSeamCommit) {
-        onSeamCommit(session.seam, session.preview);
+        const releasePreview =
+          clientX != null ? seamPreviewAt(session, clientX) : null;
+        const preview = pickSeamCommitPreview(
+          session.startPreview,
+          session.minPreview,
+          session.maxPreview,
+          releasePreview,
+        );
+        onSeamCommit(session.seam, preview);
       }
     },
-    [onSeamCommit],
+    [onSeamCommit, seamPreviewAt],
   );
 
   useEffect(() => {
@@ -439,7 +474,7 @@ export function PinDesktopCanvas({
         const moved =
           Math.hypot(e.clientX - session.startX, e.clientY - session.startY) >=
           PIN_DRAG_MOVE_THRESHOLD;
-        endSeamResize(session, moved);
+        endSeamResize(session, moved, e.clientX);
         setTrackPointer(false);
         return;
       }
@@ -464,15 +499,14 @@ export function PinDesktopCanvas({
   }, [trackPointer, beginDrag, beginSeamDrag, endDrag, endSeamResize, updateDragPointer, updateSeamPointer]);
 
   useEffect(() => {
-    if (!trackPointer) return;
-    const tick = () => {
+    if (!drag || drag.overCol == null || drag.overZone !== "replace") return;
+    const id = window.setTimeout(() => {
       const session = dragRef.current;
-      if (!session) return;
+      if (!session || session.overCol !== drag.overCol) return;
       updateDragPointer(session.x, session.y);
-    };
-    const id = window.setInterval(tick, 80);
-    return () => window.clearInterval(id);
-  }, [trackPointer, updateDragPointer]);
+    }, PIN_DROP_ZONE_DWELL_MS + 1);
+    return () => window.clearTimeout(id);
+  }, [drag?.overCol, drag?.overZone, updateDragPointer]);
 
   useEffect(() => {
     return () => {
@@ -495,16 +529,42 @@ export function PinDesktopCanvas({
     dockDragWidget != null && dockDragOverCol != null ? dockDragOverCol : null;
   const dockDropZone = dockDragOverZone;
 
-  const extensionCol = useMemo(
-    () =>
-      onPinWidgetAtCol && onAddTemplateAtCol && isDockWidgetPinned
-        ? extensionSlotColumn(displayLayout)
-        : null,
-    [displayLayout, isDockWidgetPinned, onAddTemplateAtCol, onPinWidgetAtCol],
-  );
+  const extensionCols = useMemo(() => {
+    if (!onPinWidgetAtCol || !onAddTemplateAtCol || !isDockWidgetPinned) return [];
+    const fillAllEmpty = pageCount > 1 && pageIndex < pageCount - 1;
+    const slotLayout =
+      seamResize != null ? layoutForExtensionSlots : normalizeLayout(displayLayout);
+    const raw = extensionSlotColumns(slotLayout, { fillAllEmpty });
+    const occupied = new Set<number>();
+    for (const layout of [
+      normalizeLayout(displayLayout),
+      seamResize != null ? normalizeLayout(layoutForExtensionSlots) : null,
+    ]) {
+      if (!layout) continue;
+      for (const seg of buildPinSegments(layout)) {
+        if (seg.kind !== "widget") continue;
+        for (let c = seg.col; c < seg.col + seg.colspan; c++) occupied.add(c);
+      }
+    }
+    return raw.filter((col) => !occupied.has(col));
+  }, [
+    layoutForExtensionSlots,
+    isDockWidgetPinned,
+    onAddTemplateAtCol,
+    onPinWidgetAtCol,
+    pageCount,
+    pageIndex,
+  ]);
 
   const renderExtensionSlotCell = (col: number) => {
     if (!onPinWidgetAtCol || !onAddTemplateAtCol || !isDockWidgetPinned) return null;
+    if (
+      buildPinSegments(layoutForExtensionSlots).some(
+        (seg) => seg.kind === "widget" && col >= seg.col && col < seg.col + seg.colspan,
+      )
+    ) {
+      return null;
+    }
     const isDropTarget = dropCol === col;
     const isDockDropTarget = dockDropCol === col;
     const activeZone =
@@ -636,8 +696,8 @@ export function PinDesktopCanvas({
   const renderWidgetCell = (
     widget: PinWidgetId,
     col: number,
-    colspan: 1 | 2,
-    storedWide: boolean,
+    colspan: 1 | 2 | 3,
+    storedSpan: 1 | 2 | 3,
   ) => {
     const isDragged = drag?.widget === widget;
     const isDropTarget = dropCol === col;
@@ -657,9 +717,10 @@ export function PinDesktopCanvas({
       return null;
     }
 
-    const resizeStyle = getResizeStyle(widget, col, storedWide);
+    const resizeStyle = getResizeStyle(widget, col, storedSpan);
     const resizing =
       isResizing && seamAffectsWidget(seamResize!.seam, widget) != null;
+    const isWide = storedSpan >= 2;
 
     return (
       <div
@@ -667,10 +728,10 @@ export function PinDesktopCanvas({
         ref={(el) => {
           cellRefs.current[col] = el;
         }}
-        className={`pin-desktop-cell pin-desktop-cell-widget${storedWide && !resizing ? " wide" : ""}${isDropTarget || isDockDropTarget ? " drop-target" : ""}${resizing ? " pin-desktop-cell-resizing" : ""}${resizing && storedWide ? " pin-desktop-cell-resizing-wide" : ""}`}
+        className={`pin-desktop-cell pin-desktop-cell-widget${isWide && !resizing ? " wide" : ""}${storedSpan === 3 && !resizing ? " wide-3" : ""}${isDropTarget || isDockDropTarget ? " drop-target" : ""}${resizing ? " pin-desktop-cell-resizing" : ""}${resizing && isWide ? " pin-desktop-cell-resizing-wide" : ""}`}
         style={resizeStyle}
       >
-        {activeZone && targetOccupied && !storedWide
+        {activeZone && targetOccupied && storedSpan === 1
           ? renderDropZoneHints(activeZone, `zones-${col}-${widget}`)
           : null}
         <FlexibleWidgetFrame
@@ -683,41 +744,11 @@ export function PinDesktopCanvas({
         >
           {widgets[widget] ?? <p className="empty-hint">面板加载中…</p>}
         </FlexibleWidgetFrame>
-        {(() => {
-          const leftSeam = seamForWidgetLeftEdge(displayLayout, widget);
-          if (!leftSeam || isDragging || isResizing) return null;
-          return (
-            <div
-              className="pin-desktop-edge-handle pin-desktop-edge-handle-left"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={`向左调整${slotLabel(widget)}宽度`}
-              onPointerDown={(e) =>
-                onSeamPointerDown(leftSeam, e, { edge: "left", actingWidget: widget })
-              }
-            />
-          );
-        })()}
-        {(() => {
-          const rightSeam = seamForWidgetRightEdge(displayLayout, widget);
-          if (!rightSeam || isDragging || isResizing) return null;
-          return (
-            <div
-              className="pin-desktop-edge-handle pin-desktop-edge-handle-right"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={`向右调整${slotLabel(widget)}宽度`}
-              onPointerDown={(e) =>
-                onSeamPointerDown(rightSeam, e, { edge: "right", actingWidget: widget })
-              }
-            />
-          );
-        })()}
       </div>
     );
   };
 
-  const renderPlaceholder = (col: number, colspan: 1 | 2, key: string) => (
+  const renderPlaceholder = (col: number, colspan: 1 | 2 | 3, key: string) => (
     <div
       key={key}
       className="pin-desktop-cell pin-desktop-cell-placeholder"
@@ -731,12 +762,12 @@ export function PinDesktopCanvas({
   const getResizeStyle = (
     widget: PinWidgetId,
     col: number,
-    storedWide: boolean,
+    storedSpan: 1 | 2 | 3,
   ): CSSProperties => {
-    if (!seamResize) return { gridColumn: `${col + 1} / span ${storedWide ? 2 : 1}` };
+    if (!seamResize) return { gridColumn: `${col + 1} / span ${storedSpan}` };
 
     const role = seamAffectsWidget(seamResize.seam, widget);
-    if (!role) return { gridColumn: `${col + 1} / span ${storedWide ? 2 : 1}` };
+    if (!role) return { gridColumn: `${col + 1} / span ${storedSpan}` };
 
     const { preview, seam } = seamResize;
     const base: CSSProperties = {
@@ -778,7 +809,7 @@ export function PinDesktopCanvas({
         anchorCol !== seam.leftCol ? pairRight - width - cellStart : 0;
       return {
         ...base,
-        gridColumn: `${anchorCol + 1} / span ${storedWide ? 2 : 1}`,
+        gridColumn: `${anchorCol + 1} / span ${storedSpan}`,
         width: `${width}px`,
         marginLeft: `${marginLeft}px`,
         zIndex: 3,
@@ -799,11 +830,11 @@ export function PinDesktopCanvas({
     const { rightCol } = seamVisualCellCols(seam, displayLayout);
     const anchorCol = rightCol ?? col;
     const cellStart = cellStartForCol(anchorCol);
-    const spanCols = storedWide ? 2 : 1;
+    const spanCols = storedSpan;
     const spanEnd =
       cellStart +
       spanCols * preview.oneWidth +
-      (spanCols > 1 ? preview.gapPx : 0);
+      (spanCols > 1 ? preview.gapPx * (spanCols - 1) : 0);
     const width = Math.max(0, spanEnd - preview.boundaryX);
     if (width <= 1) {
       return {
@@ -892,9 +923,9 @@ export function PinDesktopCanvas({
         style={{ gridTemplateColumns }}
         aria-label="柔性桌面三列任务栏"
       >
-        {pinnedCount === 0 && !dockDragWidget && extensionCol == null ? (
+        {pinnedCount === 0 && !dockDragWidget && extensionCols.length === 0 ? (
           <div className="pin-desktop-grid-hint" aria-hidden>
-            <p>拖底栏图标到槽位 · 拖标题栏换位 · 拖接缝调宽度</p>
+            <p>拖底栏图标到槽位 · 拖标题栏换位 · 拖卡片间接缝调宽度</p>
           </div>
         ) : null}
 
@@ -903,10 +934,10 @@ export function PinDesktopCanvas({
             return renderStackCell(seg.col, seg.top, seg.bottom);
           }
           if (seg.kind !== "widget") return null;
-          return renderWidgetCell(seg.widget, seg.col, seg.colspan, seg.colspan === 2);
+          return renderWidgetCell(seg.widget, seg.col, seg.colspan, seg.colspan);
         })}
 
-        {extensionCol != null ? renderExtensionSlotCell(extensionCol) : null}
+        {extensionCols.map((col) => renderExtensionSlotCell(col))}
 
         {isDragging && placeholderCol != null && !displaySegments.some(
           (s) =>

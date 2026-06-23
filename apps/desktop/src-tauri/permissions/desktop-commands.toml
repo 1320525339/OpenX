@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "desktop-commands"
+description = "OpenX desktop shell invoke commands"
+commands.allow = [
+  "desktop_get_prefs",
+  "desktop_set_prefs",
+  "desktop_update_tray",
+  "desktop_quit",
+  "desktop_show_main",
+  "desktop_emit_new_goal",
+]

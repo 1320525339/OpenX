@@ -19,6 +19,7 @@
     "@openx/executor-mock": "workspace:*",
     "@openx/executor-pi": "workspace:*",
     "@openx/shared": "workspace:*",
+    "@zvec/zvec": "^0.5.0",
     "better-sqlite3": "^11.9.1",
     "hono": "^4.7.4",
     "nanoid": "^5.1.5",

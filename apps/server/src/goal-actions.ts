@@ -183,58 +183,74 @@ export async function reworkGoal(
   if (!canTransition(goal.status, "running")) {
     return { ok: false, status: 400, error: "Cannot rework from current status" };
   }
-  goal.effectStatus = "rework";
-  goal.reworkReason = reason;
-  if (opts?.source === "auto") {
-    goal.iterationCount = (goal.iterationCount ?? 0) + 1;
-  }
-  goal.updatedAt = new Date().toISOString();
+  // 保存必要字段用于 refineGoal（此时 goal 仍为最新）
+  const userDraft = goal.userDraft ?? `${goal.title}\n验收：${goal.acceptance}`;
+  const constraints = goal.constraints;
 
   const settings = loadSettings();
-  const feedback = buildGoalFeedback(goal.id);
+  const feedback = buildGoalFeedback(goalId);
   const { refined, llmError } = await refineGoal(
     {
-      userDraft: goal.userDraft ?? `${goal.title}\n验收：${goal.acceptance}`,
-      constraints: goal.constraints,
+      userDraft,
+      constraints,
       feedback,
     },
     settings,
     settings.defaultConstraints,
   );
-  goal.executionPrompt = refined.executionPrompt;
-  appendLog(goal.id, "info", "Coach 已根据返工反馈优化执行提示词");
-  if (llmError) {
-    appendLog(goal.id, "warn", `Coach refine 降级：${llmError}`);
+
+  // TOCTOU 防护：refineGoal 耗时（LLM 调用），期间目标状态可能被并发请求修改
+  // 必须重新从 DB 读取，确保不覆盖并发 approve/cancel 的结果
+  const fresh = getGoalById(goalId);
+  if (!fresh) return { ok: false, status: 404, error: "Not found" };
+  if (fresh.status !== "awaiting_review") {
+    return {
+      ok: false,
+      status: 400,
+      error: `目标状态已在返工期间变更为 ${fresh.status}，放弃返工`,
+    };
   }
 
-  goal.status = "running";
-  goal.progress = 0;
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
+  fresh.executionPrompt = refined.executionPrompt;
+  fresh.effectStatus = "rework";
+  fresh.reworkReason = reason;
+  if (opts?.source === "auto") {
+    fresh.iterationCount = (fresh.iterationCount ?? 0) + 1;
+  }
+  appendLog(fresh.id, "info", "Coach 已根据返工反馈优化执行提示词");
+  if (llmError) {
+    appendLog(fresh.id, "warn", `Coach refine 降级：${llmError}`);
+  }
+
+  fresh.status = "running";
+  fresh.progress = 0;
+  fresh.updatedAt = new Date().toISOString();
+  updateGoal(fresh);
+  broadcast({ type: "goal.updated", goal: fresh });
   const reasonText = reason?.trim() || "（未填写原因）";
   const prefix = opts?.source === "auto" ? "自动验收未通过，返工" : "工头返工";
-  appendLog(goal.id, "warn", `${prefix}：${reasonText}`);
-  narrateGoalChange(goal, "rework");
+  appendLog(fresh.id, "warn", `${prefix}：${reasonText}`);
+  narrateGoalChange(fresh, "rework");
 
-  const steered = await steerReworkGoal(goal.id);
+  const steered = await steerReworkGoal(fresh.id);
   if (steered) {
     if (opts?.source !== "auto") {
-      void autoDraftNextSubGoals(goal.id, "rework");
+      void autoDraftNextSubGoals(fresh.id, "rework");
     }
-    return { ok: true, goal, mode: "steer" };
+    return { ok: true, goal: fresh, mode: "steer" };
   }
 
-  if (goal.executorId.startsWith("acp:")) {
+  if (fresh.executorId.startsWith("acp:")) {
     appendLog(
-      goal.id,
+      fresh.id,
       "info",
       "ACP steer 会话不可用，将 loadSession 续跑或重启执行（保留返工说明）",
     );
   }
-  cancelRunning(goal.id);
-  void dispatchGoal(goal.id);
+  cancelRunning(fresh.id);
+  void dispatchGoal(fresh.id);
   if (opts?.source !== "auto") {
-    void autoDraftNextSubGoals(goal.id, "rework");
+    void autoDraftNextSubGoals(fresh.id, "rework");
   }
-  return { ok: true, goal, mode: "restart" };
+  return { ok: true, goal: fresh, mode: "restart" };
 }

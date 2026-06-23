@@ -6,6 +6,8 @@
 
 - Node.js 20+
 - pnpm 9+
+- Rust 1.77+（仅桌面端需要）
+- Windows 10/11（已内置 WebView2）
 
 ## 开发
 
@@ -36,6 +38,60 @@ OpenX Coach 使用与 [OpenCode](vendors/opencode) 相同的成熟栈：**Vercel
 
 执行器（Pi 等）仍自带 LLM；Coach 只负责优化目标与元对话。
 
+## 桌面端（Tauri v2）
+
+基于 Tauri v2 + Node.js sidecar 架构，将 Server 打包为独立 exe，由 Rust 外壳管理生命周期，前端由系统 WebView2 渲染。
+
+### 额外环境要求
+
+- **Rust 1.77+**：[rustup](https://rustup.rs/) 安装后 `rustc --version` 验证
+- **WebView2**：Windows 10/11 已内置，无需额外安装
+
+### 开发模式
+
+```bash
+# 首次运行会自动安装 @tauri-apps/cli
+pnpm desktop:dev
+```
+
+自动启动 Vite dev server + Tauri 窗口，server sidecar 自动 spawn。支持前端热更新。
+
+### 构建安装包
+
+```bash
+# 完整流程：server exe → web dist → Rust 编译 → 安装包
+pnpm desktop:build
+```
+
+产物位于 `apps/desktop/src-tauri/target/release/bundle/nsis/`：
+- `*.exe` — NSIS 安装包（当前 `tauri.conf.json` 仅启用 NSIS 目标）
+
+### 单独构建 Server Sidecar
+
+```bash
+# 仅重新编译 server exe（跳过 Rust 编译）
+pnpm --filter @openx/desktop build:server
+```
+
+产物：`apps/desktop/src-tauri/binaries/openx-server-x86_64-pc-windows-msvc.exe`
+
+### 架构说明
+
+```
+┌─────────────────────────────────┐
+│  Tauri Rust 外壳 (.exe)         │
+│  ├─ 系统托盘（右键菜单）          │
+│  ├─ WebView2 → React 前端       │
+│  └─ Sidecar 管理                │
+│     └─ openx-server.exe :3921   │
+│        └─ better_sqlite3.node   │
+└─────────────────────────────────┘
+```
+
+- **关闭窗口** → 隐藏到系统托盘，不退出
+- **托盘右键** → 「打开 OpenX」/「退出」
+- **退出时** → 自动清理 sidecar 子进程
+
 ## 文档
 
 - [正式版产品核心](docs/openx-product-core.md)
@@ -49,6 +105,7 @@ OpenX Coach 使用与 [OpenCode](vendors/opencode) 相同的成熟栈：**Vercel
 ```
 apps/server   Hono API + SQLite + SSE
 apps/web      Vite React 四宫格 UI
+apps/desktop  Tauri v2 桌面客户端（Rust + sidecar）
 packages/*    shared, coach, executor-*
 vendors/      第三方参考（不依赖）
 ```

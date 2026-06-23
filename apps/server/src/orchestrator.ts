@@ -156,7 +156,7 @@ function buildCallbacks(goalId: string) {
     onParkAwaitingUser: async (checkpointSummary: string) => {
       const g = getGoalById(goalId);
       if (!g || g.status !== "running") return;
-      endGoalRun(goalId, "completed", checkpointSummary);
+      endGoalRun(goalId, "paused", checkpointSummary);
       updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
       appendLog(
         goalId,
@@ -395,6 +395,7 @@ export async function resumeCrewAfterUserDecision(
   goalId: string,
   userMessage: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  ensureExecutors();
   const goal = getGoalById(goalId);
   if (!goal) return { ok: false, error: "目标不存在" };
   if (goal.crewStatus !== "awaiting_user") {

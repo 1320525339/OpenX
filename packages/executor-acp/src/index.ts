@@ -434,10 +434,17 @@ export const acpExecutor: ExecutorAdapter = {
   },
 
   async steerRework(ctx: ExecutorContext) {
-    const parked = parkedSessions.get(ctx.goal.id);
-    if (!parked) return false;
     const runtimeId = parseAcpRuntimeId(ctx.goal.executorId);
-    if (!runtimeId || parked.runtimeId !== runtimeId) return false;
+    if (!runtimeId) return false;
+
+    let parked = parkedSessions.get(ctx.goal.id);
+    if (!parked) {
+      const storedSession = parseStoredAcpSessionId(ctx.goal.crewSessionId, runtimeId);
+      if (!storedSession) return false;
+      parked = { sessionId: storedSession, runtimeId };
+    } else if (parked.runtimeId !== runtimeId) {
+      return false;
+    }
 
     const { callbacks } = ctx;
     await callbacks.onProgress(5, "ACP 返工 steer…");

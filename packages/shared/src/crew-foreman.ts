@@ -33,9 +33,12 @@ export type ForemanTurnLlmDecision = {
 export function mapForemanTurnLlmDecision(
   decision: ForemanTurnLlmDecision,
 ): ForemanTurnDecision {
+  const message = decision.message.trim();
   return {
     action: decision.action,
-    message: decision.message.trim(),
+    message:
+      message ||
+      "继续推进，按验收标准完成可验证产出；有阻塞请【请示工头】。",
     reason: decision.reason?.trim(),
     source: "foreman_llm",
   };

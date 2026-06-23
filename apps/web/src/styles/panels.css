@@ -1968,6 +1968,22 @@
   font-size: 0.7rem;
 }
 
+.chat-task-foreman-footer.tone-awaiting-user {
+  background: rgba(255, 149, 0, 0.08);
+}
+
+.chat-task-foreman-footer.tone-awaiting-user .chat-task-foreman-primary {
+  color: var(--amber, #ff9500);
+}
+
+.chat-task-foreman-footer.tone-awaiting-foreman .chat-task-foreman-primary {
+  color: var(--text-dim);
+}
+
+.chat-task-foreman-footer.tone-active .chat-task-foreman-primary {
+  color: var(--green);
+}
+
 .chat-task-foreman-primary {
   color: var(--green);
   font-weight: 650;

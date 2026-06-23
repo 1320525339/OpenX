@@ -47,6 +47,7 @@ import {
   requestIsland,
   setIslandCatchupMode,
 } from "./island-queue";
+import { goalNeedsUserAttention } from "./goal-attention";
 import type { AppView } from "../components/SideNav";
 
 export type ExecutorScope = "all" | string;
@@ -1120,12 +1121,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectedConversation = state.conversations.find(
     (c) => c.id === state.selectedConversationId,
   );
-  const inboxBadgeCount = state.goals.filter(
-    (g) =>
-      g.status === "awaiting_review" ||
-      g.status === "failed" ||
-      g.effectStatus === "rework",
-  ).length;
+  const inboxBadgeCount = state.goals.filter(goalNeedsUserAttention).length;
   const consoleBadgeCount = useMemo(() => {
     const systemActive = state.goals.filter(
       (g) =>

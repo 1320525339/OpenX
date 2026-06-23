@@ -232,7 +232,7 @@ describe("runCrewDialogueLoop", () => {
     } as unknown as ExecutorContext;
 
     const result = await runForemanManagedLoop({}, "任务", ctx, runTurn);
-    expect(runTurn).toHaveBeenCalledTimes(MAX_FOREMAN_LOOP_ROUNDS + 1);
+    expect(runTurn).toHaveBeenCalledTimes(MAX_FOREMAN_LOOP_ROUNDS);
     expect(result.dialogueExhausted).toBe(true);
     expect(dispositionForemanManagedLoop(result).action).toBe("dialogue_exhausted");
   });
@@ -313,10 +313,9 @@ describe("runCrewDialogueLoop", () => {
     } as unknown as ExecutorContext;
 
     const result = await runCrewDialogueLoop({}, "任务", ctx, runTurn);
-    // 循环耗尽：for 0..MAX 共 MAX+1 轮，每轮都产生 question
-    expect(runTurn).toHaveBeenCalledTimes(MAX_CREW_DIALOGUE_ROUNDS + 1);
+    expect(runTurn).toHaveBeenCalledTimes(MAX_CREW_DIALOGUE_ROUNDS);
     expect(result.dialogueExhausted).toBe(true);
-    expect(result.crewRounds).toBe(MAX_CREW_DIALOGUE_ROUNDS + 1);
+    expect(result.crewRounds).toBe(MAX_CREW_DIALOGUE_ROUNDS);
     expect(result.toolBudgetExceeded).toBe(false);
   });
 });

@@ -42,7 +42,7 @@ export function ChatTaskOrderHeader({
         {goal?.orderNo && goal.orderNo > 0 ? (
           <WorkOrderIdBadge orderNo={goal.orderNo} className="chat-task-order-id" />
         ) : null}
-        <h3 className="chat-task-order-title">{title}</h3>
+        <span className="chat-task-order-title">{title}</span>
         {onToggle ? (
           <span className={`goal-card-chevron chat-task-order-chevron${expanded ? " open" : ""}`} aria-hidden />
         ) : null}
@@ -124,8 +124,14 @@ export function ChatTaskOrderDispatch({ goal }: { goal: Goal }) {
 export function ChatTaskOrderFooter({ goal, run }: { goal: Goal; run?: GoalRunState }) {
   const foreman = describeForemanManagedStatus(goal, run);
   if (!foreman) return null;
+  const tone =
+    goal.crewStatus === "awaiting_user"
+      ? "awaiting-user"
+      : goal.crewStatus === "awaiting_foreman"
+        ? "awaiting-foreman"
+        : "active";
   return (
-    <footer className="chat-task-foreman-footer">
+    <footer className={`chat-task-foreman-footer tone-${tone}`}>
       <span className="chat-task-foreman-primary">{foreman.primary}</span>
       <span className="chat-task-foreman-sep" aria-hidden>
         ·

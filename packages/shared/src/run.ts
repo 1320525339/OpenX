@@ -1,9 +1,17 @@
 import { z } from "zod";
 
-export const RunEndStatusSchema = z.enum(["completed", "failed", "cancelled"]);
+export const RunEndStatusSchema = z.enum(["completed", "failed", "cancelled", "paused"]);
 export type RunEndStatus = z.infer<typeof RunEndStatusSchema>;
 
 const runTimestamp = z.string();
+
+export const ToolFileDiffSchema = z.object({
+  diff: z.string(),
+  added: z.number(),
+  removed: z.number(),
+  path: z.string().optional(),
+});
+export type ToolFileDiff = z.infer<typeof ToolFileDiffSchema>;
 
 const textDeltaEvent = z.object({
   type: z.literal("text.delta"),
@@ -39,6 +47,7 @@ const toolEndEvent = z.object({
   toolCallId: z.string().optional(),
   isError: z.boolean().optional(),
   resultPreview: z.string().optional(),
+  fileDiff: ToolFileDiffSchema.optional(),
   timestamp: runTimestamp,
 });
 

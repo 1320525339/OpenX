@@ -21,7 +21,6 @@ type Props = {
   goal?: Goal;
   run?: GoalRunState;
   fallbackTitle: string;
-  onLocate?: () => void;
   onOpenDetail?: () => void;
   handlers?: GoalTaskActionHandlers;
 };

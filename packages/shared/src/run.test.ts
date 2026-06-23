@@ -65,6 +65,23 @@ describe("applyRunStreamEvent", () => {
     expect(state.liveText).toBe("done");
   });
 
+  it("ends run as paused without clearing live text", () => {
+    let state = createEmptyRunState("g1");
+    state = applyRunStreamEvent(state, {
+      type: "run.start",
+      runId: "r1",
+      executorId: "pi",
+      timestamp: ts,
+    });
+    state = applyRunStreamEvent(state, {
+      type: "run.end",
+      status: "paused",
+      summary: "等待开发商",
+      timestamp: ts,
+    });
+    expect(state.active).toBe(false);
+  });
+
   it("accumulates thinking deltas", () => {
     let state = createEmptyRunState("g1");
     state = applyRunStreamEvent(state, {
@@ -121,5 +138,18 @@ describe("applyRunDelta", () => {
     });
     const update = state.events.find((e) => e.type === "tool.update");
     expect(update && "outputPreview" in update && update.outputPreview).toBe("partial output");
+  });
+
+  it("preserves fileDiff on tool.end", () => {
+    let state = createEmptyRunState("g1");
+    state = applyRunDelta(state, {
+      type: "tool.end",
+      tool: "edit_file",
+      toolCallId: "tc-2",
+      fileDiff: { diff: "-a\n+b", added: 1, removed: 1, path: "x.ts" },
+      timestamp: ts,
+    });
+    const end = state.events.find((e) => e.type === "tool.end");
+    expect(end && "fileDiff" in end && end.fileDiff?.path).toBe("x.ts");
   });
 });

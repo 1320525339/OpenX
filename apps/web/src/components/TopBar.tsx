@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Conversation, Goal, Project } from "@openx/shared";
 import type { AppView } from "./SideNav";
+import { goalNeedsUserAttention } from "../lib/goal-attention";
 import { goalStatusText } from "../lib/goal-detail";
 import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 import { SidebarToggle } from "./SidebarToggle";
@@ -56,6 +57,10 @@ export function TopBar({
   );
 
   const urgentGoal = useMemo(() => {
+    const awaitingUser = goals.find(
+      (g) => g.status === "running" && g.crewStatus === "awaiting_user",
+    );
+    if (awaitingUser) return awaitingUser;
     const review = goals.find((g) => g.status === "awaiting_review");
     if (review) return review;
     return goals.find((g) => g.status === "failed") ?? null;
@@ -94,12 +99,7 @@ export function TopBar({
     secondary = `${stats.running} 进行中 · ${stats.review} 待确认 · 系统任务池`;
   } else if (view === "home") {
     primary = "首页";
-    const urgent = goals.filter(
-      (g) =>
-        g.status === "awaiting_review" ||
-        g.status === "failed" ||
-        g.effectStatus === "rework",
-    ).length;
+    const urgent = goals.filter(goalNeedsUserAttention).length;
     secondary = urgent > 0 ? `${urgent} 项需要你关注` : "跨项目态势";
   }
 
@@ -130,7 +130,12 @@ export function TopBar({
             onClick={() => onUrgentClick(urgentGoal.id)}
           >
             「{urgentGoal.title}」
-            {urgentGoal.status === "awaiting_review" ? "等你确认" : "卡住了"} →
+            {urgentGoal.status === "awaiting_review"
+              ? "等你确认"
+              : urgentGoal.crewStatus === "awaiting_user"
+                ? "等你决策"
+                : "卡住了"}{" "}
+            →
           </button>
         ) : null}
 

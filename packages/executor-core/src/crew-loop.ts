@@ -169,7 +169,7 @@ export async function runForemanManagedLoop<TSession>(
   let foremanRounds = 0;
   let last: CrewTurnResult | undefined;
 
-  for (let round = 0; round <= MAX_FOREMAN_LOOP_ROUNDS; round += 1) {
+  for (let round = 0; round < MAX_FOREMAN_LOOP_ROUNDS; round += 1) {
     last = await runTurn(session, promptText, ctx, steer ? { steer: true } : undefined);
     if (last.toolBudgetExceeded) {
       return {

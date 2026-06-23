@@ -212,7 +212,9 @@ export function endGoalRun(
   const snapshot = applyRunStreamEvent(buildRunStateFromDb(goalId), endEvent);
   persistAndBroadcast(goalId, active.runId, endEvent);
   activeByGoal.delete(goalId);
-  persistCoachRunMessage(goalId, snapshot);
+  if (status !== "paused") {
+    persistCoachRunMessage(goalId, snapshot);
+  }
 }
 
 /** 测试用 */

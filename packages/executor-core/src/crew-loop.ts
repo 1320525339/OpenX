@@ -206,10 +206,6 @@ export async function runForemanManagedLoop<TSession>(
       }
       promptText = formatCrewForemanReplyForPrompt(directive);
       steer = true;
-      await ctx.callbacks.onLog(
-        "info",
-        `[${tag}] 工头指令 › ${directive.message.slice(0, 120)}`,
-      );
       continue;
     }
 
@@ -221,10 +217,6 @@ export async function runForemanManagedLoop<TSession>(
         round,
       };
       const decision = await ctx.callbacks.onCrewTurnReview(reviewInput);
-      await ctx.callbacks.onLog(
-        "info",
-        `[${tag}] 工头轮次 › ${decision.action}: ${decision.message.slice(0, 120)}`,
-      );
 
       const applied = await applyForemanTurnDecision(decision, last, {
         foremanRounds,

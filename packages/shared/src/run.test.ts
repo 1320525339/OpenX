@@ -63,6 +63,7 @@ describe("applyRunStreamEvent", () => {
     });
     expect(state.active).toBe(false);
     expect(state.liveText).toBe("done");
+    expect(state.lastEndStatus).toBe("completed");
   });
 
   it("ends run as paused without clearing live text", () => {
@@ -80,6 +81,23 @@ describe("applyRunStreamEvent", () => {
       timestamp: ts,
     });
     expect(state.active).toBe(false);
+    expect(state.lastEndStatus).toBe("paused");
+  });
+
+  it("clears lastEndStatus on run.start", () => {
+    let state = createEmptyRunState("g1");
+    state = applyRunStreamEvent(state, {
+      type: "run.end",
+      status: "paused",
+      timestamp: ts,
+    });
+    state = applyRunStreamEvent(state, {
+      type: "run.start",
+      runId: "r2",
+      executorId: "pi",
+      timestamp: ts,
+    });
+    expect(state.lastEndStatus).toBeUndefined();
   });
 
   it("accumulates thinking deltas", () => {

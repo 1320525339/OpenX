@@ -103,6 +103,7 @@ export const GoalRunStateSchema = z.object({
   events: z.array(RunStreamEventSchema),
   liveText: z.string(),
   thinkingText: z.string().optional().default(""),
+  lastEndStatus: RunEndStatusSchema.optional(),
 });
 
 export type GoalRunState = z.infer<typeof GoalRunStateSchema>;
@@ -131,6 +132,7 @@ export function applyRunStreamEvent(state: GoalRunState, event: RunStreamEvent):
     next.executorId = event.executorId;
     next.liveText = "";
     next.thinkingText = "";
+    next.lastEndStatus = undefined;
   }
   if (event.type === "text.delta") {
     next.liveText = (state.liveText + event.delta).slice(-MAX_LIVE_TEXT);
@@ -140,8 +142,14 @@ export function applyRunStreamEvent(state: GoalRunState, event: RunStreamEvent):
   }
   if (event.type === "run.end") {
     next.active = false;
+    next.lastEndStatus = event.status;
   }
   return next;
+}
+
+/** run 已结束且为工头暂停等待开发商决策 */
+export function isRunPausedAwaitingUser(state: GoalRunState): boolean {
+  return !state.active && state.lastEndStatus === "paused";
 }
 
 export function applyRunDelta(state: GoalRunState, event: RunDeltaEvent): GoalRunState {

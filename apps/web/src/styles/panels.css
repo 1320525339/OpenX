@@ -1872,8 +1872,18 @@
   box-shadow: 0 0 0 2px rgba(46, 160, 67, 0.18);
 }
 
+.chat-task-meta-dot.paused {
+  background: var(--amber, #d97706);
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.18);
+}
+
 .chat-task-meta-live {
   color: var(--green);
+}
+
+.chat-task-meta-paused {
+  color: var(--amber, #d97706);
 }
 
 .chat-task-meta-status {

@@ -1,5 +1,5 @@
 import type { Goal, GoalRunState } from "@openx/shared";
-import { goalDisplayHint, goalDisplayLabel, goalDisplayOutcome } from "@openx/shared";
+import { goalDisplayHint, goalDisplayLabel, goalDisplayOutcome, isRunPausedAwaitingUser } from "@openx/shared";
 import { goalStatusText } from "../lib/goal-detail";
 import { executorDisplayLabel } from "../lib/executors";
 import {
@@ -31,9 +31,11 @@ export function ChatTaskOrderHeader({
   const hint = goal ? goalDisplayHint(goal) : null;
   const outcomeLabel = goal ? goalDisplayLabel(goal) : "已创建";
   const outcome = goal ? goalDisplayOutcome(goal) : "incomplete";
+  const paused = run ? isRunPausedAwaitingUser(run) : false;
   const live =
     showLiveMeta &&
     run &&
+    !paused &&
     (run.active || Boolean(run.liveText) || Boolean(run.thinkingText) || run.events.length > 0);
 
   const inner = (
@@ -54,7 +56,12 @@ export function ChatTaskOrderHeader({
             施工队 {executorAgentShortName(goal.executorId)}
           </span>
         ) : null}
-        {live ? (
+        {paused ? (
+          <span className="chat-task-meta-item chat-task-meta-paused">
+            <span className="chat-task-meta-dot paused" aria-hidden />
+            {goal?.crewStatus === "awaiting_user" ? "等待决策" : "已暂停"}
+          </span>
+        ) : live ? (
           <span className="chat-task-meta-item chat-task-meta-live">
             <span className="chat-task-meta-dot live" aria-hidden />
             实时输出

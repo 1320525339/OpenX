@@ -50,6 +50,9 @@ export function goalMatchesDisplayFilter(goal: Goal, filter: string): boolean {
   }
   if (filter === "awaiting_review") return goal.status === "awaiting_review";
   if (filter === "running") return goal.status === "running";
+  if (filter === "awaiting_user") {
+    return goal.status === "running" && goal.crewStatus === "awaiting_user";
+  }
   if (filter === "draft") return goal.status === "draft";
   return goal.status === filter;
 }

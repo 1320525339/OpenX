@@ -5,6 +5,7 @@ export {
   refineGoalLlm,
   coachAgentReplyLlm,
   coachChatReplyLlm,
+  createModel,
   generateStructuredObject,
   generateCoachText,
   resolveLlmCredentials,
@@ -16,6 +17,8 @@ export {
   coachChatReply,
   coachContinueAfterWorkOrderTool,
   coachContinueAfterClarifyTool,
+  coachContinueAfterOperatorTool,
+  coachContinueAfterDispatchPermissionTool,
   getCoachRuntime,
   getPiRuntime,
   testCoachConnection,
@@ -55,7 +58,15 @@ export {
   type ParentRollupInput,
   type ParentRollupChild,
 } from "./rollup.js";
-export { coachOperatorChatReply } from "./operator-chat.js";
+export { coachOperatorChatReply, extractDispatchPermissionProposal } from "./operator-chat.js";
+export { coachKnowledgeChatReply } from "./knowledge-chat.js";
+export {
+  KNOWLEDGE_SAVE_TOOL_NAME,
+  type KnowledgeToolGateway,
+  type KnowledgeToolCallResult,
+  type KnowledgeSaveToolInput,
+  type KnowledgeSaveToolResult,
+} from "./knowledge-tools.js";
 export {
   resolveForemanDirectiveViaCoach,
   buildForemanCrewUserPrompt,

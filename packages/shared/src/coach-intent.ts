@@ -1,6 +1,38 @@
 import type { CoachIntent } from "./coach.js";
 import { isBugOrAnomalyReport } from "./bug-dispatch.js";
 
+/**
+ * 用户在讨论 OpenX / 工头自身的能力、设置或 UI 元问题（非要让施工队写代码）。
+ * 例如「我需要你能改显示名」「你能改这部分吗」。
+ */
+export function isProductMetaRequest(message: string): boolean {
+  const m = message.trim();
+  if (!m) return false;
+
+  if (
+    /我需要你(能|可以)|我需要你能|希望你能|你要能|让你能|使你能/.test(m) &&
+    /改|换|设置|调整|配置|称呼|显示名|展示名|标题/.test(m)
+  ) {
+    return true;
+  }
+  if (/我需要你.{0,8}改/.test(m) && !/代码|接口|页面|功能|模块|登录|注册|api/i.test(m)) {
+    return true;
+  }
+  if (/你(能不能|可不可以|能否|可以|能)(自己)?改/.test(m)) {
+    return true;
+  }
+  if (
+    /显示名|展示名|界面标题|对话框.*名|称呼你|叫你|agent.*名|工头.*名/i.test(m) &&
+    /改|换|自定义|设置/.test(m)
+  ) {
+    return true;
+  }
+  if (/改这(一)?部分|这部分.*改|自己改/.test(m) && !/代码|接口|页面|功能|模块|bug/i.test(m)) {
+    return true;
+  }
+  return false;
+}
+
 /** 是否像非编程类深度探讨（设计、游戏、股票等） */
 export function isDiscourseTopicMessage(message: string): boolean {
   const m = message.trim();
@@ -22,6 +54,7 @@ export function mayNeedGoalRefined(message: string): boolean {
   const m = message.trim();
   if (!m) return false;
 
+  if (isProductMetaRequest(m)) return false;
   if (isDiscourseTopicMessage(m)) return false;
 
   if (
@@ -51,6 +84,10 @@ export function mayNeedGoalRefined(message: string): boolean {
 export function classifyCoachIntent(message: string): CoachIntent {
   const m = message.trim();
   const lower = m.toLowerCase();
+
+  if (isProductMetaRequest(m)) {
+    return "consult";
+  }
 
   if (
     /看.*(文件|目录|文件夹)|查看.*(文件|目录|文件夹)|列出|列举|目录结构|有哪些文件|有什么文件|当前目录|工作目录|文件夹下|目录下|\bls\b|\bdir\b|list\s+(files|dir)|read\s+(file|dir|folder)|show\s+(files|directory)|workspace/i.test(
@@ -151,15 +188,25 @@ export function shouldUseCoachStreaming(
   message: string,
   intent: CoachIntent = classifyCoachIntent(message),
 ): boolean {
+  if (isProductMetaRequest(message)) return true;
   if (isDiscourseTopicMessage(message)) return true;
   if (intent === "task" || intent === "rework") return false;
   if (mayNeedGoalRefined(message)) return false;
   return isStreamingCoachIntent(intent);
 }
 
+/** 是否请求 Coach 使用 knowledge_save 工具写入项目用户知识 */
+export function shouldUseKnowledgeSaveTool(message: string): boolean {
+  const m = message.trim();
+  if (!m) return false;
+  return /记住|记下来|保存到知识|写入知识库|加到知识库|知识库保存|保存知识|remember this|save.*knowledge/i.test(
+    m,
+  );
+}
+
 /**
- * 是否走「结构化 LLM」路径，由模型自行选择 clarify 或 refined。
- * 用于替代仅 isAmbiguousTaskMessage 的硬编码门槛。
+ * 无 LLM 兜底时判定是否需要出澄清/任务单。
+ * LLM 可用时不再用作门控——由 LLM 在 structured 路径自主三选一。
  */
 export function shouldTryLlmClarify(
   message: string,

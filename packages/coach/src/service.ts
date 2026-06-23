@@ -1,11 +1,9 @@
 import {
   classifyCoachIntent,
   getModelRuntimeStatus,
-  isAmbiguousTaskMessage,
+  isProductMetaRequest,
   isWorkOrderDismissMessage,
   mayNeedGoalRefined,
-  shouldUseCoachStreaming,
-  shouldTryLlmClarify,
   upgradeToModelConfig,
   type AgentChatResponse,
   type CoachChatContext,
@@ -16,7 +14,11 @@ import {
   type RefinedGoal,
   type WorkOrderToolResult,
   type ClarifyToolResult,
+  type OperatorActionToolResult,
   type CoachClarifyPayload,
+  type CoachDispatchPermissionPayload,
+  type DispatchPermissionToolResult,
+  operatorToolsEnabled,
   formatClarifyAnswersForPrompt,
   enforceBugTwoPhaseSubGoals,
   resolveBriefTemplateSections,
@@ -28,7 +30,6 @@ import {
 import {
   refineGoalRules,
   coachChatReplyRules,
-  buildAmbiguousClarifyFallback,
 } from "./rules.js";
 import {
   coachAgentReplyLlm,
@@ -40,6 +41,8 @@ import {
   type LlmRole,
 } from "./llm.js";
 import { formatCoachLlmError, isCoachParseError, isCoachQuotaError, isCoachTimeoutError, formatCoachTimeoutError } from "./llm-errors.js";
+import { coachOperatorChatReply } from "./operator-chat.js";
+import type { OperatorToolGateway } from "./operator-tools.js";
 
 function finalizeRefinedGoal(
   refined: RefinedGoal | undefined,
@@ -58,6 +61,7 @@ function rulesRefinedFallbackForMessage(
   force: boolean,
 ): RefinedGoal | undefined {
   if (isWorkOrderDismissMessage(message)) return undefined;
+  if (isProductMetaRequest(message)) return undefined;
   const intentHint = classifyCoachIntent(message);
   const need =
     force ||
@@ -248,8 +252,8 @@ export async function coachChatReply(
   message: string;
   refined?: RefinedGoal;
   clarify?: CoachClarifyPayload;
+  dispatchPermission?: CoachDispatchPermissionPayload;
   intent?: CoachIntent;
-  suggestRefine?: boolean;
   llmError?: string;
   quotaExceeded?: boolean;
   streamed?: boolean;
@@ -259,14 +263,14 @@ export async function coachChatReply(
   const dismiss =
     !force &&
     (options?.skipRefine === true || isWorkOrderDismissMessage(message));
-  /** LLM 三选一（clarify / refined / message）；forceRefine 时强制关闭 */
+  /** 有 LLM 时统一走 structured，由 LLM 自主三选一 clarify/refined/message */
   const tryStructuredLlm =
     !force &&
     !dismiss &&
     !options?.toolContinuation &&
     !options?.clarifyContinuation &&
     !isWorkspaceInspectIntent(message) &&
-    shouldTryLlmClarify(message, intentHint);
+    !isProductMetaRequest(message);
   const upgraded = upgradeToModelConfig(settings);
   if (resolveLlmCredentials(upgraded, "coach", env)) {
     try {
@@ -281,26 +285,8 @@ export async function coachChatReply(
             chatHistory,
             { promptMode: "structured" },
           );
-          if (structuredReply.clarify?.questions?.length) {
-            if (isAmbiguousTaskMessage(message)) {
-              return {
-                message: structuredReply.message,
-                clarify: structuredReply.clarify,
-                intent: structuredReply.intent ?? "consult",
-              };
-            }
-            structuredReply = { ...structuredReply, clarify: undefined };
-          }
         } catch (structErr) {
           console.warn("[coach] structured clarify/refine failed:", structErr);
-          if (isAmbiguousTaskMessage(message)) {
-            return {
-              message:
-                "信息还不够具体。请先回答下方澄清问题，我再整理成任务单。",
-              clarify: buildAmbiguousClarifyFallback(message),
-              intent: "consult",
-            };
-          }
           // 明确任务：跳过 structured，走下方 agent / rules refined 兜底
         }
       }
@@ -308,7 +294,7 @@ export async function coachChatReply(
       if (
         options?.onDelta &&
         !force &&
-        (dismiss || shouldUseCoachStreaming(message, intentHint))
+        (dismiss || isProductMetaRequest(message))
       ) {
         const streamed = await coachChatStreamLlm(
           message,
@@ -323,8 +309,6 @@ export async function coachChatReply(
             streamed ||
             coachChatReplyRules(message, { ...context, defaultConstraints }),
           intent: dismiss ? "consult" : intentHint,
-          suggestRefine:
-            !dismiss && isAmbiguousTaskMessage(message) ? true : undefined,
           streamed: true,
         };
       }
@@ -345,17 +329,15 @@ export async function coachChatReply(
         ));
       const merged = ensureWorkspaceInspectRefined(message, context, reply);
       const intent = merged.intent ?? intentHint;
-      let refined = merged.refined;
+      let refined =
+        isProductMetaRequest(message) ? undefined : merged.refined;
       const needRefined =
         !dismiss &&
         !merged.clarify &&
+        !merged.dispatchPermission &&
         !refined &&
-        (force ||
-          intent === "task" ||
-          intent === "rework" ||
-          intentHint === "task" ||
-          intentHint === "rework" ||
-          mayNeedGoalRefined(message));
+        force &&
+        !isProductMetaRequest(message);
       if (!refined && needRefined) {
         refined = refineGoalRules(
           { userDraft: message },
@@ -367,6 +349,7 @@ export async function coachChatReply(
       if (
         refined &&
         !merged.clarify &&
+        !merged.dispatchPermission &&
         !dismiss &&
         !/创建并执行|创建目标|整理成|工单|任务单/.test(messageOut)
       ) {
@@ -374,10 +357,10 @@ export async function coachChatReply(
       }
       return {
         message: messageOut,
-        refined: merged.clarify ? undefined : refined,
+        refined: merged.clarify || merged.dispatchPermission ? undefined : refined,
         clarify: merged.clarify,
+        dispatchPermission: merged.dispatchPermission,
         intent,
-        suggestRefine: !refined && !merged.clarify && isAmbiguousTaskMessage(message) ? true : undefined,
       };
     } catch (err) {
       const hint = formatCoachLlmError(err);
@@ -457,15 +440,6 @@ export async function coachChatReply(
     };
   }
 
-  if (shouldTryLlmClarify(message, intentHint)) {
-    return {
-      message: "请先回答下方澄清问题，我再整理成任务单。",
-      clarify: buildAmbiguousClarifyFallback(message),
-      intent: "consult",
-      llmError: "模型未配置：请在设置中添加渠道并选择模型",
-    };
-  }
-
   return {
     message: coachChatReplyRules(message, context),
     llmError: "模型未配置：请在设置中添加渠道并选择模型",
@@ -511,7 +485,6 @@ export async function coachContinueAfterClarifyTool(
       onDelta: options?.onDelta,
       skipRefine: toolResult.outcome === "dismissed",
       clarifyContinuation: toolResult.outcome === "answered",
-      forceRefine: toolResult.outcome === "answered",
     },
   );
   let message = reply.message;
@@ -591,6 +564,128 @@ export async function coachContinueAfterWorkOrderTool(
     message: reply.message,
     llmError: reply.llmError,
     quotaExceeded: reply.quotaExceeded,
+  };
+}
+
+/** Operator 待确认操作 UI 处理后，将 tool_result 回传工头继续对话 */
+export async function coachContinueAfterOperatorTool(
+  toolResult: OperatorActionToolResult,
+  context: CoachChatContext,
+  settings: ModelSettingsSlice,
+  chatHistory: CoachChatTurn[] = [],
+  env?: LlmEnv,
+  options?: Pick<CoachChatReplyOptions, "onDelta"> & {
+    operatorGateway?: OperatorToolGateway;
+  },
+): Promise<{
+  message: string;
+  llmError?: string;
+  quotaExceeded?: boolean;
+  streamed?: boolean;
+}> {
+  const continuation =
+    toolResult.outcome === "dismissed"
+      ? `工具 ${toolResult.toolName} 已返回：用户取消待确认操作「${toolResult.summary}」。`
+      : [
+          `工具 ${toolResult.toolName} 已返回：用户已确认「${toolResult.summary}」。`,
+          toolResult.apiOk === false
+            ? `API 执行失败：${toolResult.apiError ?? "未知错误"}`
+            : toolResult.apiOk === true
+              ? `API 执行成功（HTTP ${toolResult.apiStatus ?? 200}）。`
+              : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+  const tier = context.operatorTier ?? "off";
+  if (
+    options?.operatorGateway &&
+    operatorToolsEnabled(tier) &&
+    shouldUseOperatorToolsForContinuation(continuation)
+  ) {
+    try {
+      const opReply = await coachOperatorChatReply(
+        continuation,
+        { ...context, operatorTier: tier },
+        settings,
+        options.operatorGateway,
+        env,
+        chatHistory,
+      );
+      return { message: opReply.message };
+    } catch (err) {
+      const hint = formatCoachLlmError(err);
+      if (hint && isCoachQuotaError(err)) {
+        return { message: hint, llmError: hint, quotaExceeded: true };
+      }
+      console.warn("[coach] operator tool continuation failed:", err);
+    }
+  }
+
+  const reply = await coachChatReply(
+    continuation,
+    context,
+    settings,
+    context.defaultConstraints ?? [],
+    env,
+    chatHistory,
+    {
+      onDelta: options?.onDelta,
+      skipRefine: true,
+      toolContinuation: true,
+    },
+  );
+  return {
+    message: reply.message,
+    llmError: reply.llmError,
+    quotaExceeded: reply.quotaExceeded,
+    streamed: reply.streamed,
+  };
+}
+
+function shouldUseOperatorToolsForContinuation(message: string): boolean {
+  return /api|设置|权限|operator|admin|模型|cli|mcp/i.test(message);
+}
+
+/** 派单权限 UI 操作后，将 tool_result 回传工头继续对话 */
+export async function coachContinueAfterDispatchPermissionTool(
+  toolResult: DispatchPermissionToolResult,
+  context: CoachChatContext,
+  settings: ModelSettingsSlice,
+  chatHistory: CoachChatTurn[] = [],
+  env?: LlmEnv,
+  options?: Pick<CoachChatReplyOptions, "onDelta">,
+): Promise<{
+  message: string;
+  llmError?: string;
+  quotaExceeded?: boolean;
+  streamed?: boolean;
+}> {
+  const modeLabel =
+    toolResult.appliedMode ?? toolResult.requestedMode;
+  const continuation =
+    toolResult.outcome === "dismissed"
+      ? `工具 propose_dispatch_permission 已返回：用户拒绝将派单权限调整为 ${toolResult.requestedMode}。`
+      : `工具 propose_dispatch_permission 已返回：用户已确认，派单权限现为 ${modeLabel}。`;
+
+  const reply = await coachChatReply(
+    continuation,
+    context,
+    settings,
+    context.defaultConstraints ?? [],
+    env,
+    chatHistory,
+    {
+      onDelta: options?.onDelta,
+      skipRefine: true,
+      toolContinuation: true,
+    },
+  );
+  return {
+    message: reply.message,
+    llmError: reply.llmError,
+    quotaExceeded: reply.quotaExceeded,
+    streamed: reply.streamed,
   };
 }
 

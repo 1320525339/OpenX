@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMcpCatalog } from "../lib/use-mcp-catalog";
 import {
   COACH_SKILLS,
@@ -14,34 +14,87 @@ import {
   type CoachSkill,
 } from "../lib/coach-context";
 import { PERMISSION_PICKER_OPTIONS } from "../lib/workflow-ui";
+import type { KnowledgeSourceRef } from "@openx/shared";
+import {
+  buildKnowledgePickerItems,
+  enabledMapToSelection,
+  knowledgeSelectionLabel,
+  loadKnowledgeSelection,
+  saveKnowledgeSelection,
+  selectionToEnabledMap,
+} from "../lib/knowledge-context";
 
-export type PickerTab = "skill" | "mcp" | "permission";
+export type PickerTab = "skill" | "mcp" | "permission" | "knowledge";
 
 type Props = {
   skillCatalog?: CoachSkill[];
+  projectId?: string;
+  isSystemMain?: boolean;
+  globalSources?: KnowledgeSourceRef[];
+  projectSources?: KnowledgeSourceRef[];
   onContextChange?: (ctx: {
     skills: Record<string, boolean>;
     mcps: Record<string, boolean>;
     permission: ChatPermissionSelection;
     permissionMode?: ReturnType<typeof permissionModeFromSelection>;
+    knowledgeSelection: ReturnType<typeof loadKnowledgeSelection>;
   }) => void;
 };
 
 export function ChatContextPicker({
   skillCatalog = COACH_SKILLS,
+  projectId,
+  isSystemMain = false,
+  globalSources = [],
+  projectSources = [],
   onContextChange,
 }: Props) {
   const { mcps: mcpCatalog } = useMcpCatalog();
   const [openTab, setOpenTab] = useState<PickerTab | null>(null);
   const [skills, setSkills] = useState(() => loadSkillSelection(skillCatalog));
-  const [mcps, setMcps] = useState(loadMcpSelection);
+  const [mcps, setMcps] = useState(() => loadMcpSelection(mcpCatalog));
+  const globalSourceKey = globalSources.map((s) => s.id).join("|");
+  const projectSourceKey = projectSources.map((s) => s.id).join("|");
+  const knowledgeItems = useMemo(
+    () =>
+      buildKnowledgePickerItems({
+        isSystemMain,
+        globalSources,
+        projectSources,
+      }),
+    [isSystemMain, globalSourceKey, projectSourceKey, globalSources, projectSources],
+  );
+  const [knowledgeEnabled, setKnowledgeEnabled] = useState(() =>
+    selectionToEnabledMap(knowledgeItems, loadKnowledgeSelection(projectId)),
+  );
+
+  useEffect(() => {
+    setKnowledgeEnabled(
+      selectionToEnabledMap(knowledgeItems, loadKnowledgeSelection(projectId)),
+    );
+  }, [projectId, knowledgeItems]);
+
   const [permission, setPermission] = useState<ChatPermissionSelection>(() =>
     loadPermissionSelection(),
+  );
+  const knowledgeSelection = useMemo(
+    () => enabledMapToSelection(knowledgeItems, knowledgeEnabled),
+    [knowledgeItems, knowledgeEnabled],
+  );
+  const knowledgeCount = countEnabled(knowledgeEnabled);
+  const knowledgeLabel = knowledgeSelectionLabel(
+    knowledgeSelection,
+    knowledgeCount,
+    knowledgeItems.length,
   );
 
   useEffect(() => {
     setSkills(loadSkillSelection(skillCatalog));
   }, [skillCatalog.map((s) => `${s.id}:${s.installed}`).join("|")]);
+
+  useEffect(() => {
+    setMcps(loadMcpSelection(mcpCatalog));
+  }, [mcpCatalog.map((m) => m.id).join("|")]);
 
   const footerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -49,15 +102,20 @@ export function ChatContextPicker({
 
   const onContextChangeRef = useRef(onContextChange);
   onContextChangeRef.current = onContextChange;
+  const lastContextPayloadRef = useRef("");
 
   useEffect(() => {
+    const payload = JSON.stringify({ skills, mcps, permission, knowledgeSelection });
+    if (payload === lastContextPayloadRef.current) return;
+    lastContextPayloadRef.current = payload;
     onContextChangeRef.current?.({
       skills,
       mcps,
       permission,
       permissionMode: permissionModeFromSelection(permission),
+      knowledgeSelection,
     });
-  }, [skills, mcps, permission]);
+  }, [skills, mcps, permission, knowledgeSelection]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -137,6 +195,18 @@ export function ChatContextPicker({
     savePermissionSelection(mode);
   };
 
+  const toggleKnowledge = (id: string) => {
+    const next = { ...knowledgeEnabled, [id]: !knowledgeEnabled[id] };
+    setKnowledgeEnabled(next);
+    saveKnowledgeSelection(enabledMapToSelection(knowledgeItems, next), projectId);
+  };
+
+  const selectAllKnowledge = () => {
+    const next = Object.fromEntries(knowledgeItems.map((item) => [item.id, true]));
+    setKnowledgeEnabled(next);
+    saveKnowledgeSelection({ mode: "all" }, projectId);
+  };
+
   const skillCount = countEnabled(skills);
   const mcpCount = countEnabled(mcps);
   const permissionLabel =
@@ -172,6 +242,15 @@ export function ChatContextPicker({
         >
           权限{permissionLabel ? ` · ${permissionLabel}` : ""}
         </button>
+        <button
+          type="button"
+          className={`chat-context-tab${openTab === "knowledge" ? " open" : ""}${knowledgeSelection.mode === "all" ? " active-selection" : ""}`}
+          aria-expanded={openTab === "knowledge"}
+          onClick={() => toggleTab("knowledge")}
+          title="本次对话包含的知识库"
+        >
+          知识 · {knowledgeLabel}
+        </button>
       </div>
 
       {openTab && (
@@ -181,9 +260,15 @@ export function ChatContextPicker({
               {openTab === "skill" && "选择 Skills"}
               {openTab === "mcp" && "选择 MCP"}
               {openTab === "permission" && "派单权限"}
+              {openTab === "knowledge" && "选择知识库"}
             </span>
             <span className="chat-context-banner-hint">
               {openTab === "permission" ? "单选" : "可多选"}
+              {openTab === "knowledge" ? (
+                <button type="button" className="btn compact" onClick={selectAllKnowledge}>
+                  全部
+                </button>
+              ) : null}
             </span>
           </div>
           <div
@@ -240,6 +325,25 @@ export function ChatContextPicker({
                   >
                     <span className="chat-context-option-name">{item.label}</span>
                     <span className="chat-context-option-desc">{item.description}</span>
+                  </button>
+                );
+              })}
+            {openTab === "knowledge" &&
+              knowledgeItems.map((item) => {
+                const on = knowledgeEnabled[item.id];
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    className={`chat-context-option${on ? " active" : ""}`}
+                    onClick={() => toggleKnowledge(item.id)}
+                  >
+                    <span className="chat-context-option-name">{item.label}</span>
+                    <span className="chat-context-option-desc">
+                      {item.group === "scope" ? "知识范围" : "外部知识源"}
+                    </span>
                   </button>
                 );
               })}

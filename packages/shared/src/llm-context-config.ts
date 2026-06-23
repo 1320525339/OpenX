@@ -135,6 +135,7 @@ export const DEFAULT_LLM_PROMPT_SECTIONS: LlmPromptSection[] = [
 - 用户问进展、验收、返工建议
 - 汇总已有子任务结果，对照核心目标 acceptance 说明离完成还有多远
 - 纯闲聊或概念问答
+- 用户讨论 **OpenX 自身**能力边界、设置入口、界面称呼/显示名（如「你能改工头这个名字吗」「我需要你能改这部分」）——说明你能做什么、引导去设置，**禁止** refined 派单
 - 问题描述过于模糊：先用 message 追问关键事实，或输出 clarify，**不要**在约束不足时硬派单
 
 ## 何时输出 clarify（结构化澄清）
@@ -148,6 +149,18 @@ export const DEFAULT_LLM_PROMPT_SECTIONS: LlmPromptSection[] = [
 - 需要现场信息（列目录、读文件、跑命令）——派 Pi 侦察/执行子任务，不要空口拒绝
 - 用户确认返工后，输出更新后的 executionPrompt（含审查反馈与新增约束）
 - refined 在对话时间线中等价于工具 **propose_work_order**；用户在 UI 取消/确认后，系统会以 **tool_result** 回传，你只根据结果用 message 回复，勿重复出 refined
+- openx_call_api / request_admin_access 挂起的 admin 操作同理：确认或取消后以 **tool_result** 回传，你只根据结果回复，勿重复发起相同写操作
+- propose_dispatch_permission 挂起的派单权限变更同理：用户确认后 tool_result 回传 appliedMode，你只根据结果回复
+
+## 派单权限（对话栏）
+当前派单权限：{{runtime.dispatchPermissionLabel}}（{{runtime.dispatchPermissionMode}}）。
+- read_only：施工队只读侦察，禁止写文件
+- ask_write：写操作须先说明并等工头确认
+- full：按任务完全授权
+创建工单时该权限写入 dispatchContext；可在 refined.subGoals[].permissionMode 为子任务单独指定。
+
+## 工头自控权限（设置）
+当前 operatorTier={{runtime.operatorTier}}。off 无 API 工具；read 只读；operator 可派单；admin 可改设置但敏感写须 UI 确认。权限不足时用 request_admin_access 向用户申请升级。
 
 ## 派单要求（refined.executionPrompt）
 工人只看你给的 brief，必须无歧义、可独立执行。executionPrompt 须按「问题定位 brief 模板」组织（见 problemFraming 段），至少包含：
@@ -348,6 +361,8 @@ export const DEFAULT_LLM_PROMPT_SECTIONS: LlmPromptSection[] = [
 
 工作流程：先 openx_get_catalog 或 openx_list_apis 了解接口，再 openx_call_api 执行。
 admin 级写 settings/model/cli/mcp/agents 时须告知用户去 UI 确认，不要假装已执行。
+若当前非 admin 且需修改设置，先调用 request_admin_access 申请权限升级。
+openx_call_api / request_admin_access 的 pending 结果经用户确认后，会以 tool_result 回传；根据结果继续，勿重复发起。
 /api/events 为 SSE，不可经 openx_call_api 调用。`,
   },
   {

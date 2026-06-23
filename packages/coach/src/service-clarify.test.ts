@@ -62,34 +62,33 @@ describe("coachChatReply clarify", () => {
   it("returns structured clarify for ambiguous task message", async () => {
     const result = await coachChatReply("帮我优化一下", {}, settings);
     expect(result.clarify?.questions).toHaveLength(1);
-    expect(result.suggestRefine).toBeUndefined();
     expect(result.refined).toBeUndefined();
   });
 
   it("uses structured mode for explicit task messages", async () => {
     const result = await coachChatReply("帮我实现登录接口", {}, settings);
-    expect(result.refined?.title.length).toBeGreaterThan(0);
-    expect(result.clarify).toBeUndefined();
-  });
-
-  it("falls back to rule clarify when structured LLM throws on ambiguous task", async () => {
-    vi.mocked(coachAgentReplyLlm).mockRejectedValueOnce(new Error("timeout"));
-    const result = await coachChatReply("帮我优化一下", {}, settings);
-    expect(result.clarify?.questions?.length).toBeGreaterThan(1);
-    expect(result.message).toContain("澄清");
+    expect(result.clarify?.questions).toHaveLength(1);
     expect(result.refined).toBeUndefined();
   });
 
-  it("falls back to rules refined when structured LLM throws on explicit task", async () => {
+  it("returns message only when structured LLM throws on ambiguous task", async () => {
+    vi.mocked(coachAgentReplyLlm).mockRejectedValueOnce(new Error("timeout"));
+    const result = await coachChatReply("帮我优化一下", {}, settings);
+    expect(result.clarify).toBeUndefined();
+    expect(result.refined).toBeUndefined();
+    expect(result.message.length).toBeGreaterThan(0);
+  });
+
+  it("returns message only when structured LLM throws on explicit task", async () => {
     vi.mocked(coachAgentReplyLlm)
       .mockRejectedValueOnce(new Error("timeout"))
       .mockResolvedValueOnce({ message: "ok", intent: "consult" as const });
     const result = await coachChatReply("帮我实现 JWT 登录", {}, settings);
-    expect(result.refined?.title.length).toBeGreaterThan(0);
+    expect(result.refined).toBeUndefined();
     expect(result.clarify).toBeUndefined();
   });
 
-  it("rules refined when structured LLM returns message without refined", async () => {
+  it("respects LLM message-only output without forcing rules refined", async () => {
     vi.mocked(coachAgentReplyLlm).mockResolvedValueOnce({
       message: "好的，我来整理",
       intent: "task" as const,
@@ -99,8 +98,28 @@ describe("coachChatReply clarify", () => {
       {},
       settings,
     );
-    expect(result.refined?.title.length).toBeGreaterThan(0);
+    expect(result.refined).toBeUndefined();
     expect(result.clarify).toBeUndefined();
+  });
+
+  it("does not propose work order for product meta feedback", async () => {
+    vi.mocked(coachAgentReplyLlm).mockResolvedValueOnce({
+      message: "目前我不能直接改界面称呼，请在设置里修改。",
+      refined: {
+        title: "我需要你能改这部分",
+        acceptance: "完成",
+        executionPrompt: "改 UI",
+        constraints: [],
+        priority: "medium" as const,
+      },
+      intent: "task" as const,
+    });
+    const result = await coachChatReply("我需要你能改这部分", {}, settings);
+    expect(result.refined).toBeUndefined();
+    const structuredCalls = vi
+      .mocked(coachAgentReplyLlm)
+      .mock.calls.filter((call) => call[5]?.promptMode === "structured");
+    expect(structuredCalls).toHaveLength(0);
   });
 
   it("skips structured mode when forceRefine is set", async () => {

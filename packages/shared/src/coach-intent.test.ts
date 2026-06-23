@@ -2,13 +2,35 @@ import { describe, expect, it } from "vitest";
 import {
   classifyCoachIntent,
   isAmbiguousTaskMessage,
+  isProductMetaRequest,
   isWorkOrderDismissMessage,
   mayNeedGoalRefined,
   shouldTryLlmClarify,
   shouldUseCoachStreaming,
+  shouldUseKnowledgeSaveTool,
 } from "./coach-intent.js";
 
+describe("isProductMetaRequest", () => {
+  it("detects coach capability / settings feedback", () => {
+    expect(isProductMetaRequest("我需要你能改这部分")).toBe(true);
+    expect(isProductMetaRequest("你能改显示名吗")).toBe(true);
+    expect(isProductMetaRequest("我希望你能自己改工头这个名字")).toBe(true);
+  });
+
+  it("does not treat real dev tasks as product meta", () => {
+    expect(isProductMetaRequest("帮我实现一个登录接口")).toBe(false);
+    expect(isProductMetaRequest("我需要做一个登录页")).toBe(false);
+    expect(isProductMetaRequest("帮我改登录页面的样式")).toBe(false);
+  });
+});
+
 describe("classifyCoachIntent", () => {
+  it("treats product meta as consult with streaming", () => {
+    expect(classifyCoachIntent("我需要你能改这部分")).toBe("consult");
+    expect(shouldUseCoachStreaming("我需要你能改这部分")).toBe(true);
+    expect(mayNeedGoalRefined("我需要你能改这部分")).toBe(false);
+  });
+
   it("treats progress queries as progress", () => {
     expect(classifyCoachIntent("最近进展怎么样？")).toBe("progress");
     expect(shouldUseCoachStreaming("最近进展怎么样？")).toBe(true);
@@ -86,5 +108,13 @@ describe("isWorkOrderDismissMessage", () => {
       isWorkOrderDismissMessage("我先不创建「深色模式」这个任务单了"),
     ).toBe(true);
     expect(isWorkOrderDismissMessage("帮我做一个登录页")).toBe(false);
+  });
+});
+
+describe("shouldUseKnowledgeSaveTool", () => {
+  it("detects remember phrases", () => {
+    expect(shouldUseKnowledgeSaveTool("请记住：后端端口 3921")).toBe(true);
+    expect(shouldUseKnowledgeSaveTool("保存到知识库：使用 vitest")).toBe(true);
+    expect(shouldUseKnowledgeSaveTool("帮我做一个登录页")).toBe(false);
   });
 });

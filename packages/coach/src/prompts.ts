@@ -152,10 +152,9 @@ export function buildChatUserPrompt(
   history: CoachChatTurn[] = [],
   maxHistoryChars = DEFAULT_HISTORY_CHAR_BUDGET,
   options?: {
-    jsonMode?: boolean | "tool_continuation" | "clarify" | "clarify_continuation" | "structured";
+    jsonMode?: boolean | "tool_continuation" | "clarify_continuation" | "structured";
     threadBlock?: string;
-  },
-): string {
+  }): string {
   const lines: string[] = [];
 
   const threadBlock =
@@ -172,40 +171,42 @@ export function buildChatUserPrompt(
     lines.push(
       "用户已通过 UI 对 propose_work_order 作出选择。请仅输出 message 确认收到，禁止再次输出 refined。",
     );
-  } else if (options?.jsonMode === "clarify") {
-    lines.push("## 当前用户消息");
-    lines.push(message.trim());
-    lines.push("");
-    lines.push(
-      "用户意图不够明确。请输出 clarify（1-4 道决策题，含 id/prompt/options；选项可有 description、recommended、preview），不要输出 refined。",
-    );
-    lines.push(
-      "澄清重点：期望 vs 实际、复现步骤、影响范围、优化目标、可接受改动边界。字段 message 简要说明为何需要澄清。",
-    );
   } else if (options?.jsonMode === "clarify_continuation") {
     lines.push("## 待处理澄清结果");
     lines.push(message.trim());
     lines.push("");
     lines.push(
-      "用户已回答 propose_clarification。请根据答案输出 refined 任务单（可含 subGoals），不要再次 clarify。",
+      "用户已回答 propose_clarification。请根据答案分析用户真实意图，自行决定下一步：",
     );
     lines.push(
-      "refined.executionPrompt 必须使用问题定位 brief 模板，把澄清结果写入「已知事实」，仍不确定的写入「待核实项」。",
+      "1) 答案已充分明确范围/验收/期望 → 输出 refined（含 executionPrompt 问题定位 brief，把澄清结果写入「已知事实」）；",
+    );
+    lines.push(
+      "2) 答案仍不够、还有关键信息缺失 → 再次输出 clarify（不要勉强 refined）；",
+    );
+    lines.push(
+      "3) 答案表明用户只是咨询/探讨，不需要派单 → 仅 message。",
     );
   } else if (options?.jsonMode === "structured") {
     lines.push("## 当前用户消息");
     lines.push(message.trim());
     lines.push("");
     lines.push(
-      "请根据信息完整度自行选择输出（三选一，勿同时输出 clarify 与 refined）：",
+      "请根据信息完整度自行选择输出（四选一，勿同时输出 clarify、dispatchPermission 与 refined）：",
     );
     lines.push(
       "1) 范围/验收/期望/复现/边界不明确 → 输出 clarify（propose_clarification，1-4 题，含 options/preview），不要 refined；",
     );
     lines.push(
-      "2) 信息充分、可派单 → 输出 refined（含 executionPrompt 问题定位 brief）；",
+      "2) 用户请求变更派单权限，或当前权限不适合即将派单的任务 → 输出 dispatchPermission（propose_dispatch_permission，含 requestedMode 与 reason），不要 refined；",
     );
-    lines.push("3) 仅咨询/闲聊/进展 → 仅 message，不输出 clarify 或 refined。");
+    lines.push(
+      "3) 信息充分、可派单 → 输出 refined（含 executionPrompt 问题定位 brief）；",
+    );
+    lines.push("4) 仅咨询/闲聊/进展 → 仅 message，不输出 clarify、dispatchPermission 或 refined。");
+    lines.push(
+      "4) 用户讨论 OpenX/工头自身设置、称呼、UI 能力（如改显示名、改界面标题）→ 仅 message 说明能力边界与设置入口，禁止 refined。",
+    );
     lines.push(
       "澄清重点：期望 vs 实际、复现步骤、影响范围、优化目标、可接受改动边界。",
     );

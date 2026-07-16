@@ -3,7 +3,7 @@ import type {
   ConnectBootstrapStatus,
   Conversation,
   CreateGoalInput,
-  CreateKnowledgeSourceInput,
+  CreateKnowledgeSourceBody,
   CreateProjectInput,
   Goal,
   GoalRunState,
@@ -41,6 +41,100 @@ export type CoachAgentInfo = {
   desc: string;
   agentMdPath?: string;
   builtin?: boolean;
+};
+
+export type MilocoStatusResponse = {
+  dashboardUrl: string;
+  skillsInstalled: string[];
+  skillsBoundToPi: string[];
+  syncSkillsInstalled?: string[];
+  batch2SkillsInstalled?: string[];
+  batch2SkillsBoundToPi?: string[];
+  batch3SkillsInstalled?: string[];
+  batch3SkillsBoundToPi?: string[];
+  webhook: {
+    url: string;
+    tokenConfigured: boolean;
+  };
+  presenceWatch?: { enabled: boolean; intervalMs: number };
+  homeCronWatch?: { enabled: boolean };
+};
+
+export type MilocoEventItem = {
+  id: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  lane?: string;
+  goalId?: string;
+};
+
+export type IntegrationDirectoryEntry = {
+  id: string;
+  version: string;
+  displayName: string;
+  icon: string;
+  capabilities: string[];
+  permissions: string[];
+  installed: boolean;
+  enabled: boolean;
+  health: string;
+  healthDetail?: string;
+  envLocked?: boolean;
+  envLockReason?: string;
+  migrationCompleted?: boolean;
+  toolsTab?: { id: string; label: string; componentKey: string };
+  oxspTemplates?: Array<{ id: string; label: string }>;
+};
+
+export type MilocoHomeCronStatus = {
+  enabled: boolean;
+  tickMs: number;
+  memoryDir: string;
+  conversationId: string;
+  tasks: Array<{
+    name: string;
+    description: string;
+    cronExpr: string;
+    nextHint: string;
+  }>;
+  recentRuns: Array<{ taskName: string; goalId: string; triggeredAt: string }>;
+};
+
+export type MilocoLayerBCheck = {
+  id: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type MilocoScopeCamera = {
+  did: string;
+  name?: string;
+  room?: string;
+  in_use: boolean;
+  is_online: boolean;
+  connected: boolean;
+};
+
+export type MilocoLayerBStatus = {
+  checkedAt: string;
+  ready: boolean;
+  checks: MilocoLayerBCheck[];
+  cameras: MilocoScopeCamera[];
+  enabledCameraCount: number;
+  maxEnabledCameras: number;
+  perceptionDeviceCount: number;
+  omniApiKeyConfigured: boolean;
+  wslWebhookReachable: boolean;
+  wslWebhookUrl?: string;
+  dashboardUrl: string;
+  eventsConversationId: string;
+  recentEventGoalCount: number;
+  latestEventGoal?: { id: string; title: string; status: string; updatedAt: string };
+  refreshing?: boolean;
+  stale?: boolean;
+  error?: string;
 };
 
 export type BootstrapResponse = {
@@ -189,6 +283,17 @@ export const api = {
       "/api/projects",
     ),
 
+  getProjectReadiness: (id: string) =>
+    request<{
+      readiness: {
+        level: string;
+        score: number;
+        gaps: string[];
+        checks: Array<{ id: string; label: string; ok: boolean; detail?: string }>;
+      };
+      badge: string;
+    }>(`/api/projects/${encodeURIComponent(id)}/readiness`),
+
   createProject: (body: CreateProjectInput) =>
     request<{ project: Project }>("/api/projects", {
       method: "POST",
@@ -209,13 +314,134 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  createConversation: (projectId: string, title?: string) =>
-    request<{ conversation: Conversation }>(
+  createConversation: (
+    projectId: string,
+    opts?: string | {
+      title?: string;
+      mode?: "foreman" | "roundtable";
+      participantProfileIds?: string[];
+    },
+  ) => {
+    const body =
+      typeof opts === "string"
+        ? { title: opts }
+        : {
+            title: opts?.title,
+            mode: opts?.mode,
+            participantProfileIds: opts?.participantProfileIds,
+          };
+    return request<{ conversation: Conversation }>(
       `/api/projects/${encodeURIComponent(projectId)}/conversations`,
       {
         method: "POST",
-        body: JSON.stringify({ title }),
+        body: JSON.stringify(body),
       },
+    );
+  },
+
+  patchConversation: (
+    id: string,
+    body: { title?: string; mode?: "foreman" | "roundtable" },
+  ) =>
+    request<{ conversation: Conversation }>(
+      `/api/conversations/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+
+  listAiProfiles: () =>
+    request<{ profiles: import("@openx/shared").AiProfile[] }>("/api/roundtable/ai-profiles"),
+
+  createAiProfile: (body: import("@openx/shared").CreateAiProfileInput) =>
+    request<{ profile: import("@openx/shared").AiProfile }>("/api/roundtable/ai-profiles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getRoundtableParticipants: (conversationId: string) =>
+    request<{ participants: import("@openx/shared").ConversationParticipant[] }>(
+      `/api/roundtable/conversations/${encodeURIComponent(conversationId)}/participants`,
+    ),
+
+  putRoundtableParticipants: (
+    conversationId: string,
+    participants: import("@openx/shared").UpsertConversationParticipantsInput["participants"],
+  ) =>
+    request<{ participants: import("@openx/shared").ConversationParticipant[] }>(
+      `/api/roundtable/conversations/${encodeURIComponent(conversationId)}/participants`,
+      { method: "PUT", body: JSON.stringify({ participants }) },
+    ),
+
+  enableRoundtable: (conversationId: string, participantProfileIds?: string[]) =>
+    request<{
+      conversation: Conversation;
+      participants: import("@openx/shared").ConversationParticipant[];
+    }>(`/api/roundtable/conversations/${encodeURIComponent(conversationId)}/enable`, {
+      method: "POST",
+      body: JSON.stringify({ participantProfileIds }),
+    }),
+
+  createChatRound: (
+    conversationId: string,
+    body: import("@openx/shared").CreateChatRoundInput,
+  ) =>
+    request<{
+      round: import("@openx/shared").ChatRound;
+      userMessage: import("@openx/shared").CoachMessageRecord;
+    }>(`/api/roundtable/conversations/${encodeURIComponent(conversationId)}/chat/rounds`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  synthesizeChatRound: (roundId: string) =>
+    request<{ synthesis: import("@openx/shared").RoundSynthesisPayload }>(
+      `/api/roundtable/rounds/${encodeURIComponent(roundId)}/synthesize`,
+      { method: "POST", body: "{}" },
+    ),
+
+  roundToWorkOrder: (roundId: string) =>
+    request<{
+      message: string;
+      refined?: import("@openx/shared").RefinedGoal;
+      refinedMessage?: import("@openx/shared").CoachMessageRecord;
+    }>(`/api/roundtable/rounds/${encodeURIComponent(roundId)}/to-work-order`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  retryRoundtableReply: (messageId: number) =>
+    request<{ ok: boolean }>(
+      `/api/roundtable/replies/${messageId}/retry`,
+      { method: "POST", body: "{}" },
+    ),
+
+  cancelRoundtableReply: (messageId: number) =>
+    request<{ ok: boolean }>(
+      `/api/roundtable/replies/${messageId}/cancel`,
+      { method: "POST", body: "{}" },
+    ),
+
+  cancelActiveRoundtableRounds: (conversationId: string) =>
+    request<{ ok: boolean; roundIds: string[]; cancelledMessageIds: number[] }>(
+      `/api/roundtable/conversations/${encodeURIComponent(conversationId)}/rounds/cancel-active`,
+      { method: "POST", body: "{}" },
+    ),
+
+  rejectPeerRequest: (requestId: string) =>
+    request<{ request: import("@openx/shared").PeerRequest }>(
+      `/api/roundtable/peer-requests/${encodeURIComponent(requestId)}/reject`,
+      { method: "POST", body: "{}" },
+    ),
+
+  approvePeerRequest: (requestId: string) =>
+    request<{ request: import("@openx/shared").PeerRequest }>(
+      `/api/roundtable/peer-requests/${encodeURIComponent(requestId)}/approve`,
+      { method: "POST", body: "{}" },
+    ),
+
+  approveSessionPeerRequest: (requestId: string) =>
+    request<{ request: import("@openx/shared").PeerRequest }>(
+      `/api/roundtable/peer-requests/${encodeURIComponent(requestId)}/approve-session`,
+      { method: "POST", body: "{}" },
     ),
 
   deleteConversation: (id: string) =>
@@ -236,6 +462,58 @@ export const api = {
     if (opts?.projectId) params.set("projectId", opts.projectId);
     const q = params.toString();
     return request<{ goals: Goal[] }>(q ? `/api/goals?${q}` : "/api/goals");
+  },
+
+  getGoalsPage: (opts: {
+    conversationId?: string;
+    projectId?: string;
+    displayFilter?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (opts.conversationId) params.set("conversationId", opts.conversationId);
+    if (opts.projectId) params.set("projectId", opts.projectId);
+    if (opts.displayFilter) params.set("displayFilter", opts.displayFilter);
+    params.set("limit", String(opts.limit ?? 80));
+    params.set("offset", String(opts.offset ?? 0));
+    return request<{
+      goals: Goal[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/goals?${params}`);
+  },
+
+  getGoalCounts: (opts?: { conversationId?: string; projectId?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.conversationId) params.set("conversationId", opts.conversationId);
+    if (opts?.projectId) params.set("projectId", opts.projectId);
+    const q = params.toString();
+    return request<{
+      counts: {
+        all: number;
+        incomplete: number;
+        failed: number;
+        done: number;
+        rework: number;
+      };
+    }>(q ? `/api/goals/counts?${q}` : "/api/goals/counts");
+  },
+
+  getLogsPage: (opts?: { goalId?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.goalId) params.set("goalId", opts.goalId);
+    params.set("limit", String(opts?.limit ?? 120));
+    params.set("offset", String(opts?.offset ?? 0));
+    return request<{
+      logs: { goalId: string; level: string; message: string; timestamp: string }[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/logs?${params}`);
   },
 
   getExecutors: () => request<{ executors: ExecutorInfo[] }>("/api/executors"),
@@ -369,10 +647,10 @@ export const api = {
   triggerGoalReview: (id: string, opts?: { force?: boolean }) =>
     request<{ ok: boolean; goal?: Goal; rounds: ReviewRoundEntry[] }>(
       `/api/goals/${id}/trigger-review`,
-      {
+      withGoalAccess({
         method: "POST",
         body: JSON.stringify({ force: opts?.force ?? true }),
-      },
+      }),
     ),
 
   createGoal: (body: CreateGoalInput & { autoStart?: boolean }) =>
@@ -386,10 +664,13 @@ export const api = {
     subGoals: CreateGoalInput["subGoals"],
     autoStart?: boolean,
   ) =>
-    request<{ children: Goal[] }>(`/api/goals/${parentId}/sub-goals`, {
-      method: "POST",
-      body: JSON.stringify({ subGoals, autoStart }),
-    }),
+    request<{ children: Goal[] }>(
+      `/api/goals/${parentId}/sub-goals`,
+      withGoalAccess({
+        method: "POST",
+        body: JSON.stringify({ subGoals, autoStart }),
+      }),
+    ),
 
   patchGoal: (id: string, body: Record<string, unknown>) =>
     request<{ goal: Goal }>(`/api/goals/${id}`, withGoalAccess({
@@ -530,6 +811,7 @@ export const api = {
       agentId?: string;
       forceRefine?: boolean;
       skipRefine?: boolean;
+      permissionMode?: import("@openx/shared").DispatchPermissionMode;
     },
   ) =>
     request<{
@@ -553,6 +835,7 @@ export const api = {
         agentId: opts.agentId,
         forceRefine: opts.forceRefine,
         skipRefine: opts.skipRefine,
+        permissionMode: opts.permissionMode,
         ...readClientTimeContext(),
       }),
     }),
@@ -586,14 +869,27 @@ export const api = {
       allGoals: Goal[];
     }>("/api/system/console"),
 
-  getIslandSeen: (limit = 500) =>
-    request<{ seenIds: string[] }>(`/api/island/seen?limit=${limit}`),
+  getIslandSeen: (limit = 500, scopeKey?: string) => {
+    const scope = scopeKey ? `&scopeKey=${encodeURIComponent(scopeKey)}` : "";
+    return request<{ seenIds: string[] }>(`/api/island/seen?limit=${limit}${scope}`);
+  },
 
-  markIslandSeen: (ids: string[]) =>
+  markIslandSeen: (ids: string[], scopeKey?: string) =>
     request<{ ok: true; marked: number }>("/api/island/seen", {
       method: "POST",
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, scopeKey }),
     }),
+
+  listAttentions: (state: "open" = "open", limit = 200) =>
+    request<{ attentions: import("@openx/shared").AttentionRecord[] }>(
+      `/api/island/attentions?state=${state}&limit=${limit}`,
+    ),
+
+  ackAttention: (key: string) =>
+    request<{ ok: true; key: string; state: string; revision: number }>(
+      `/api/island/attentions/${encodeURIComponent(key)}/ack`,
+      { method: "POST" },
+    ),
 
   getMcp: () =>
     request<{
@@ -732,7 +1028,7 @@ export const api = {
   getGlobalKnowledgeSources: () =>
     request<{ scope: "global"; sources: KnowledgeSourceRef[] }>("/api/knowledge/sources"),
 
-  createGlobalKnowledgeSource: (body: CreateKnowledgeSourceInput) =>
+  createGlobalKnowledgeSource: (body: CreateKnowledgeSourceBody) =>
     request<{ source: KnowledgeSourceRef }>("/api/knowledge/sources", {
       method: "POST",
       body: JSON.stringify(body),
@@ -757,7 +1053,7 @@ export const api = {
       runtime: { memory: string; sections: string[] };
     }>(`/api/projects/${encodeURIComponent(projectId)}/knowledge`),
 
-  createProjectKnowledgeSource: (projectId: string, body: CreateKnowledgeSourceInput) =>
+  createProjectKnowledgeSource: (projectId: string, body: CreateKnowledgeSourceBody) =>
     request<{ source: KnowledgeSourceRef }>(
       `/api/projects/${encodeURIComponent(projectId)}/knowledge/sources`,
       {
@@ -789,6 +1085,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(messageId != null ? { messageId } : {}),
     }),
+
+  respondDispatchPermission: (
+    messageId: number,
+    body: {
+      conversationId: string;
+      outcome: "confirmed" | "dismissed";
+    },
+  ) =>
+    request<{ ok?: boolean }>(
+      `/api/coach/dispatch-permission/${messageId}/respond`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
 
   runOperatorSelfTest: (opts?: { skipConnect?: boolean }) =>
     request<{ ok: boolean; steps: Array<{ id: string; ok: boolean; detail: string }> }>(
@@ -855,6 +1166,135 @@ export const api = {
           error?: string;
         }
     >(`/api/workspace/file-preview?path=${encodeURIComponent(path)}`),
+
+  getMilocoStatus: () => request<MilocoStatusResponse>("/api/miloco/status"),
+
+  setupMiloco: (opts?: { force?: boolean }) =>
+    request<{
+      ok: boolean;
+      installed: string[];
+      error?: string;
+      webhookUrl?: string;
+      tokenConfigured?: boolean;
+    }>("/api/miloco/setup", {
+      method: "POST",
+      body: JSON.stringify(opts ?? {}),
+    }),
+
+  getMilocoLayerB: () => request<MilocoLayerBStatus>("/api/miloco/layer-b"),
+
+  refreshMilocoLayerB: () =>
+    request<MilocoLayerBStatus>("/api/miloco/layer-b/refresh", {
+      method: "POST",
+      body: "{}",
+    }),
+
+  getIntegrations: () =>
+    request<{ integrations: IntegrationDirectoryEntry[] }>("/api/integrations"),
+
+  getIntegration: (id: string) =>
+    request<IntegrationDirectoryEntry & { config?: Record<string, unknown> }>(
+      `/api/integrations/${encodeURIComponent(id)}`,
+    ),
+
+  patchIntegration: (
+    id: string,
+    body: { enabled?: boolean; config?: Record<string, unknown> },
+  ) =>
+    request<{ ok: boolean; integration?: IntegrationDirectoryEntry; error?: string; envLocked?: boolean }>(
+      `/api/integrations/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+
+  runIntegrationDiagnostics: (id: string) =>
+    request<{
+      ok: boolean;
+      checkedAt: string;
+      summary: string;
+      checks?: Array<{ id: string; ok: boolean; detail: string }>;
+    }>(`/api/integrations/${encodeURIComponent(id)}/diagnostics`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  getIntegrationDiagnosticsLatest: (id: string) =>
+    request<{
+      ok: boolean;
+      checkedAt: string;
+      summary: string;
+      checks?: Array<{ id: string; ok: boolean; detail: string }>;
+    }>(`/api/integrations/${encodeURIComponent(id)}/diagnostics/latest`),
+
+  getMilocoConfig: () => request<Record<string, unknown>>("/api/miloco/config"),
+
+  saveMilocoConfig: (body: Record<string, unknown>) =>
+    request<Record<string, unknown>>("/api/miloco/config", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  getMilocoHomes: () =>
+    request<{
+      ok: boolean;
+      devices: Array<{
+        did: string;
+        name: string;
+        room: string;
+        category: string;
+        online: boolean;
+      }>;
+      config: Record<string, unknown>;
+      error?: string;
+    }>("/api/miloco/homes"),
+
+  completeMilocoSetupWizard: (body: Record<string, unknown>) =>
+    request<{ ok: boolean; config: Record<string, unknown> }>(
+      "/api/miloco/setup-wizard/complete",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
+  getMilocoEvents: (limit = 50, lane?: string) =>
+    request<{ conversationId: string; goals: MilocoEventItem[]; runs?: MilocoEventItem[] }>(
+      `/api/miloco/events?limit=${limit}${lane ? `&lane=${encodeURIComponent(lane)}` : ""}`,
+    ),
+
+  getMilocoHomeCron: () => request<MilocoHomeCronStatus>("/api/miloco/home-cron"),
+
+  triggerMilocoHomeCron: (name: string) =>
+    request<{ ok: boolean; goalId?: string; error?: string }>(
+      "/api/miloco/home-cron/trigger",
+      { method: "POST", body: JSON.stringify({ name }) },
+    ),
+
+  habitSuggestAction: (body: Record<string, unknown>) =>
+    request<Record<string, unknown>>("/api/miloco/habit-suggest", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  connectMilocoWsl: (webhookHost?: string) =>
+    request<{ ok: boolean; webhookUrl: string; error?: string }>("/api/miloco/connect-wsl", {
+      method: "POST",
+      body: JSON.stringify(webhookHost ? { webhookHost } : {}),
+    }),
+
+  addMilocoDashboardCard: () =>
+    request<{ ok: boolean; slotId?: string; existing?: boolean; error?: string }>(
+      "/api/miloco/add-card",
+      { method: "POST", body: "{}" },
+    ),
+
+  enableMilocoCameras: (dids: string[]) =>
+    request<{ ok: boolean; error?: string; status?: MilocoLayerBStatus }>(
+      "/api/miloco/layer-b/cameras/enable",
+      { method: "POST", body: JSON.stringify({ dids }) },
+    ),
+
+  disableMilocoCameras: (dids: string[]) =>
+    request<{ ok: boolean; error?: string; status?: MilocoLayerBStatus }>(
+      "/api/miloco/layer-b/cameras/disable",
+      { method: "POST", body: JSON.stringify({ dids }) },
+    ),
 };
 
 export type EventConnectionHandlers = {
@@ -863,45 +1303,87 @@ export type EventConnectionHandlers = {
   /** SSE 历史回放结束（收到 connected 事件） */
   onCatchupComplete?: () => void;
   onError?: () => void;
-  onGap?: (reason: string, pending?: number) => void;
+  /** gap 后可做完整状态同步；返回 Promise 时会等其结束后再重建连接 */
+  onGap?: (reason: string, pending?: number) => void | Promise<void>;
 };
 
 export function connectEvents(handlers: EventConnectionHandlers | ((e: SseEvent) => void)): () => void {
   const { onEvent, onOpen, onCatchupComplete, onError, onGap } =
     typeof handlers === "function" ? { onEvent: handlers } : handlers;
 
-  const es = new EventSource(`${BASE}/api/events`);
+  let closed = false;
+  let es: EventSource | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let gapHandling = false;
 
-  const handler = (ev: MessageEvent) => {
-    try {
-      const data = JSON.parse(ev.data as string) as SseEvent | { type: string };
-      if (data.type === "connected") {
-        onCatchupComplete?.();
-        onOpen?.();
-        return;
-      }
-      onEvent(data as SseEvent);
-    } catch {
-      /* ignore */
+  const clearReconnectTimer = () => {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
   };
 
-  es.onopen = () => onOpen?.();
-  es.onerror = () => onError?.();
+  const attach = () => {
+    if (closed) return;
+    clearReconnectTimer();
+    es?.close();
+    es = new EventSource(`${BASE}/api/events`);
 
-  for (const eventType of SSE_EVENT_TYPES) {
-    es.addEventListener(eventType, handler);
-  }
-  es.addEventListener("connected", handler);
-  es.addEventListener("gap", (ev: MessageEvent) => {
-    try {
-      const data = JSON.parse(ev.data as string) as { reason?: string; pending?: number };
-      onGap?.(data.reason ?? "unknown", data.pending);
-    } catch {
-      onGap?.("unknown");
+    const handler = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data as string) as SseEvent | { type: string };
+        if (data.type === "connected") {
+          onCatchupComplete?.();
+          onOpen?.();
+          return;
+        }
+        onEvent(data as SseEvent);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    es.onopen = () => onOpen?.();
+    es.onerror = () => onError?.();
+
+    for (const eventType of SSE_EVENT_TYPES) {
+      es.addEventListener(eventType, handler);
     }
-  });
-  es.onmessage = handler;
+    es.addEventListener("connected", handler);
+    es.addEventListener("gap", (ev: MessageEvent) => {
+      if (closed || gapHandling) return;
+      gapHandling = true;
+      let reason = "unknown";
+      let pending: number | undefined;
+      try {
+        const data = JSON.parse(ev.data as string) as { reason?: string; pending?: number };
+        reason = data.reason ?? "unknown";
+        pending = data.pending;
+      } catch {
+        /* ignore */
+      }
+      es?.close();
+      es = null;
+      void Promise.resolve(onGap?.(reason, pending))
+        .catch(() => {
+          /* sync 失败仍重建，避免卡死 */
+        })
+        .finally(() => {
+          gapHandling = false;
+          if (closed) return;
+          reconnectTimer = setTimeout(() => attach(), 0);
+        });
+    });
+    es.onmessage = handler;
+  };
 
-  return () => es.close();
+  attach();
+
+  return () => {
+    closed = true;
+    gapHandling = false;
+    clearReconnectTimer();
+    es?.close();
+    es = null;
+  };
 }

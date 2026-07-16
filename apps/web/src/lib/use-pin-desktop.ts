@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { OXSP_DOCK_TEMPLATES, OXSP_EXTENSION_TEMPLATES, extWidgetId, oxspSlotIcon, oxspSlotLabel, type OxspSlotConfig, type OxspSlotKind } from "@openx/shared";
 import {
   applySeamResizeCommit,
@@ -12,6 +12,7 @@ import {
 import {
   extensionSlotColumn,
   isDockWidgetId,
+  setWidgetSpan as applyWidgetSpan,
   setPinWide,
   slotWidgetLabel,
   unpinWidget,
@@ -133,10 +134,18 @@ export function usePinDesktop(scope: PinDesktopScope) {
 
   const unpin = useCallback(
     (widget: PinWidgetId) => {
+      const pages = workspace.pages.map((page) => unpinWidget(page, widget));
+      persist(normalizeWorkspace({ ...workspace, pages }));
+    },
+    [persist, workspace],
+  );
+
+  /** 永久删除扩展：从卡片库和所有页面中同时移除。 */
+  const removeExtension = useCallback(
+    (widget: PinWidgetId) => {
       const slotId = slotIdFromWidget(widget);
-      if (slotId) {
-        persistCatalog(removeOxspSlot(slotCatalog, slotId));
-      }
+      if (!slotId) return;
+      persistCatalog(removeOxspSlot(slotCatalog, slotId));
       const pages = workspace.pages.map((page) => unpinWidget(page, widget));
       persist(normalizeWorkspace({ ...workspace, pages }));
     },
@@ -253,6 +262,13 @@ export function usePinDesktop(scope: PinDesktopScope) {
     [persistPage, layout],
   );
 
+  const setWidgetSpan = useCallback(
+    (widget: PinWidgetId, span: 1 | 2 | 3) => {
+      persistPage(applyWidgetSpan(layout, widget, span));
+    },
+    [persistPage, layout],
+  );
+
   const commitSeamResize = useCallback(
     (seam: PinSeam, preview: SeamResizePreview) => {
       persistPage(applySeamResizeCommit(layout, seam, preview));
@@ -277,27 +293,6 @@ export function usePinDesktop(scope: PinDesktopScope) {
     [workspace],
   );
 
-  useEffect(() => {
-    let next = workspace;
-    let catalog = slotCatalog;
-    let changed = false;
-    for (const slot of catalog.slots) {
-      const widget = `ext:${slot.id}` as PinWidgetId;
-      if (isWidgetPinnedInWorkspace(next, widget)) continue;
-      const col = extensionSlotColumn(layoutAtPage(next));
-      const pinned =
-        col != null
-          ? pinSlotAtColumnInWorkspace(next, widget, col)
-          : pinSlotInWorkspace(next, widget);
-      if (isWidgetPinnedInWorkspace(pinned, widget)) {
-        next = pinned;
-        changed = true;
-      }
-    }
-    if (changed) persist(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return {
     workspace,
     layout,
@@ -314,6 +309,7 @@ export function usePinDesktop(scope: PinDesktopScope) {
     isPinned,
     togglePin,
     unpin,
+    removeExtension,
     addDockCardFromSlot,
     addBrowserCardFromSlot,
     addDockCardAtCol,
@@ -325,6 +321,7 @@ export function usePinDesktop(scope: PinDesktopScope) {
     applyDrop,
     placeAtDrop,
     setWide,
+    setWidgetSpan,
     commitSeamResize,
   };
 }

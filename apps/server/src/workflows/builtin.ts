@@ -95,6 +95,56 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
       },
     ],
   },
+  {
+    id: "miloco_health_check",
+    title: "Miloco 健康检查",
+    description: "同步 Miloco Skills 绑定并检查集成状态",
+    minTier: "read",
+    steps: [
+      {
+        id: "miloco_setup",
+        title: "同步 Miloco Skills",
+        call: {
+          method: "POST",
+          path: "/api/miloco/setup",
+          body: { force: false },
+          summary: "安装/更新 Miloco Skills 并绑定 pi",
+        },
+      },
+      {
+        id: "miloco_status",
+        title: "读取集成状态",
+        call: {
+          method: "GET",
+          path: "/api/miloco/status",
+        },
+        expectStatus: 200,
+      },
+      {
+        id: "miloco_webhook_probe",
+        title: "Webhook 健康探针",
+        call: {
+          method: "GET",
+          path: "/api/miloco/webhook",
+        },
+        expectStatus: 200,
+      },
+      {
+        id: "miloco_layer_b",
+        title: "Layer B 缓存诊断",
+        call: {
+          method: "GET",
+          path: "/api/miloco/layer-b",
+        },
+        expectStatus: 200,
+      },
+      {
+        id: "wait",
+        title: "等待",
+        wait: { kind: "delay", ms: 500 },
+      },
+    ],
+  },
 ];
 
 export function getBuiltinWorkflow(id: string): WorkflowDefinition | undefined {

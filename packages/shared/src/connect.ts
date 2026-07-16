@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GoalSchema } from "./goal.js";
 
 export const ConnectInputSchema = z.object({
   toolName: z.string().min(1),
@@ -22,10 +23,25 @@ export const HeartbeatInputSchema = z.object({
       model: z.string().optional(),
       inputTokens: z.number().optional(),
       outputTokens: z.number().optional(),
+      goalId: z.string().optional(),
+      runId: z.string().optional(),
     })
     .optional(),
 });
 export type HeartbeatInput = z.infer<typeof HeartbeatInputSchema>;
+
+/** 心跳返回的待办：Goal + 派单凭证绑定 */
+export const PendingGoalWorkItemSchema = z.object({
+  goal: GoalSchema,
+  receiptId: z.string().optional(),
+  runId: z.string().optional(),
+});
+export type PendingGoalWorkItem = z.infer<typeof PendingGoalWorkItemSchema>;
+
+export const AckDispatchReceiptSchema = z.object({
+  receiptId: z.string().min(1),
+});
+export type AckDispatchReceiptInput = z.infer<typeof AckDispatchReceiptSchema>;
 
 export type AgentConnection = {
   connectionId: string;

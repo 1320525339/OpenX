@@ -96,7 +96,7 @@ export const OXSP_DEMO_WEB_URL = OXSP_DEMO_BROWSER_URL;
 export const OXSP_DOCK_TEMPLATES: OxspDockTemplate[] = [
   {
     id: "chat",
-    label: "对话",
+    label: "AI 会话 / 圆桌",
     icon: "💬",
     kind: "react",
     defaultConfig: { kind: "react", componentId: "chat" },
@@ -133,20 +133,7 @@ export const OXSP_DOCK_TEMPLATES: OxspDockTemplate[] = [
     kind: "browser",
     defaultConfig: { kind: "browser" },
   },
-  {
-    id: "demo-game",
-    label: "打砖块 Demo",
-    icon: "🕹️",
-    kind: "browser",
-    defaultConfig: { kind: "browser", startUrl: OXSP_DEMO_BROWSER_URL },
-  },
-  {
-    id: "genshin-web",
-    label: "原神",
-    icon: "🎮",
-    kind: "browser",
-    defaultConfig: { kind: "browser", startUrl: "https://ys.mihoyo.com/main/" },
-  },
+  // Miloco 等集成面板由 Integration Manifest 动态贡献，勿在此硬编码演示页
 ];
 
 /** 底栏「新增 / 拓展槽」可选模板（不含内置 react、不含已废弃 web/markdown） */

@@ -66,6 +66,15 @@ pnpm desktop:build
 产物位于 `apps/desktop/src-tauri/target/release/bundle/nsis/`：
 - `*.exe` — NSIS 安装包（当前 `tauri.conf.json` 仅启用 NSIS 目标）
 
+免安装 zip（需先完成 `desktop:build`）：
+
+```bash
+pnpm desktop:portable
+```
+
+产物位于 `apps/desktop/src-tauri/target/release/bundle/portable/`：
+- `OpenX_0.1.0_x64-portable.zip` — 解压后运行 `OpenX.exe`
+
 ### 单独构建 Server Sidecar
 
 ```bash
@@ -95,6 +104,7 @@ pnpm --filter @openx/desktop build:server
 ## 文档
 
 - [正式版产品核心](docs/openx-product-core.md)
+- [Miloco × OpenX 接入](docs/miloco-openx-integration.md)
 - [UI 设计规范](docs/openx-ui-design-spec.md)
 - [阶段设计（HTML）](docs/openx-stage-design.html)
 - [地基调研](docs/openx-foundation-survey.html)

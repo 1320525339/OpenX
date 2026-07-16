@@ -30,6 +30,7 @@ import {
   type PinWidgetId,
 } from "@openx/shared";
 import { loadDesktopState, loadSlotCatalog, saveDesktopBundle } from "./desktop-store.js";
+import { collectIntegrationOxspTemplates } from "./integration-plugin.js";
 import {
   browserDomSnapshot,
   browserNetworkLog,
@@ -53,12 +54,23 @@ export function getDesktopBundle(scope: PinDesktopScope): DesktopBundle {
   const state = loadDesktopState(scope);
   const catalog = loadSlotCatalog(scope);
   const workspace = normalizeWorkspace(state.workspace);
+  const core = dockExtensionTemplates();
+  const integrationTemplates =
+    collectIntegrationOxspTemplates({
+      env: process.env,
+      openxRoot: process.env.OPENX_ROOT ?? "",
+    }) ?? [];
+  const seen = new Set(core.map((t) => t.id));
+  const merged = [
+    ...core,
+    ...integrationTemplates.filter((t) => t && !seen.has(t.id)),
+  ];
   return {
     revision: state.revision,
     scope,
     workspace,
     catalog,
-    templates: dockExtensionTemplates(),
+    templates: merged,
     pinnedWidgets: pinnedWidgetsInWorkspace(workspace),
   };
 }

@@ -25,6 +25,7 @@ describe("resolveForemanDirectiveAuto", () => {
       question: {
         kind: "question",
         prompt: "请选择实现方案",
+        requestId: "req-1",
         options: [
           { id: "a", label: "方案A" },
           { id: "b", label: "方案B" },
@@ -37,6 +38,28 @@ describe("resolveForemanDirectiveAuto", () => {
       expect(outcome.selectedOptionId).toBeUndefined();
       expect(outcome.message).toContain("请选择实现方案");
       expect(outcome.source).toBe("foreman_rule");
+      expect(outcome.replyTo).toBe("req-1");
+    }
+  });
+
+  it("deny-safe picks reject option for permission questions", () => {
+    const outcome = resolveForemanDirectiveAuto({
+      goal,
+      question: {
+        kind: "question",
+        prompt: "写入 package.json",
+        requestId: "req-perm",
+        permissionKind: "write",
+        options: [
+          { id: "deny", label: "拒绝" },
+          { id: "allow_once", label: "允许一次" },
+        ],
+      },
+    });
+    expect(outcome.kind).toBe("directive");
+    if (outcome.kind === "directive") {
+      expect(outcome.selectedOptionId).toBe("deny");
+      expect(outcome.replyTo).toBe("req-perm");
     }
   });
 
@@ -46,12 +69,14 @@ describe("resolveForemanDirectiveAuto", () => {
       question: {
         kind: "question",
         prompt: "是否允许删除生产数据？",
+        requestId: "req-esc",
         escalate: true,
       },
     });
     expect(outcome.kind).toBe("escalation");
     if (outcome.kind === "escalation") {
       expect(outcome.reason).toContain("开发商");
+      expect(outcome.replyTo).toBe("req-esc");
     }
   });
 });
@@ -109,6 +134,7 @@ describe("mapForemanTextReply", () => {
   const question = {
     kind: "question" as const,
     prompt: "选方案",
+    requestId: "req-map",
     options: [
       { id: "a", label: "A" },
       { id: "b", label: "B" },
@@ -121,6 +147,21 @@ describe("mapForemanTextReply", () => {
     if (outcome.kind === "directive") {
       expect(outcome.source).toBe("foreman_llm");
       expect(outcome.message).toContain("打砖块");
+      expect(outcome.replyTo).toBe("req-map");
+      expect(outcome.selectedOptionId).toBeUndefined();
+    }
+  });
+
+  it("parses 选项ID line into selectedOptionId", () => {
+    const outcome = mapForemanTextReply(
+      question,
+      "选项ID: a\n采用方案A，更简单。",
+    );
+    expect(outcome.kind).toBe("directive");
+    if (outcome.kind === "directive") {
+      expect(outcome.selectedOptionId).toBe("a");
+      expect(outcome.message).toContain("方案A");
+      expect(outcome.replyTo).toBe("req-map");
     }
   });
 
@@ -129,6 +170,7 @@ describe("mapForemanTextReply", () => {
     expect(outcome.kind).toBe("escalation");
     if (outcome.kind === "escalation") {
       expect(outcome.reason).toContain("生产库");
+      expect(outcome.replyTo).toBe("req-map");
     }
   });
 });

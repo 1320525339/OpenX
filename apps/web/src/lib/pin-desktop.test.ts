@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLogicalGridTemplate,
+  canSetWidgetSpanWithoutDisplacing,
   buildPinSegments,
   compactPinLayout,
   columnSpan,
@@ -15,6 +16,7 @@ import {
   setPinSpan,
   shrinkCol0Span3To2,
   setPinWide,
+  setWidgetSpanWithoutDisplacing,
   togglePinWidget,
   placePinWidgetAtColumn,
   widgetColumn,
@@ -83,6 +85,39 @@ describe("pin-desktop", () => {
     });
     const blocked = setPinSpan(layout, 0, 2);
     expect(blocked).toEqual(layout);
+  });
+
+  it("explicit width control never moves a neighboring card", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", "tasks", null],
+      wide: [false, false, false],
+    });
+
+    expect(canSetWidgetSpanWithoutDisplacing(layout, "chat", 2)).toBe(false);
+    expect(setWidgetSpanWithoutDisplacing(layout, "chat", 2)).toEqual(layout);
+  });
+
+  it("explicit width control expands only into the visible empty space", () => {
+    const layout = normalizeLayout({
+      cols: ["chat", null, "tasks"],
+      wide: [false, false, false],
+    });
+
+    expect(canSetWidgetSpanWithoutDisplacing(layout, "chat", 2)).toBe(true);
+    const next = setWidgetSpanWithoutDisplacing(layout, "chat", 2);
+    expect(next.cols).toEqual(["chat", null, "tasks"]);
+    expect(columnSpan(next, 0)).toBe(2);
+    expect(widgetColumn(next, "tasks")).toBe(2);
+  });
+
+  it("explicit width control does not relocate a right-side card for full width", () => {
+    const layout = normalizeLayout({
+      cols: [null, null, "tasks"],
+      wide: [false, false, false],
+    });
+
+    expect(canSetWidgetSpanWithoutDisplacing(layout, "tasks", 3)).toBe(false);
+    expect(setWidgetSpanWithoutDisplacing(layout, "tasks", 3)).toEqual(layout);
   });
 
   it("wide spans three equal columns when both neighbors empty", () => {

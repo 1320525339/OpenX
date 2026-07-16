@@ -11,7 +11,7 @@ import {
 } from "@openx/shared";
 import { getProvidersPath } from "./paths.js";
 import { atomicWriteJson } from "./atomic-json.js";
-import { upsertOpenxDotEnv } from "./openx-dotenv.js";
+import { persistSecrets } from "./secrets-store.js";
 
 export function readProvidersFromDisk(): ProvidersMap {
   const path = getProvidersPath();
@@ -42,7 +42,7 @@ export function writeProvidersToDisk(providers: ProvidersMap): ProvidersMap {
   const parsed = ProvidersMapSchema.parse(providers);
   const secrets = collectSecretsForDotEnv(parsed);
   if (Object.keys(secrets).length > 0) {
-    upsertOpenxDotEnv(secrets);
+    persistSecrets(secrets);
   }
   const sanitized = sanitizeProvidersForDisk(parsed);
   const path = getProvidersPath();

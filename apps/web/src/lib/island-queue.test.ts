@@ -3,6 +3,8 @@ import type { DynamicIslandPayload } from "@openx/shared";
 import {
   bindIslandQueueHandlers,
   completeIslandDisplay,
+  getIslandDisplayToken,
+  getIslandShowingId,
   isIslandSeen,
   markIslandSeen,
   requestIsland,
@@ -98,20 +100,86 @@ describe("island-queue", () => {
     expect(shown).toEqual(["a1"]);
   });
 
-  it("marks replay as seen during catchup without showing", () => {
+  it("catchup 时 transient 不展示且不 mark seen；durable 不 mark seen", () => {
     const shown: string[] = [];
     bindIslandQueueHandlers({
       show: (p) => shown.push(p.id),
       dismiss: () => {},
     });
     setIslandCatchupMode(true);
-    requestIsland(payload("replay"));
+    requestIsland(payload("replay-transient"));
     expect(shown).toHaveLength(0);
-    expect(isIslandSeen("replay")).toBe(true);
+    expect(isIslandSeen("replay-transient")).toBe(false);
+
+    requestIsland({
+      ...payload("replay-durable"),
+      kind: "goal.awaiting_review",
+      goalId: "g1",
+      autoDismissMs: 0,
+    });
+    expect(shown).toHaveLength(0);
+    expect(isIslandSeen("replay-durable")).toBe(false);
+
     setIslandCatchupMode(false);
-    requestIsland(payload("replay"));
-    expect(shown).toHaveLength(0);
     requestIsland(payload("fresh"));
     expect(shown).toEqual(["fresh"]);
+  });
+
+  it("severity 优先出队", () => {
+    const shown: string[] = [];
+    bindIslandQueueHandlers({
+      show: (p) => shown.push(p.id),
+      dismiss: () => {},
+    });
+    // 先入队两张再结束 catchup… 实际 catchup 已关；用：先展示一张后另一张在队列
+    requestIsland({ ...payload("info1"), severity: "info" });
+    requestIsland({ ...payload("err1"), severity: "error" });
+    expect(shown[0]).toBe("info1");
+    completeIslandDisplay("info1");
+    expect(shown[1]).toBe("err1");
+  });
+
+  it("stale displayToken 不会误关下一张卡", () => {
+    const shown: string[] = [];
+    bindIslandQueueHandlers({
+      show: (p) => shown.push(p.id),
+      dismiss: () => {},
+    });
+    requestIsland(payload("1"));
+    requestIsland(payload("2"));
+    const token1 = getIslandDisplayToken();
+    expect(token1).toBe(1);
+    expect(getIslandShowingId()).toBe("1");
+
+    completeIslandDisplay({ token: token1! });
+    expect(shown).toEqual(["1", "2"]);
+    expect(getIslandShowingId()).toBe("2");
+    const token2 = getIslandDisplayToken();
+    expect(token2).toBe(2);
+
+    // 延迟回调仍持有旧 token，不应关掉第 2 张
+    completeIslandDisplay({ token: token1! });
+    expect(getIslandShowingId()).toBe("2");
+    expect(isIslandSeen("2")).toBe(false);
+  });
+
+  it("同 dedupe 更新不更换 displayToken", () => {
+    const tokens: number[] = [];
+    bindIslandQueueHandlers({
+      show: (_p, token) => tokens.push(token),
+      update: (_p, token) => tokens.push(token),
+      dismiss: () => {},
+    });
+    requestIsland({ ...payload("a1"), goalId: "g1", kind: "goal.awaiting_review" });
+    const token = getIslandDisplayToken();
+    requestIsland({ ...payload("a2"), goalId: "g1", kind: "goal.awaiting_review" });
+    expect(getIslandDisplayToken()).toBe(token);
+    expect(tokens).toEqual([token, token]);
+    expect(getIslandShowingId()).toBe("a2");
+
+    // 用展示令牌完成，应关掉当前（已更新为 a2）
+    completeIslandDisplay({ token: token! });
+    expect(getIslandShowingId()).toBeNull();
+    expect(isIslandSeen("a2")).toBe(true);
   });
 });

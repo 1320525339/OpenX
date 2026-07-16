@@ -1,11 +1,11 @@
-import type { AgentCatalogEntry, SkillCatalogEntry } from "@openx/shared";
+import type { AgentCatalogEntry, SkillCatalogEntry, SkillKind } from "@openx/shared";
 import { CORE_SKILLS, COACH_AGENT_ROLES, type DispatchPermissionMode } from "@openx/shared";
 
 export type CoachSkill = {
   id: string;
   name: string;
   desc: string;
-  kind?: "core" | "github";
+  kind?: SkillKind;
   required?: boolean;
   defaultEnabled?: boolean;
   installed?: boolean;

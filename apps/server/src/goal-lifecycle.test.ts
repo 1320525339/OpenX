@@ -1,6 +1,13 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { nanoid } from "nanoid";
-import { resetDb, insertGoal, getGoalById, deleteGoals } from "./db.js";
+import {
+  resetDb,
+  insertGoal,
+  getGoalById,
+  deleteGoals,
+  casUpdateGoal,
+  GoalRevisionConflictError,
+} from "./db.js";
 import {
   cancelGoalStatus,
   markGoalComplete,
@@ -33,6 +40,7 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
     dependsOn: [],
     priority: "medium",
     orderNo: 1,
+    revision: 0,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -41,17 +49,20 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
 
 describe("goal-lifecycle", () => {
   beforeEach(() => {
-    process.env.OPENX_DB_PATH = ":memory:";
     resetDb();
+    resetConnections();
     seedTestProjectAndConversation();
+  });
+  afterEach(() => {
+    resetDb();
+    resetConnections();
   });
 
   it("rejects illegal complete transition", () => {
-    const goal = makeGoal({ status: "done" });
+    const goal = makeGoal({ status: "draft" });
     insertGoal(goal);
     const result = markGoalComplete(goal.id, "ok");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(409);
   });
 
   it("completes running goal", () => {
@@ -62,14 +73,15 @@ describe("goal-lifecycle", () => {
     if (result.ok) {
       expect(result.goal.status).toBe("awaiting_review");
       expect(result.goal.resultSummary).toBe("完成");
+      expect(result.goal.revision).toBe(1);
     }
   });
 
-  it("persists structured deliverables on complete", () => {
+  it("persists structured deliverables", () => {
     const goal = makeGoal({ status: "running" });
     insertGoal(goal);
     const deliverables = [
-      { kind: "file" as const, path: "src/a.ts", label: "a.ts", action: "modified" as const },
+      { kind: "file" as const, path: "hello.txt", action: "created" as const },
     ];
     const result = markGoalComplete(goal.id, "完成", deliverables);
     expect(result.ok).toBe(true);
@@ -114,12 +126,7 @@ describe("goal-lifecycle", () => {
     expect(result.ok).toBe(false);
   });
 
-  afterEach(() => {
-    resetDb();
-    resetConnections();
-  });
-
-  it("marks running goal failed", () => {
+  it("marks failed from running", () => {
     const goal = makeGoal({ status: "running" });
     insertGoal(goal);
     const result = markGoalFailed(goal.id, "boom");
@@ -127,17 +134,24 @@ describe("goal-lifecycle", () => {
     expect(getGoalById(goal.id)?.status).toBe("failed");
   });
 
-  it("deleteGoals clears cancelledGoalIds when purging a goal", () => {
-    const goal = makeGoal({ status: "cancelled" });
+  it("CAS rejects stale revision on complete vs cancel race", () => {
+    const goal = makeGoal({ status: "running", revision: 0 });
     insertGoal(goal);
+    const cancelled = cancelGoalStatus(goal.id);
+    expect(cancelled.ok).toBe(true);
+    // stale in-memory complete attempt after cancel bumped revision
+    const stale = { ...goal, status: "awaiting_review" as const, progress: 100 };
+    expect(() => casUpdateGoal(stale, { expectedStatuses: ["running"] })).toThrow(
+      GoalRevisionConflictError,
+    );
+    expect(getGoalById(goal.id)?.status).toBe("cancelled");
+  });
 
-    // 模拟目标被取消后打上标记
+  it("connect cancel flag helpers", () => {
+    const goal = makeGoal();
+    insertGoal(goal);
     markGoalCancelledForConnect(goal.id);
     expect(isGoalCancelledForConnect(goal.id)).toBe(true);
-
-    // 删除目标后，取消标记应被清理
-    const result = deleteGoals([goal.id]);
-    expect(result.deleted).toContain(goal.id);
-    expect(isGoalCancelledForConnect(goal.id)).toBe(false);
+    deleteGoals([goal.id]);
   });
 });

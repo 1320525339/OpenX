@@ -1,6 +1,7 @@
 import type { Goal } from "./goal.js";
 import { buildDispatchPermissionBlock } from "./dispatch-context.js";
 import { buildSkillsPromptBlock, type ExecutionSkillHint } from "./skills.js";
+import { milocoOpenxExecutionPreamble } from "./miloco.js";
 import {
   LlmContextSettingsSchema,
   renderPromptTemplate,
@@ -29,6 +30,8 @@ export type BuildExecutionPromptOptions = {
   llmContext?: Partial<LlmContextSettings> | null;
   /** 项目用户 + 运行知识（L2/L3） */
   projectKnowledge?: string;
+  /** OpenX 仓库根目录（注入 Miloco WSL 包装说明） */
+  openxRoot?: string;
 };
 
 /** 执行 prompt 各区块默认模板（{{var}} 占位符） */
@@ -143,6 +146,11 @@ export function buildExecutionPrompt(
 
   const skillsBlock = buildSkillsPromptBlock(enabledSkills ?? []);
   if (skillsBlock) parts.push(skillsBlock);
+
+  const hasMilocoSkill = (enabledSkills ?? []).some((s) => s.id.startsWith("miloco-"));
+  if (hasMilocoSkill && options?.openxRoot?.trim()) {
+    parts.push(milocoOpenxExecutionPreamble(options.openxRoot.trim()));
+  }
 
   const summaries = options?.priorSummaries ?? [];
   if (summaries.length > 0) {

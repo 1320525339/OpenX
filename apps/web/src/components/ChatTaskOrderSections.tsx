@@ -1,5 +1,5 @@
 import type { Goal, GoalRunState } from "@openx/shared";
-import { goalDisplayHint, goalDisplayLabel, goalDisplayOutcome, isRunPausedAwaitingUser } from "@openx/shared";
+import { goalDisplayHint, goalDisplayLabel, goalDisplayOutcome, isPausedGoal, isRunPausedAwaitingUser } from "@openx/shared";
 import { goalStatusText } from "../lib/goal-detail";
 import { executorDisplayLabel } from "../lib/executors";
 import {
@@ -31,7 +31,8 @@ export function ChatTaskOrderHeader({
   const hint = goal ? goalDisplayHint(goal) : null;
   const outcomeLabel = goal ? goalDisplayLabel(goal) : "已创建";
   const outcome = goal ? goalDisplayOutcome(goal) : "incomplete";
-  const paused = run ? isRunPausedAwaitingUser(run) : false;
+  const paused =
+    (goal ? isPausedGoal(goal) : false) || (run ? isRunPausedAwaitingUser(run) : false);
   const live =
     showLiveMeta &&
     run &&
@@ -132,7 +133,7 @@ export function ChatTaskOrderFooter({ goal, run }: { goal: Goal; run?: GoalRunSt
   const foreman = describeForemanManagedStatus(goal, run);
   if (!foreman) return null;
   const tone =
-    goal.crewStatus === "awaiting_user"
+    isPausedGoal(goal) || goal.crewStatus === "awaiting_user"
       ? "awaiting-user"
       : goal.crewStatus === "awaiting_foreman"
         ? "awaiting-foreman"

@@ -393,16 +393,23 @@ describe("connect API", () => {
       expect(hb.status).toBe(200);
       const body = (await hb.json()) as {
         status: string;
-        pendingGoals: { status: string; id: string }[];
+        pendingGoals: Array<{
+          goal: { status: string; id: string };
+          receiptId?: string;
+          runId?: string;
+        }>;
       };
       expect(body.status).toBe("alive");
 
       const detail = await app.request(`/api/goals/${goal.id}`);
       const { goal: current } = (await detail.json()) as { goal: { status: string } };
       if (current.status === "running") {
-        expect(body.pendingGoals.some((g) => g.id === goal.id && g.status === "running")).toBe(
-          true,
-        );
+        expect(
+          body.pendingGoals.some(
+            (item) => item.goal.id === goal.id && item.goal.status === "running",
+          ),
+        ).toBe(true);
+        expect(body.pendingGoals.some((item) => Boolean(item.receiptId))).toBe(true);
       } else {
         expect(["awaiting_review", "failed"]).toContain(current.status);
       }

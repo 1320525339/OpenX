@@ -22,6 +22,7 @@ type Props = {
   onToggleProject: (projectId: string) => void;
   onAddProject: (workspaceDir: string) => Promise<void>;
   onNewConversation: (projectId: string) => void;
+  onNewRoundtable?: (projectId: string) => void;
   onDeleteProject?: (projectId: string) => void;
   onDeleteConversation?: (conversationId: string) => void;
   onSettings: () => void;
@@ -67,6 +68,7 @@ export function SideNav({
   onToggleProject,
   onAddProject,
   onNewConversation,
+  onNewRoundtable,
   onDeleteProject,
   onDeleteConversation,
   onSettings,
@@ -180,10 +182,24 @@ export function SideNav({
                   >
                     +
                   </button>
+                  {onNewRoundtable ? (
+                    <button
+                      type="button"
+                      className="sidebar-tree-add-conv sidebar-tree-add-roundtable"
+                      aria-label={`在 ${project.name} 下新建圆桌`}
+                      title="新圆桌"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onNewRoundtable(project.id);
+                      }}
+                    >
+                      🪑
+                    </button>
+                  ) : null}
                   {onDeleteProject ? (
                     <RowDeleteButton
                       label={`删除项目 ${project.name}`}
-                      title="删除项目及下属对话"
+                      title="删除项目及下属对话与任务"
                       onClick={(e) => {
                         e.stopPropagation();
                         onDeleteProject(project.id);
@@ -209,7 +225,10 @@ export function SideNav({
                             className={`sidebar-tree-conv${convActive ? " active" : ""}`}
                             onClick={() => onOpenConversation(project.id, conv.id)}
                           >
-                            <span className="sidebar-tree-label">{conv.title}</span>
+                            <span className="sidebar-tree-label">
+                              {conv.mode === "roundtable" ? "🪑 " : ""}
+                              {conv.title}
+                            </span>
                             {cBadge > 0 ? (
                               <span className="sidebar-badge">{cBadge}</span>
                             ) : null}

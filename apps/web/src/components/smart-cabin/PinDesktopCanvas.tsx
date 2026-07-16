@@ -37,9 +37,6 @@ import {
   buildPinSeams,
   computeSeamResizePreview,
   isSeamVisuallyPlaced,
-  pickMinSeamPreview,
-  pickPeakSeamPreview,
-  pickSeamCommitPreview,
   seamAffectsWidget,
   seamLineLeftPx,
   seamVisualCellCols,
@@ -105,9 +102,6 @@ type PendingSeamResize = {
 
 type SeamResizeSession = PendingSeamResize & {
   preview: SeamResizePreview;
-  startPreview: SeamResizePreview;
-  minPreview: SeamResizePreview;
-  maxPreview: SeamResizePreview;
 };
 
 const GRID_GAP_PX = 8;
@@ -152,7 +146,6 @@ export function PinDesktopCanvas({
   const pinnedCount = pinnedWidgets(layout).length;
   const isDragging = drag != null;
   const isResizing = seamResize != null;
-
   const displayLayout = layout;
 
   const layoutForExtensionSlots = useMemo(() => {
@@ -329,7 +322,7 @@ export function PinDesktopCanvas({
 
       e.preventDefault();
       e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
+      e.currentTarget.setPointerCapture?.(e.pointerId);
 
       pendingSeamRef.current = {
         seam,
@@ -366,9 +359,6 @@ export function PinDesktopCanvas({
       const session: SeamResizeSession = {
         ...pending,
         preview,
-        startPreview: preview,
-        minPreview: preview,
-        maxPreview: preview,
       };
       seamRef.current = session;
       setSeamResize(session);
@@ -385,9 +375,7 @@ export function PinDesktopCanvas({
       const preview = seamPreviewAt(session, clientX);
       if (!preview) return;
 
-      const minPreview = pickMinSeamPreview(session.minPreview, preview);
-      const maxPreview = pickPeakSeamPreview(session.maxPreview, preview);
-      const next = { ...session, preview, minPreview, maxPreview };
+      const next = { ...session, preview };
       seamRef.current = next;
       setSeamResize(next);
     },
@@ -401,15 +389,11 @@ export function PinDesktopCanvas({
       setSeamResize(null);
       document.body.classList.remove("pin-desktop-body-resizing");
       if (session && moved && onSeamCommit) {
-        const releasePreview =
-          clientX != null ? seamPreviewAt(session, clientX) : null;
-        const preview = pickSeamCommitPreview(
-          session.startPreview,
-          session.minPreview,
-          session.maxPreview,
-          releasePreview,
-        );
-        onSeamCommit(session.seam, preview);
+        // 卡片大小以鼠标松开位置为准：拖动过程中曾经经过某个档位，
+        // 不应当使它在回拉后仍被意外提交。
+        const preview =
+          clientX != null ? seamPreviewAt(session, clientX) : session.preview;
+        if (preview) onSeamCommit(session.seam, preview);
       }
     },
     [onSeamCommit, seamPreviewAt],
@@ -719,7 +703,7 @@ export function PinDesktopCanvas({
 
     const resizeStyle = getResizeStyle(widget, col, storedSpan);
     const resizing =
-      isResizing && seamAffectsWidget(seamResize!.seam, widget) != null;
+      seamResize != null && seamAffectsWidget(seamResize.seam, widget) != null;
     const isWide = storedSpan >= 2;
 
     return (
@@ -925,7 +909,7 @@ export function PinDesktopCanvas({
       >
         {pinnedCount === 0 && !dockDragWidget && extensionCols.length === 0 ? (
           <div className="pin-desktop-grid-hint" aria-hidden>
-            <p>拖底栏图标到槽位 · 拖标题栏换位 · 拖卡片间接缝调宽度</p>
+            <p>拖底栏图标到槽位 · 拖标题栏换位 · 拖接缝跟手改宽</p>
           </div>
         ) : null}
 
@@ -957,6 +941,7 @@ export function PinDesktopCanvas({
           : null}
 
         {renderSeamDividers()}
+
       </div>
 
       {drag &&

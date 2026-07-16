@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type SkillKind = "core" | "github";
+export type SkillKind = "core" | "github" | "local";
 
 export type CoreSkillDef = {
   id: string;
@@ -125,6 +125,27 @@ export function githubSkillRemotePath(source: GithubSkillSource): string {
   return `${OBSCURA_SKILL_REPO.basePath}/${source.dir}`;
 }
 
+function localSkillCatalogEntries(manifest?: SkillManifest | null): SkillCatalogEntry[] {
+  const installed = manifest?.skills ?? {};
+  const entries: SkillCatalogEntry[] = [];
+  for (const record of Object.values(installed)) {
+    if (record.error) continue;
+    if (record.repo !== "local" && record.repo !== "miloco-local") continue;
+    entries.push({
+      id: record.id,
+      name: record.name ?? record.id,
+      desc: record.description ?? `本地 Skill · ${record.id}`,
+      kind: "local",
+      required: false,
+      defaultEnabled: false,
+      installed: Boolean(record.skillMdPath),
+      repo: record.repo,
+      skillMdPath: record.skillMdPath,
+    });
+  }
+  return entries.sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export function defaultSkillCatalog(
   manifest?: SkillManifest | null,
 ): SkillCatalogEntry[] {
@@ -157,7 +178,7 @@ export function defaultSkillCatalog(
     installed: true,
   }));
 
-  return [...coreEntries, ...githubEntries];
+  return [...coreEntries, ...githubEntries, ...localSkillCatalogEntries(manifest)];
 }
 
 /** 无显式绑定时：defaultEnabled 的 Skill 默认只给 pi */
@@ -211,7 +232,7 @@ export function resolveSkillsForExecutor(
 
   for (const skill of catalog) {
     if (!isSkillEnabledForExecutor(skill, executorId, bindings[skill.id])) continue;
-    if (skill.kind === "github" && !skill.installed) continue;
+    if ((skill.kind === "github" || skill.kind === "local") && !skill.installed) continue;
 
     const record = installed[skill.id];
     hints.push({
@@ -221,7 +242,7 @@ export function resolveSkillsForExecutor(
       kind: skill.kind,
       skillMdPath: skill.skillMdPath ?? record?.skillMdPath,
     });
-    if (skill.kind === "github") githubSkillIds.push(skill.id);
+    if (skill.kind === "github" || skill.kind === "local") githubSkillIds.push(skill.id);
   }
 
   return { hints, githubSkillIds };
@@ -256,7 +277,9 @@ export function formatSkillsSystemAppend(
   hints: ExecutionSkillHint[],
   bodies: Record<string, string>,
 ): string {
-  const github = hints.filter((h) => h.kind === "github" && bodies[h.id]?.trim());
+  const github = hints.filter(
+    (h) => (h.kind === "github" || h.kind === "local") && bodies[h.id]?.trim(),
+  );
   if (github.length === 0) return "";
 
   const sections = github.map((h) => {

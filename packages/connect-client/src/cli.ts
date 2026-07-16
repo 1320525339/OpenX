@@ -25,8 +25,14 @@ type Goal = {
   status: string;
 };
 
+type PendingWorkItem = {
+  goal: Goal;
+  receiptId?: string;
+  runId?: string;
+};
+
 type HeartbeatResponse = {
-  pendingGoals?: Goal[];
+  pendingGoals?: Array<Goal | PendingWorkItem>;
   skillsDir?: string;
   enabledSkills?: ExecutionSkillHint[];
 };
@@ -48,8 +54,14 @@ type ConnectResponse = {
     fail: string;
     log: string;
     runEvent: string;
+    ackReceipt?: string;
   };
 };
+
+function normalizePendingItem(item: Goal | PendingWorkItem): PendingWorkItem {
+  if ("goal" in item && item.goal) return item;
+  return { goal: item as Goal };
+}
 
 function parseArgs(argv: string[]) {
   const opts: Record<string, string> = {};
@@ -134,13 +146,14 @@ async function loadSkillsRuntime(base: string, executorId: string): Promise<Skil
 }
 
 async function executeGoal(
-  goal: Goal,
+  work: PendingWorkItem,
   callbacks: ConnectResponse["callbacks"],
   internalToken: string,
   settings: Settings | null,
   mock: boolean,
   skillsRuntime: SkillsRuntime | null,
 ) {
+  const goal = work.goal;
   const progressUrl = fillGoalId(callbacks.progress, goal.id);
   const completeUrl = fillGoalId(callbacks.complete, goal.id);
   const logUrl = fillGoalId(callbacks.log, goal.id);
@@ -149,11 +162,20 @@ async function executeGoal(
   const postInternal = (url: string, body: unknown) => postJson(url, body, internalToken);
   const postRunEvent = (event: RunDeltaEvent) => postInternal(runEventUrl, event);
 
+  if (work.receiptId && callbacks.ackReceipt) {
+    await postInternal(callbacks.ackReceipt, { receiptId: work.receiptId }).catch((err) => {
+      console.warn("[connect-client] receipt ACK 失败:", err);
+    });
+  }
+
   console.log(`[connect-client] 执行任务 ${goal.id}: ${goal.title}`);
   await postInternal(logUrl, { level: "info", message: `[connect-client] 开始处理：${goal.title}` });
   await postInternal(progressUrl, { progress: 15, message: "Connect Agent 已认领任务…" });
 
   let summary: string;
+  let tokenUsage:
+    | { model?: string; inputTokens?: number; outputTokens?: number }
+    | undefined;
   if (mock || !settings) {
     await postInternal(logUrl, { level: "warn", message: "[connect-client] 演示模式（未使用 LLM）" });
     await postInternal(progressUrl, { progress: 60, message: "演示模式整理结果…" });
@@ -189,10 +211,24 @@ async function executeGoal(
     );
     await runPoster.finish();
     await postInternal(progressUrl, { progress: 90, message: "LLM 完成，提交结果…" });
+    tokenUsage = {
+      model: settings.model?.pi ?? settings.model?.default,
+      inputTokens: Math.ceil((goal.executionPrompt.length + summary.length) / 4),
+      outputTokens: Math.ceil(summary.length / 4),
+    };
   }
 
   await postInternal(completeUrl, { resultSummary: summary });
   console.log(`[connect-client] 已完成 ${goal.id}`);
+  return {
+    tokenUsage: tokenUsage
+      ? {
+          ...tokenUsage,
+          goalId: goal.id,
+          runId: work.runId,
+        }
+      : undefined,
+  };
 }
 
 async function main() {
@@ -219,13 +255,27 @@ async function main() {
   }
 
   const inFlight = new Set<string>();
+  let pendingTokenUsage:
+    | {
+        model?: string;
+        inputTokens?: number;
+        outputTokens?: number;
+        goalId?: string;
+        runId?: string;
+      }
+    | undefined;
 
   const tick = async () => {
     let res: HeartbeatResponse;
+    const heartbeatBody: Record<string, unknown> = {
+      connectionId: conn.connectionId,
+    };
+    if (pendingTokenUsage) {
+      heartbeatBody.tokenUsage = pendingTokenUsage;
+      pendingTokenUsage = undefined;
+    }
     try {
-      res = (await postJson(conn.heartbeatUrl, {
-        connectionId: conn.connectionId,
-      })) as HeartbeatResponse;
+      res = (await postJson(conn.heartbeatUrl, heartbeatBody)) as HeartbeatResponse;
     } catch (err) {
       const status = (err as Error & { status?: number }).status;
       if (status !== 404) throw err;
@@ -244,18 +294,22 @@ async function main() {
       };
     }
 
-    for (const goal of res.pendingGoals ?? []) {
-      if (inFlight.has(goal.id)) continue;
-      inFlight.add(goal.id);
-      void executeGoal(goal, conn.callbacks, conn.internalToken, settings, args.mock, skillsRuntime)
+    for (const raw of res.pendingGoals ?? []) {
+      const work = normalizePendingItem(raw);
+      if (inFlight.has(work.goal.id)) continue;
+      inFlight.add(work.goal.id);
+      void executeGoal(work, conn.callbacks, conn.internalToken, settings, args.mock, skillsRuntime)
+        .then((result) => {
+          if (result?.tokenUsage) pendingTokenUsage = result.tokenUsage;
+        })
         .catch(async (err) => {
-          const failUrl = fillGoalId(conn.callbacks.fail, goal.id);
+          const failUrl = fillGoalId(conn.callbacks.fail, work.goal.id);
           await postJson(failUrl, {
             errorMessage: err instanceof Error ? err.message : String(err),
           }, conn.internalToken).catch(() => {});
         })
         .finally(() => {
-          inFlight.delete(goal.id);
+          inFlight.delete(work.goal.id);
         });
     }
   };

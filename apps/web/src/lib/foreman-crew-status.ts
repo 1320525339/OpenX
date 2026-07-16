@@ -1,4 +1,5 @@
 import type { Goal, GoalRunState } from "@openx/shared";
+import { isPausedGoal } from "@openx/shared";
 
 export type ForemanManagedStatus = {
   primary: string;
@@ -10,6 +11,13 @@ export function describeForemanManagedStatus(
   goal: Goal,
   run?: GoalRunState,
 ): ForemanManagedStatus | null {
+  if (isPausedGoal(goal) || goal.crewStatus === "awaiting_user") {
+    return {
+      primary: "工头状态：等待开发商",
+      secondary: "请「回复并继续」或 /resume，勿依赖普通聊天续跑",
+    };
+  }
+
   if (goal.status !== "running") return null;
 
   switch (goal.crewStatus) {
@@ -17,11 +25,6 @@ export function describeForemanManagedStatus(
       return {
         primary: "工头状态：托管执行中",
         secondary: "工头判定下一步",
-      };
-    case "awaiting_user":
-      return {
-        primary: "工头状态：等待开发商",
-        secondary: "施工队已暂停，待你决策",
       };
     default:
       if (run?.active) {

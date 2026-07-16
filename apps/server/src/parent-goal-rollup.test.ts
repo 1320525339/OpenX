@@ -101,6 +101,7 @@ describe("parent-goal-rollup", () => {
     insertGoal(childA);
     insertGoal(childB);
 
+    const beforeRevision = getGoalById("parent")?.revision ?? 0;
     approveGoal("child-b");
     await vi.waitFor(() => {
       const updatedParent = getGoalById("parent");
@@ -108,6 +109,7 @@ describe("parent-goal-rollup", () => {
       expect(updatedParent?.progress).toBe(100);
       expect(updatedParent?.resultSummary).toContain("A 完成");
       expect(updatedParent?.resultSummary).toContain("B 待确认");
+      expect((updatedParent?.revision ?? 0) > beforeRevision).toBe(true);
     });
   });
 

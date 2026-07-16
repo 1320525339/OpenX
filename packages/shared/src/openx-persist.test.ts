@@ -4,6 +4,7 @@ import {
   mergeDotEnvContent,
   parseDotEnv,
   sanitizeProviderForDisk,
+  sanitizeSettingsForApi,
 } from "./openx-persist.js";
 
 describe("openx-persist", () => {
@@ -40,5 +41,20 @@ export MIMO_API_KEY="tp-abc"
     });
     expect(sanitized.auth?.env).toBe("DEEPSEEK_API_KEY");
     expect(sanitized.auth?.apiKey).toBeUndefined();
+  });
+
+  it("sanitizes settings for API responses", () => {
+    const sanitized = sanitizeSettingsForApi({
+      providers: {
+        deepseek: {
+          name: "DeepSeek",
+          api: { type: "openai-compatible" as const, baseUrl: "https://api.deepseek.com/v1" },
+          auth: { apiKey: "sk-secret", env: "DEEPSEEK_API_KEY" },
+          models: { chat: {} },
+        },
+      },
+    });
+    expect(sanitized.providers?.deepseek.auth?.apiKey).toBeUndefined();
+    expect(sanitized.providers?.deepseek.auth?.env).toBe("DEEPSEEK_API_KEY");
   });
 });

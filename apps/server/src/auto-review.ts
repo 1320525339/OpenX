@@ -309,8 +309,8 @@ async function executeReviewLoop(
     if (isParent) {
       fresh.iterationCount = iteration + 1;
       fresh.updatedAt = new Date().toISOString();
-      updateGoal(fresh);
-      broadcast({ type: "goal.updated", goal: fresh });
+      const saved = updateGoal(fresh);
+      broadcast({ type: "goal.updated", goal: saved });
       await routeParentReviewFail(goalId, verdict);
       appendLogAndBroadcast(
         goalId,
@@ -323,6 +323,19 @@ async function executeReviewLoop(
       return { ok: true };
     }
 
+    const settings = loadSettings();
+    if (!settings.autoRework) {
+      appendLogAndBroadcast(
+        goalId,
+        "info",
+        `自动策略：验收失败未自动返工（autoRework=false）：${verdict.reason.slice(0, 120)}`,
+      );
+      narrate(
+        `「${goal.title}」审查未通过，已停止自动返工（autoRework=false）`,
+      );
+      return { ok: true };
+    }
+
     const reworkReason = formatReviewFeedback(verdict, priorRounds);
     maybeDistillReviewLesson(goalId, verdict.reason);
     void import("./dream-job.js").then(({ distillMemoryForConversation }) => {
@@ -330,6 +343,11 @@ async function executeReviewLoop(
       if (goal) distillMemoryForConversation(goal.conversationId);
     });
     narrate(`「${goal.title}」审查未通过，ACP steer 返工：${verdict.reason.slice(0, 80)}`);
+    appendLogAndBroadcast(
+      goalId,
+      "warn",
+      `自动策略：验收失败，自动返工（autoRework）：${verdict.reason.slice(0, 120)}`,
+    );
     await reworkGoal(goalId, reworkReason, { source: "auto" });
     return { ok: true };
   } catch (err) {

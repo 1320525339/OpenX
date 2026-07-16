@@ -9,8 +9,9 @@ import { ToolsCliTab } from "./tools/ToolsCliTab";
 import { ToolsSkillsTab } from "./tools/ToolsSkillsTab";
 import { ToolsAgentTab, formatAgentMd } from "./tools/ToolsAgentTab";
 import { ToolsMcpTab } from "./tools/ToolsMcpTab";
+import { ToolsExtensionsCenter } from "./tools/ToolsExtensionsCenter";
 
-type ToolsTab = "cli" | "skills" | "agent" | "mcp";
+type ToolsTab = "cli" | "skills" | "agent" | "mcp" | "extensions";
 
 type Props = {
   settings: Settings;
@@ -63,7 +64,10 @@ function toolsSnapshotEqual(a: ToolsSnapshot, b: ToolsSnapshot): boolean {
 
 function loadTab(): ToolsTab {
   const v = localStorage.getItem(TAB_KEY);
-  if (v === "cli" || v === "skills" || v === "agent" || v === "mcp") return v;
+  if (v === "miloco") return "extensions";
+  if (v === "cli" || v === "skills" || v === "agent" || v === "mcp" || v === "extensions") {
+    return v;
+  }
   return "cli";
 }
 
@@ -234,19 +238,21 @@ export function ToolsPanel({
   };
 
   const enabledSkillCount = Object.values(serverBindings).filter((b) => b.enabled).length;
+  const isIntegrationTab = tab === "extensions";
+
+  const coreTabs: Array<[string, string, number?]> = [
+    ["cli", "CLI"],
+    ["skills", "Skills", enabledSkillCount],
+    ["mcp", "MCP"],
+    ["extensions", "拓展中心"],
+    ["agent", "Agent"],
+  ];
 
   return (
     <section className="mech-panel page-panel">
       <div className="mech-panel-head page-panel-head">
         <div className="tools-tabs" role="tablist">
-          {(
-            [
-              ["cli", "CLI"],
-              ["skills", "Skills", enabledSkillCount],
-              ["mcp", "MCP"],
-              ["agent", "Agent"],
-            ] as const
-          ).map(([id, label, badge]) => (
+          {coreTabs.map(([id, label, badge]) => (
             <button
               key={id}
               type="button"
@@ -326,8 +332,14 @@ export function ToolsPanel({
               onSaved={(servers) => onChange({ ...settings, mcpServers: servers })}
             />
           )}
+          {tab === "extensions" && (
+            <ToolsExtensionsCenter
+              onOpenGoal={(goal) => onIntegrationGoalCreated(goal)}
+            />
+          )}
         </div>
 
+        {!isIntegrationTab ? (
         <div className="panel-footer settings-panel-footer">
           <span className="settings-footer-status" aria-live="polite">
             {dirty && <span className="settings-dirty">有未保存的更改</span>}
@@ -341,6 +353,7 @@ export function ToolsPanel({
             {saving ? "保存中…" : "保存工具配置"}
           </button>
         </div>
+        ) : null}
       </div>
     </section>
   );

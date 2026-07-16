@@ -8,6 +8,8 @@
     "build": "tauri build",
     "build:debug": "tauri build --debug",
     "build:server": "node scripts/build-server.mjs",
+    "package:portable": "node scripts/package-portable.mjs",
+    "package:portable:debug": "node scripts/package-portable.mjs --debug",
     "tauri": "tauri"
   },
   "devDependencies": {

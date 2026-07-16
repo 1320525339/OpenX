@@ -13,22 +13,25 @@ const base: Goal = {
   constraints: [],
   status: "running",
   progress: 50,
+  dependsOn: [],
+  priority: "medium",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 describe("goalDisplayHint", () => {
-  it("shows awaiting_user hint for parked crew", () => {
-    const goal = { ...base, crewStatus: "awaiting_user" as const };
+  it("shows awaiting hint for paused goals", () => {
+    const goal = { ...base, status: "paused" as const, crewStatus: "awaiting_user" as const };
     expect(goalDisplayHint(goal)).toBe("等待开发商决策");
   });
 });
 
 describe("goalMatchesDisplayFilter", () => {
-  it("matches awaiting_user filter for running goals waiting on user", () => {
-    const goal = { ...base, crewStatus: "awaiting_user" as const };
+  it("matches awaiting_user and paused filters for paused goals", () => {
+    const goal = { ...base, status: "paused" as const, crewStatus: "awaiting_user" as const };
     expect(goalMatchesDisplayFilter(goal, "awaiting_user")).toBe(true);
-    expect(goalMatchesDisplayFilter(goal, "running")).toBe(true);
+    expect(goalMatchesDisplayFilter(goal, "paused")).toBe(true);
+    expect(goalMatchesDisplayFilter(goal, "running")).toBe(false);
   });
 
   it("excludes idle running goals from awaiting_user filter", () => {

@@ -451,18 +451,32 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
 }
 
 .console-task-stage .goals-workspace {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
-.console-task-stage .goals-workspace-pin .tasks-panel {
+.console-task-stage .goals-workspace-pin .tasks-panel,
+.console-task-stage .goals-workspace-embedded .tasks-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   padding-inline: 0.35rem;
+}
+
+.console-task-stage .goals-workspace-pin .mech-panel-body.panel-stack,
+.console-task-stage .goals-workspace-embedded .mech-panel-body.panel-stack {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .console-task-stage .goals-workspace-embedded {
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .console-smart-cabin .smart-cabin-card-left,
@@ -676,6 +690,17 @@ body.split-dragging .flexible-canvas-split .pane-divider::after {
   color: var(--accent, #2563eb);
   border-color: rgba(37, 99, 235, 0.35);
   background: rgba(37, 99, 235, 0.06);
+}
+
+.flexible-widget-span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
+}
+
+.flexible-widget-wide:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .flexible-widget-title {

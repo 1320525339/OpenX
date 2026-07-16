@@ -29,6 +29,9 @@ type Props = {
   pinnedCount: number;
   onTogglePin: (widget: PinWidgetId) => void;
   onRegisterTemplate?: (templateId: string) => boolean;
+  /** 启用 / 切换到 AI 圆桌会话模式 */
+  onEnableRoundtable?: () => void;
+  roundtableActive?: boolean;
   onDockDragStart?: (widget: PinWidgetId) => void;
   onDockDragMove?: (clientX: number, clientY: number) => void;
   onDockDragEnd?: (widget: PinWidgetId, clientX: number, clientY: number) => void;
@@ -62,6 +65,8 @@ export function PinDock({
   pinnedCount,
   onTogglePin,
   onRegisterTemplate,
+  onEnableRoundtable,
+  roundtableActive = false,
   onDockDragStart,
   onDockDragMove,
   onDockDragEnd,
@@ -376,6 +381,28 @@ export function PinDock({
               </div>
             );
           })}
+
+          {onEnableRoundtable ? (
+            <button
+              type="button"
+              className={`pin-dock-btn pin-dock-roundtable-btn${roundtableActive ? " pinned" : ""}`}
+              aria-pressed={roundtableActive}
+              title={
+                roundtableActive
+                  ? "当前已是 AI 圆桌模式"
+                  : "切换为 AI 圆桌并固定对话面板"
+              }
+              onClick={() => onEnableRoundtable()}
+            >
+              <span className="pin-dock-icon" aria-hidden>
+                🪑
+              </span>
+              <span className="pin-dock-label">AI 圆桌</span>
+              {roundtableActive ? (
+                <span className="pin-dock-pin-mark">圆桌中</span>
+              ) : null}
+            </button>
+          ) : null}
 
           {onRegisterTemplate ? (
             <div className="pin-dock-add-wrap">

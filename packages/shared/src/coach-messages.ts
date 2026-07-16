@@ -8,6 +8,15 @@ import {
   CoachDispatchPermissionPayloadSchema,
   DispatchPermissionToolResultSchema,
 } from "./coach-dispatch-permission.js";
+import {
+  GenerationMetaSchema,
+  GenerationStatusSchema,
+  PeerRequestPayloadSchema,
+  RoundSynthesisPayloadSchema,
+  SpeakerTypeSchema,
+  legacyRoleToSpeakerType,
+  speakerTypeToLegacyRole,
+} from "./roundtable.js";
 
 export const CoachMessageKindSchema = z.enum([
   "text",
@@ -17,6 +26,8 @@ export const CoachMessageKindSchema = z.enum([
   "tool_result",
   "operator_action",
   "dispatch_permission",
+  "round_synthesis",
+  "peer_request",
 ]);
 export type CoachMessageKind = z.infer<typeof CoachMessageKindSchema>;
 
@@ -33,13 +44,57 @@ export const CoachTextMessageSchema = z.object({
   id: z.number(),
   conversationId: z.string(),
   kind: z.literal("text"),
+  /** @deprecated 兼容旧客户端；新代码读 speakerType */
   role: z.enum(["user", "coach"]),
   text: z.string(),
   timestamp: z.string(),
   /** 工头↔施工队等任务内消息关联的目标 */
   linkedGoalId: z.string().optional(),
+  speakerType: SpeakerTypeSchema.optional(),
+  speakerId: z.string().optional(),
+  replyToMessageId: z.number().int().optional(),
+  roundId: z.string().optional(),
+  generationStatus: GenerationStatusSchema.optional(),
+  generationMeta: GenerationMetaSchema.optional(),
 });
 export type CoachTextMessage = z.infer<typeof CoachTextMessageSchema>;
+
+export const CoachRoundSynthesisMessageSchema = z.object({
+  id: z.number(),
+  conversationId: z.string(),
+  kind: z.literal("round_synthesis"),
+  timestamp: z.string(),
+  synthesis: RoundSynthesisPayloadSchema,
+  speakerType: z.literal("foreman").default("foreman"),
+  speakerId: z.literal("foreman").default("foreman"),
+  roundId: z.string().optional(),
+  generationStatus: GenerationStatusSchema.optional(),
+});
+export type CoachRoundSynthesisMessage = z.infer<
+  typeof CoachRoundSynthesisMessageSchema
+>;
+
+export const CoachPeerRequestMessageSchema = z.object({
+  id: z.number(),
+  conversationId: z.string(),
+  kind: z.literal("peer_request"),
+  timestamp: z.string(),
+  peerRequest: PeerRequestPayloadSchema,
+  roundId: z.string().optional(),
+});
+export type CoachPeerRequestMessage = z.infer<typeof CoachPeerRequestMessageSchema>;
+
+export function resolveTextSpeaker(
+  msg: Pick<CoachTextMessage, "role" | "speakerType" | "speakerId">,
+): { speakerType: z.infer<typeof SpeakerTypeSchema>; speakerId: string } {
+  const speakerType = msg.speakerType ?? legacyRoleToSpeakerType(msg.role);
+  const speakerId =
+    msg.speakerId ??
+    (speakerType === "user" ? "user" : speakerType === "foreman" ? "foreman" : "unknown");
+  return { speakerType, speakerId };
+}
+
+export { speakerTypeToLegacyRole, legacyRoleToSpeakerType };
 
 export const CoachExecutionMessageSchema = z.object({
   id: z.number(),
@@ -183,5 +238,7 @@ export const CoachMessageRecordSchema = z.discriminatedUnion("kind", [
   CoachToolResultMessageSchema,
   CoachOperatorActionMessageSchema,
   CoachDispatchPermissionMessageSchema,
+  CoachRoundSynthesisMessageSchema,
+  CoachPeerRequestMessageSchema,
 ]);
 export type CoachMessageRecord = z.infer<typeof CoachMessageRecordSchema>;

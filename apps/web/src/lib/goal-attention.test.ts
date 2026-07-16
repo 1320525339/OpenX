@@ -18,8 +18,8 @@ const base = {
 };
 
 describe("goalNeedsUserAttention", () => {
-  it("includes running goals awaiting user decision", () => {
-    const goal = { ...base, crewStatus: "awaiting_user" as const };
+  it("includes paused goals awaiting user decision", () => {
+    const goal = { ...base, status: "paused" as const, crewStatus: "awaiting_user" as const };
     expect(goalNeedsUserAttention(goal as Goal)).toBe(true);
   });
 

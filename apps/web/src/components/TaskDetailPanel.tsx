@@ -34,9 +34,9 @@ type Props = {
   selectedGoals: Goal[];
   logs: LogEntry[];
   run?: GoalRunState;
-  onApprove: (id: string) => Promise<void>;
-  onRework: (id: string, reason?: string) => Promise<void>;
-  onStart: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<boolean>;
+  onRework: (id: string, reason?: string) => Promise<boolean>;
+  onStart: (id: string) => Promise<boolean>;
   onOpenDetail?: (id: string) => void;
   conversationTitles?: Record<string, string>;
   /** pin 桌面卡片：聚焦状态/关系/验收与操作 */

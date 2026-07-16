@@ -26,6 +26,8 @@ export function mergeServerSettingsIntoDraft(local: Settings, server: Settings):
     operatorTier: local.operatorTier,
     notifyOnComplete: local.notifyOnComplete,
     autoExecute: local.autoExecute,
+    autoStartDependents: local.autoStartDependents,
+    autoRework: local.autoRework,
     autoBootstrapConnect: local.autoBootstrapConnect,
     defaultExecutorId: local.defaultExecutorId,
     defaultConstraints: local.defaultConstraints,

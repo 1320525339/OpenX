@@ -24,30 +24,40 @@ import {
 function useIsolatedOpenxDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "openx-knowledge-test-"));
   writeFileSync(join(dir, "config.json"), "{}");
+  process.env.OPENX_HOME = dir;
   process.env.OPENX_CONFIG_PATH = join(dir, "config.json");
+  process.env.OPENX_PROVIDERS_PATH = join(dir, "providers.json");
   process.env.OPENX_DB_PATH = ":memory:";
   return dir;
 }
 
 function writeEmbeddingSettings(dir: string, modelId = "embed-small"): void {
+  const providers = {
+    test: {
+      name: "Test Provider",
+      api: { type: "openai-compatible", baseUrl: "https://example.test/v1" },
+      auth: { apiKey: "test-key" },
+      models: { [modelId]: { name: modelId } },
+    },
+  };
   writeFileSync(
     join(dir, "config.json"),
     JSON.stringify({
       model: { coach: `test/${modelId}`, pi: `test/${modelId}`, default: `test/${modelId}` },
-      providers: {
-        test: {
-          name: "Test Provider",
-          api: { type: "openai-compatible", baseUrl: "https://example.test/v1" },
-          auth: { apiKey: "test-key" },
-          models: { [modelId]: { name: modelId } },
-        },
-      },
     }),
   );
+  // providers 已迁出 config.json：必须同步写 providers.json，否则二次改模型会解析失败
+  writeFileSync(join(dir, "providers.json"), JSON.stringify({ providers }));
+  process.env.OPENX_PROVIDERS_PATH = join(dir, "providers.json");
 }
 
 describe("knowledge-store", () => {
   let tempDir = "";
+  const prevHome = process.env.OPENX_HOME;
+  const prevConfig = process.env.OPENX_CONFIG_PATH;
+  const prevProviders = process.env.OPENX_PROVIDERS_PATH;
+  const prevDb = process.env.OPENX_DB_PATH;
+  const prevZvec = process.env.OPENX_ZVEC_ENABLED;
 
   beforeEach(() => {
     tempDir = useIsolatedOpenxDir();
@@ -62,8 +72,16 @@ describe("knowledge-store", () => {
     resetZvecKnowledgeIndexForTests();
     resetKnowledgeEmbeddingForTests();
     vi.unstubAllGlobals();
-    delete process.env.OPENX_DB_PATH;
-    delete process.env.OPENX_CONFIG_PATH;
+    if (prevDb === undefined) delete process.env.OPENX_DB_PATH;
+    else process.env.OPENX_DB_PATH = prevDb;
+    if (prevHome === undefined) delete process.env.OPENX_HOME;
+    else process.env.OPENX_HOME = prevHome;
+    if (prevConfig === undefined) delete process.env.OPENX_CONFIG_PATH;
+    else process.env.OPENX_CONFIG_PATH = prevConfig;
+    if (prevProviders === undefined) delete process.env.OPENX_PROVIDERS_PATH;
+    else process.env.OPENX_PROVIDERS_PATH = prevProviders;
+    if (prevZvec === undefined) delete process.env.OPENX_ZVEC_ENABLED;
+    else process.env.OPENX_ZVEC_ENABLED = prevZvec;
     delete process.env.OPENX_KNOWLEDGE_SEARCH_MODE;
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
@@ -160,6 +178,7 @@ describe("knowledge-store", () => {
   });
 
   it("marks health as needing rebuild when embedding model changes", async () => {
+    process.env.OPENX_ZVEC_ENABLED = "1";
     writeEmbeddingSettings(tempDir, "embed-small");
     vi.stubGlobal(
       "fetch",

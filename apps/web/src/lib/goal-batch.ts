@@ -10,7 +10,7 @@ export function goalsEligibleForAction(goals: Goal[], action: BatchGoalsAction):
     case "start":
       return goals.filter((g) => g.status === "draft" || g.status === "failed");
     case "cancel":
-      return goals.filter((g) => g.status === "running");
+      return goals.filter((g) => g.status === "running" || g.status === "paused");
     case "approve":
       return goals.filter((g) => g.status === "awaiting_review");
     case "delete":

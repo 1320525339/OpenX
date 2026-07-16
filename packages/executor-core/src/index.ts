@@ -1,4 +1,18 @@
-import type { Goal, GoalDeliverable, LogLevel, LlmContextSettings, ModelSettingsSlice, PiExecutorSettings, RunDeltaEvent, ExecutionSkillHint, CrewDirective, CrewQuestion, ForemanTurnDecision, ForemanTurnReviewInput } from "@openx/shared";
+import type {
+  ExecutionOutcome,
+  Goal,
+  GoalDeliverable,
+  LogLevel,
+  LlmContextSettings,
+  ModelSettingsSlice,
+  PiExecutorSettings,
+  RunDeltaEvent,
+  ExecutionSkillHint,
+  CrewDirective,
+  CrewQuestion,
+  ForemanTurnDecision,
+  ForemanTurnReviewInput,
+} from "@openx/shared";
 
 
 
@@ -10,6 +24,10 @@ export interface ExecutorCallbacks {
 
   onRunEvent?: (event: RunDeltaEvent) => Promise<void>;
 
+  /**
+   * 仅表示「已完成」交差。失败请用 onFail，阻塞请用 onParkAwaitingUser。
+   * 也可通过 reportExecutionOutcome 统一分发结构化 ExecutionOutcome。
+   */
   onComplete: (resultSummary: string, deliverables?: GoalDeliverable[]) => Promise<void>;
 
   onFail: (errorMessage: string) => Promise<void>;
@@ -26,6 +44,26 @@ export interface ExecutorCallbacks {
   /** 绑定施工队会话 ID（持久化到 Goal.crewSessionId） */
   onCrewSession?: (crewSessionId: string) => Promise<void>;
 
+}
+
+/** 将结构化执行结果分发到对应回调，避免用自然语言摘要推断成败 */
+export async function reportExecutionOutcome(
+  callbacks: ExecutorCallbacks,
+  outcome: ExecutionOutcome,
+): Promise<void> {
+  if (outcome.status === "completed") {
+    await callbacks.onComplete(outcome.summary, outcome.deliverables);
+    return;
+  }
+  if (outcome.status === "blocked") {
+    if (callbacks.onParkAwaitingUser) {
+      await callbacks.onParkAwaitingUser(outcome.reason);
+      return;
+    }
+    await callbacks.onFail(outcome.reason);
+    return;
+  }
+  await callbacks.onFail(outcome.error);
 }
 
 
@@ -91,6 +129,12 @@ export interface ExecutorContext {
 
   /** steer 续跑时注入的单条工头/开发商指令（返工或用户确认后） */
   crewContinuationPrompt?: string;
+
+  /**
+   * ACP loadSession 后注入的压缩 transcript（工头对话 + 摘要 + 日志）。
+   * 由 orchestrator 从 crew_messages / execution_summaries 组装。
+   */
+  resumeTranscript?: string;
 }
 
 

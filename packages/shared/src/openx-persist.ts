@@ -53,6 +53,19 @@ export function sanitizeProvidersForDisk(providers: ProvidersMap): ProvidersMap 
   return out;
 }
 
+/** API 响应脱敏：去掉非公开 apiKey，仅保留 env 引用 */
+export function sanitizeSettingsForApi<T extends { providers?: ProvidersMap }>(
+  settings: T,
+): T {
+  if (!settings.providers || Object.keys(settings.providers).length === 0) {
+    return settings;
+  }
+  return {
+    ...settings,
+    providers: sanitizeProvidersForDisk(settings.providers),
+  };
+}
+
 /** 简易 dotenv 解析（对齐 mimo2codex load-env 语义） */
 export function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {};

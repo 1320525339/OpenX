@@ -95,6 +95,19 @@ export {
   isCoachQuotaError,
   type CoachLlmErrorKind,
 } from "./llm-errors.js";
+export {
+  resolveRoundParticipants,
+  generateParticipantReply,
+  synthesizeRoundtable,
+  LIST_ATTENDEES_TOOL,
+  GET_PEER_REPLIES_TOOL,
+  REQUEST_PEER_REPLY_TOOL,
+  type MentionRouteResult,
+  type ParticipantReplyInput,
+  type ParticipantToolHandlers,
+  type RoundtableAttendee,
+  type PeerReplySnippet,
+} from "./roundtable/index.js";
 
 /** @deprecated 使用 refineGoal */
 export { refineGoalRules as refineGoalLegacy } from "./rules.js";

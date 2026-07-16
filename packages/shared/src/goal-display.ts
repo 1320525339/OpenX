@@ -1,4 +1,5 @@
 import type { Goal } from "./goal.js";
+import { isPausedGoal } from "./goal.js";
 
 /** 用户可见三态：未完成 / 失败 / 已完成 */
 export type GoalDisplayOutcome = "incomplete" | "failed" | "done";
@@ -28,8 +29,8 @@ export function goalDisplayLabel(goal: Goal): string {
 /** 副标签（细分进度，用于卡片第二行） */
 export function goalDisplayHint(goal: Goal): string | null {
   if (goal.status === "awaiting_review") return "待验收";
+  if (isPausedGoal(goal)) return "等待开发商决策";
   if (goal.status === "running") {
-    if (goal.crewStatus === "awaiting_user") return "等待开发商决策";
     if (goal.effectStatus === "rework") return "返工中";
     return "进行中";
   }
@@ -50,8 +51,9 @@ export function goalMatchesDisplayFilter(goal: Goal, filter: string): boolean {
   }
   if (filter === "awaiting_review") return goal.status === "awaiting_review";
   if (filter === "running") return goal.status === "running";
+  if (filter === "paused") return isPausedGoal(goal);
   if (filter === "awaiting_user") {
-    return goal.status === "running" && goal.crewStatus === "awaiting_user";
+    return isPausedGoal(goal) || (goal.status === "running" && goal.crewStatus === "awaiting_user");
   }
   if (filter === "draft") return goal.status === "draft";
   return goal.status === filter;

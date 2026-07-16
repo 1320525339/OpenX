@@ -20,6 +20,11 @@ import { DEFAULT_PI_MAX_TOOL_CALLS, type PiExecutorSettings } from "@openx/share
 import {
   CREW_FOREMAN_PROMPT_APPENDIX,
   buildPiCrewSessionId,
+  denyToolMessage,
+  permissionAllowsTool,
+  piToolSessionPolicy,
+  resolveEffectivePermissionMode,
+  PI_CODING_TOOL_NAMES,
 } from "@openx/shared";
 
 import {
@@ -98,15 +103,13 @@ function resolvePiSettings(ctx: ExecutorContext): PiExecutorSettings {
 
 
 function defaultSessionDir(): string {
-
-  const base = process.env.OPENX_DATA_DIR?.trim() || join(homedir(), ".openx");
-
+  const base =
+    process.env.OPENX_DATA_DIR?.trim() ||
+    process.env.OPENX_HOME?.trim() ||
+    join(homedir(), ".openx");
   const dir = join(base, "pi-sessions");
-
   mkdirSync(dir, { recursive: true });
-
   return dir;
-
 }
 
 
@@ -178,9 +181,20 @@ async function handlePiEvent(
     session: AgentSession;
     maxToolCalls: number;
     workspaceRoot: string;
+    permissionMode: import("@openx/shared").DispatchPermissionMode;
+    allowedTools?: string[];
   },
 ): Promise<void> {
-  const { callbacks, state, run, session, maxToolCalls, workspaceRoot } = ctx;
+  const {
+    callbacks,
+    state,
+    run,
+    session,
+    maxToolCalls,
+    workspaceRoot,
+    permissionMode,
+    allowedTools,
+  } = ctx;
 
   if (evt.type === "agent_start") {
     await run?.status("Pi Agent 启动");
@@ -214,6 +228,11 @@ async function handlePiEvent(
   if (evt.type === "tool_execution_start") {
     state.toolCount += 1;
     const tool = String(evt.toolName ?? "tool");
+    if (!permissionAllowsTool(permissionMode, tool, allowedTools)) {
+      await callbacks.onLog("warn", `[pi] ${denyToolMessage(permissionMode, tool)}`);
+      void session.abort();
+      return;
+    }
     const path = extractPathFromToolArgs(evt.args);
     const previousContent =
       path && workspaceRoot
@@ -421,6 +440,10 @@ async function runSessionTurn(
       session,
       maxToolCalls,
       workspaceRoot,
+      permissionMode: resolveEffectivePermissionMode(
+        goal.dispatchContext?.permissionMode,
+      ),
+      allowedTools: goal.dispatchContext?.allowedTools,
     }).catch((err) => {
       // 捕获而非静默丢弃，避免 unhandled rejection 崩溃；
       // 事件流继续，不中断当前执行
@@ -701,6 +724,7 @@ export const piExecutor: ExecutorAdapter = {
         workspaceRoot: ctx.workspaceRoot,
         llmContext: ctx.llmContext,
         projectKnowledge: (ctx as { projectKnowledge?: string }).projectKnowledge,
+        openxRoot: process.env.OPENX_ROOT,
       }),
       CREW_FOREMAN_PROMPT_APPENDIX,
     ].join("\n\n");
@@ -768,9 +792,17 @@ export const piExecutor: ExecutorAdapter = {
     try {
 
       const githubSkillIds = ctx.enabledSkills
-        ?.filter((s) => s.kind === "github")
+        ?.filter((s) => s.kind === "github" || s.kind === "local")
         .map((s) => s.id);
       const resourceLoader = await createOpenxResourceLoader(workspaceRoot, githubSkillIds);
+
+      const permissionMode = resolveEffectivePermissionMode(
+        ctx.goal.dispatchContext?.permissionMode,
+      );
+      const toolPolicy = piToolSessionPolicy(
+        permissionMode,
+        ctx.goal.dispatchContext?.allowedTools,
+      );
 
       const created = await createAgentSession({
 
@@ -786,9 +818,24 @@ export const piExecutor: ExecutorAdapter = {
 
         ...(resourceLoader ? { resourceLoader } : {}),
 
+        ...(toolPolicy.createTools ? { tools: toolPolicy.createTools } : {}),
+
       });
 
       session = created.session;
+
+      if (toolPolicy.initialActiveTools?.length) {
+        session.setActiveToolsByName(toolPolicy.initialActiveTools);
+        await callbacks.onLog(
+          "info",
+          `[pi] 派单权限 ${permissionMode}：活跃工具 ${toolPolicy.initialActiveTools.join(", ")}`,
+        );
+      } else if (toolPolicy.createTools?.length) {
+        await callbacks.onLog(
+          "info",
+          `[pi] 派单权限 ${permissionMode}：工具白名单 ${toolPolicy.createTools.join(", ")}`,
+        );
+      }
 
       if (created.modelFallbackMessage) {
 
@@ -882,6 +929,17 @@ export const piExecutor: ExecutorAdapter = {
     parkedRuns.delete(ctx.goal.id);
 
 
+
+    const permissionMode = resolveEffectivePermissionMode(
+      ctx.goal.dispatchContext?.permissionMode,
+    );
+    if (permissionMode === "full") {
+      parked.session.setActiveToolsByName([...PI_CODING_TOOL_NAMES]);
+      await callbacks.onLog(
+        "info",
+        `[pi] 派单权限已提升为完全授权，激活工具 ${PI_CODING_TOOL_NAMES.join(", ")}`,
+      );
+    }
 
     await callbacks.onLog(
       "info",

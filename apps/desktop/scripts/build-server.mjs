@@ -39,6 +39,12 @@ const PKG_EXTERNALS = [
   "utf-8-validate",
   "node:sqlite",
   "undici",
+  // 原生 addon：pkg snapshot 无法正确解析其 ./index.js / .node
+  "@zvec/zvec",
+  "@zvec/bindings-win32-x64",
+  "@zvec/bindings-darwin-arm64",
+  "@zvec/bindings-linux-arm64",
+  "@zvec/bindings-linux-x64",
 ];
 
 const PKG_BANNER = {
@@ -273,9 +279,20 @@ function copyRuntimePackageTree(packageNames, destRoot) {
         if (entry.startsWith(".")) continue;
         const src = path.join(virtualNodeModules, entry);
         const dest = path.join(destRoot, entry);
-        if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
-        cpSync(src, dest, { recursive: true });
-        console.log(`  → node_modules/${entry}`);
+        // scoped 包（@zvec 等）必须合并子目录，不能整夹覆盖
+        if (entry.startsWith("@") && existsSync(dest)) {
+          for (const pkg of readdirSync(src)) {
+            const pkgSrc = path.join(src, pkg);
+            const pkgDest = path.join(dest, pkg);
+            if (existsSync(pkgDest)) rmSync(pkgDest, { recursive: true, force: true });
+            cpSync(pkgSrc, pkgDest, { recursive: true, dereference: true });
+            console.log(`  → node_modules/${entry}/${pkg}`);
+          }
+        } else {
+          if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+          cpSync(src, dest, { recursive: true, dereference: true });
+          console.log(`  → node_modules/${entry}`);
+        }
       }
     }
 
@@ -299,7 +316,10 @@ try {
   copyPackage("better-sqlite3", serverRequire);
   copyPackage("bindings", sqliteRequire);
   copyPackage("file-uri-to-path", sqliteRequire);
-  copyRuntimePackageTree(["undici", "puppeteer-core"], sidecarNodeModules);
+  copyRuntimePackageTree(
+    ["undici", "puppeteer-core", "@zvec/zvec", "@zvec/bindings-win32-x64"],
+    sidecarNodeModules,
+  );
 } catch (err) {
   sidecarModulesOk = false;
   console.error("  ✗ failed to prepare sidecar node_modules:", err.message ?? err);
@@ -311,6 +331,23 @@ if (!existsSync(sidecarNative)) {
   console.error(`  ✗ missing ${sidecarNative}`);
 } else {
   console.log(`  ✓ native binding: ${sidecarNative}`);
+}
+
+const zvecPkg = path.join(sidecarNodeModules, "@zvec", "zvec", "package.json");
+const zvecWinBinding = path.join(
+  sidecarNodeModules,
+  "@zvec",
+  "bindings-win32-x64",
+  "zvec_node_binding.node",
+);
+if (!existsSync(zvecPkg)) {
+  sidecarModulesOk = false;
+  console.error(`  ✗ missing ${zvecPkg}`);
+} else if (!existsSync(zvecWinBinding)) {
+  sidecarModulesOk = false;
+  console.error(`  ✗ missing ${zvecWinBinding}`);
+} else {
+  console.log(`  ✓ zvec binding: ${zvecWinBinding}`);
 }
 
 // pkg 内嵌 Node 20 — 将 better-sqlite3 重编译为匹配的 NODE_MODULE_VERSION

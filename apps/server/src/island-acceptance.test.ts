@@ -28,12 +28,19 @@ import {
   islandForAwaitingReview,
 } from "./island-push.js";
 import {
+  insertGoal,
   isIslandSeenInDb,
   resetDb,
 } from "./db.js";
 import { app } from "./routes.js";
+import { getOrCreateInternalToken } from "./internal-auth.js";
+import { seedTestProjectAndConversation, TEST_CONVERSATION_ID } from "./test-helpers.js";
 
 const jsonHeaders = { "Content-Type": "application/json" };
+const internalHeaders = () => ({
+  "Content-Type": "application/json",
+  "x-openx-internal-token": getOrCreateInternalToken(),
+});
 
 // ---------------------------------------------------------------------------
 // 测试辅助：构造最小 Goal
@@ -42,7 +49,8 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
   const now = new Date().toISOString();
   return {
     id: "goal-test-1",
-    conversationId: "conv-test-1",
+    orderNo: 1,
+    conversationId: TEST_CONVERSATION_ID,
     title: "测试目标",
     acceptance: "所有测试通过",
     executionPrompt: "执行测试",
@@ -163,11 +171,12 @@ describe("灵动岛 — Payload 构建与校验", () => {
     const kinds = IslandPayloadKindSchema.options;
     for (const kind of kinds) {
       const minimal = {
-        id: `test-${kind}-${Date.now()}`,
+        id: `test-${kind}`.slice(0, 128),
         kind,
         severity: "info" as const,
         title: `测试 ${kind}`,
         message: `kind=${kind} 的自动化验收测试`,
+        ...(kind.startsWith("goal.") ? { goalId: "g-schema-1" } : {}),
       };
       const parsed = DynamicIslandPayloadSchema.safeParse(minimal);
       expect(parsed.success).toBe(true);
@@ -254,8 +263,7 @@ describe("灵动岛 — /api/island/seen 已读标记", () => {
       headers: jsonHeaders,
       body: JSON.stringify({ ids: [] }),
     });
-    // Zod parse 失败会 throw → 500
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
   });
 
   it("GET 支持 limit 参数", async () => {
@@ -275,13 +283,13 @@ describe("灵动岛 — /api/island/seen 已读标记", () => {
 // 3. 灵动岛 — /api/system/island/push 推送端点
 // ---------------------------------------------------------------------------
 describe("灵动岛 — /api/system/island/push", () => {
-  it("推送有效 payload 返回 ok", async () => {
+  it("推送有效 broadcast 返回 ok", async () => {
     const res = await app.request("/api/system/island/push", {
       method: "POST",
-      headers: jsonHeaders,
+      headers: internalHeaders(),
       body: JSON.stringify({
-        id: "push-test-1",
         kind: "broadcast",
+        id: "push-test-1",
         severity: "info",
         title: "推送测试",
         message: "自动化验收推送",
@@ -293,51 +301,49 @@ describe("灵动岛 — /api/system/island/push", () => {
     expect(body.id).toBe("push-test-1");
   });
 
-  it("推送含 actions 的完整 payload", async () => {
+  it("目标类 push 仅接受 goalId+eventType", async () => {
+    process.env.OPENX_DB_PATH = ":memory:";
+    resetDb();
+    seedTestProjectAndConversation();
+    insertGoal(makeGoal({ id: "g-push-await", status: "awaiting_review" }));
+
     const res = await app.request("/api/system/island/push", {
       method: "POST",
-      headers: jsonHeaders,
+      headers: internalHeaders(),
       body: JSON.stringify({
-        id: "push-full-1",
-        kind: "goal.awaiting_review",
-        severity: "info",
-        title: "完整推送",
-        message: "包含按钮",
-        goalId: "g-1",
-        expanded: true,
-        allowFeedback: true,
-        feedbackPlaceholder: "请输入反馈…",
-        meta: {
-          status: "awaiting_review",
-          iterationCount: 2,
-          maxIterations: 20,
-          resultPreview: "结果预览",
-        },
-        actions: [
-          {
-            id: "approve",
-            label: "确认完成",
-            variant: "primary",
-            action: { type: "approve", goalId: "g-1" },
-          },
-        ],
+        goalId: "g-push-await",
+        eventType: "awaiting_review",
       }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; id: string };
     expect(body.ok).toBe(true);
+    expect(body.id).toContain("await-review-g-push-await");
   });
 
-  it("推送无效 payload 返回 500", async () => {
+  it("推送无效 payload 返回 400", async () => {
+    const res = await app.request("/api/system/island/push", {
+      method: "POST",
+      headers: internalHeaders(),
+      body: JSON.stringify({
+        id: "bad-push",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("无 internal token 拒绝", async () => {
     const res = await app.request("/api/system/island/push", {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({
-        // 缺少 kind / title / message
-        id: "bad-push",
+        kind: "broadcast",
+        id: "no-token",
+        title: "x",
+        message: "y",
       }),
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
   });
 });
 

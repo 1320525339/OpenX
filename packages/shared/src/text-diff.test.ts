@@ -124,4 +124,12 @@ describe("text-diff", () => {
     ].join("\n");
     expect(cleanGitDiff(raw)).toBe("-old\n+new");
   });
+
+  it("truncates by maxBytes (UTF-8 bytes, not UTF-16 length)", () => {
+    const before = "a\n";
+    const after = `a\n${"中".repeat(200)}\n`;
+    const text = formatUnifiedDiff(before, after, { path: "c.ts", maxBytes: 80, maxLines: 999 });
+    expect(text).toContain("...(diff truncated)");
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(200);
+  });
 });

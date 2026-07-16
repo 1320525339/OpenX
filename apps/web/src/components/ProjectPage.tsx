@@ -19,11 +19,11 @@ import { RowDeleteButton } from "./RowDeleteButton";
 
 type GoalActions = {
 
-  onApprove: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<boolean>;
 
-  onRework: (id: string, reason?: string) => Promise<void>;
+  onRework: (id: string, reason?: string) => Promise<boolean>;
 
-  onStart: (id: string) => Promise<void>;
+  onStart: (id: string) => Promise<boolean>;
 
 };
 
@@ -40,6 +40,8 @@ type Props = {
   onOpenConversation: (conversationId: string, goalId?: string) => void;
 
   onNewConversation: () => void;
+
+  onNewRoundtable?: () => void;
 
   onDeleteConversation?: (conversationId: string) => void;
 
@@ -68,6 +70,8 @@ export function ProjectPage({
   onOpenConversation,
 
   onNewConversation,
+
+  onNewRoundtable,
 
   onDeleteConversation,
 
@@ -258,6 +262,16 @@ export function ProjectPage({
               ＋ 新对话
 
             </button>
+
+            {onNewRoundtable ? (
+
+              <button type="button" className="btn compact" onClick={onNewRoundtable}>
+
+                🪑 新圆桌
+
+              </button>
+
+            ) : null}
 
           </div>
 

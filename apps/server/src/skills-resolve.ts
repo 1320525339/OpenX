@@ -53,6 +53,7 @@ export function resolveExecutorSkills(
     if (!selected.has(skill.id)) continue;
     if (base.hints.some((h) => h.id === skill.id)) continue;
     if (skill.kind === "github" && !skill.installed) continue;
+    if (skill.kind === "local" && !skill.installed) continue;
     const record = installed[skill.id];
     extra.push({
       id: skill.id,

@@ -22,6 +22,8 @@ type Props = {
   run?: GoalRunState;
   fallbackTitle: string;
   onOpenDetail?: () => void;
+  /** 在任务台中定位该目标（与打开详情可并存） */
+  onLocate?: () => void;
   handlers?: GoalTaskActionHandlers;
 };
 
@@ -31,6 +33,7 @@ export function ChatTaskChip({
   run,
   fallbackTitle,
   onOpenDetail,
+  onLocate,
   handlers,
 }: Props) {
   const [expanded, setExpanded] = useState(() => goal?.status === "running");
@@ -50,7 +53,13 @@ export function ChatTaskChip({
   const actionHandlers: GoalTaskActionHandlers | undefined = goal
     ? {
         ...handlers,
-        onOpenDetail: onOpenDetail ?? handlers?.onOpenDetail,
+        onOpenDetail:
+          onOpenDetail ??
+          (onLocate
+            ? () => {
+                onLocate();
+              }
+            : handlers?.onOpenDetail),
       }
     : undefined;
   const showCollapsedActions =

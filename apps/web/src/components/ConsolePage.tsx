@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BatchGoalsAction, CliProfile, CoachMessageRecord, Conversation, Goal, GoalRunState, Project } from "@openx/shared";
-import { goalMatchesDisplayFilter } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
 import { usePinDesktop } from "../lib/use-pin-desktop";
@@ -43,10 +42,6 @@ function mergeGoals(fromState: Goal[], fromApi: Goal[]): Goal[] {
   });
 }
 
-function filterPoolGoals(goals: Goal[], statusFilter: string): Goal[] {
-  return goals.filter((g) => goalMatchesDisplayFilter(g, statusFilter));
-}
-
 type Props = {
   conversationId: string;
   goals: Goal[];
@@ -64,10 +59,10 @@ type Props = {
   onClearSelection: () => void;
   onBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
   goalActions: {
-    onApprove: (id: string) => Promise<void>;
-    onRework: (id: string, reason?: string) => Promise<void>;
-    onStart: (id: string) => Promise<void>;
-    onCancel: (id: string) => Promise<void>;
+    onApprove: (id: string) => Promise<boolean>;
+    onRework: (id: string, reason?: string) => Promise<boolean>;
+    onStart: (id: string) => Promise<boolean>;
+    onCancel: (id: string) => Promise<boolean>;
   };
   locateRequest: { goalId: string; tick: number } | null;
   selectedGoal?: Goal;
@@ -77,6 +72,7 @@ type Props = {
   cliProfiles: CliProfile[];
   defaultExecutorId?: string;
   onRefreshed: () => Promise<void>;
+  upsertGoals: (goals: Goal[]) => void;
   onOpenGoalDetail: (id: string) => void;
   onLocateGoal: (id: string) => void;
   onNavigateToGoal: (goalId: string) => void;
@@ -116,6 +112,7 @@ export function ConsolePage(props: Props) {
     cliProfiles,
     defaultExecutorId,
     onRefreshed,
+    upsertGoals,
     onOpenGoalDetail,
     onLocateGoal,
     coachReplyEvent,
@@ -183,11 +180,6 @@ export function ConsolePage(props: Props) {
     [goals, consoleData?.allGoals],
   );
 
-  const allConsoleFiltered = useMemo(
-    () => filterPoolGoals(allConsoleGoals, statusFilter),
-    [allConsoleGoals, statusFilter],
-  );
-
   const consoleChatGoals = useMemo(
     () => goals.filter((g) => g.conversationId === conversationId),
     [goals, conversationId],
@@ -211,6 +203,7 @@ export function ConsolePage(props: Props) {
       executors,
       defaultExecutorId,
       onRefreshed,
+      upsertGoals,
       onOpenGoalDetail,
       onLocateGoal,
       onStartGoal: goalActions.onStart,
@@ -230,7 +223,7 @@ export function ConsolePage(props: Props) {
       tasks: (
         <div className="flexible-widget-fill console-task-stage">
           <GoalsWorkspace
-            goals={allConsoleFiltered}
+            goals={allConsoleGoals}
             allGoals={allConsoleGoals}
             filter={statusFilter}
             onFilterChange={onFilterChange}
@@ -308,7 +301,6 @@ export function ConsolePage(props: Props) {
 
     return { ...builtinWidgets, ...Object.fromEntries(extEntries) };
   }, [
-    allConsoleFiltered,
     allConsoleGoals,
     autoExecute,
     cliProfiles,

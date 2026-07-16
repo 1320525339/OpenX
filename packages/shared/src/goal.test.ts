@@ -10,6 +10,18 @@ describe("canTransition", () => {
     expect(canTransition("running", "awaiting_review")).toBe(true);
   });
 
+  it("allows running -> paused", () => {
+    expect(canTransition("running", "paused")).toBe(true);
+  });
+
+  it("allows paused -> running", () => {
+    expect(canTransition("paused", "running")).toBe(true);
+  });
+
+  it("allows paused -> cancelled", () => {
+    expect(canTransition("paused", "cancelled")).toBe(true);
+  });
+
   it("allows awaiting_review -> done", () => {
     expect(canTransition("awaiting_review", "done")).toBe(true);
   });

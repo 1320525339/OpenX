@@ -1,3 +1,5 @@
+import { MILOCO_EVENTS_CONVERSATION_ID } from "./miloco.js";
+
 /** 系统项目与会话固定 ID（与 apps/server system-workspace 一致） */
 export const SYSTEM_PROJECT_ID = "openx-system";
 export const SYSTEM_CLI_CONVERSATION_ID = "openx-system-cli";
@@ -11,7 +13,11 @@ export function isSystemProjectId(id: string): boolean {
 }
 
 export function isSystemConversationId(id: string): boolean {
-  return id === SYSTEM_CLI_CONVERSATION_ID || id === SYSTEM_MAIN_CONVERSATION_ID;
+  return (
+    id === SYSTEM_CLI_CONVERSATION_ID ||
+    id === SYSTEM_MAIN_CONVERSATION_ID ||
+    id === MILOCO_EVENTS_CONVERSATION_ID
+  );
 }
 
 export function isConnectAnyExecutorId(id: string): boolean {

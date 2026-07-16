@@ -4,6 +4,7 @@ import {
   isProductMetaRequest,
   isWorkOrderDismissMessage,
   mayNeedGoalRefined,
+  shouldUseCoachStreaming,
   upgradeToModelConfig,
   type AgentChatResponse,
   type CoachChatContext,
@@ -263,14 +264,14 @@ export async function coachChatReply(
   const dismiss =
     !force &&
     (options?.skipRefine === true || isWorkOrderDismissMessage(message));
-  /** 有 LLM 时统一走 structured，由 LLM 自主三选一 clarify/refined/message */
+  /** 闲聊/咨询/进展/产品元问题：走 streamText；任务/返工仍走 structured */
+  const preferStream = dismiss || shouldUseCoachStreaming(message);
   const tryStructuredLlm =
     !force &&
-    !dismiss &&
+    !preferStream &&
     !options?.toolContinuation &&
     !options?.clarifyContinuation &&
-    !isWorkspaceInspectIntent(message) &&
-    !isProductMetaRequest(message);
+    !isWorkspaceInspectIntent(message);
   const upgraded = upgradeToModelConfig(settings);
   if (resolveLlmCredentials(upgraded, "coach", env)) {
     try {
@@ -291,11 +292,7 @@ export async function coachChatReply(
         }
       }
 
-      if (
-        options?.onDelta &&
-        !force &&
-        (dismiss || isProductMetaRequest(message))
-      ) {
+      if (options?.onDelta && !force && preferStream) {
         const streamed = await coachChatStreamLlm(
           message,
           { ...context, defaultConstraints },

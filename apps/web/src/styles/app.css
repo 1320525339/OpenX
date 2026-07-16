@@ -533,19 +533,27 @@
   gap: 0.45rem;
   max-height: min(72vh, 28rem);
   overflow-y: auto;
+  min-height: 0;
 }
 
 .dynamic-island-preview {
   margin: 0;
-  padding: 0.45rem 0.5rem;
-  font-size: 0.68rem;
-  line-height: 1.45;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.74rem;
+  line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.28);
-  max-height: 8rem;
+  background: rgba(0, 0, 0, 0.32);
+  color: rgba(255, 255, 255, 0.92);
+  /* overflow 非 visible 时 flex 最小高度可被压成 0，必须禁止收缩并给可读下限 */
+  flex: 0 0 auto;
+  min-height: 5.5rem;
+  max-height: min(46vh, 16rem);
+  overflow-x: hidden;
   overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .dynamic-island-actions {

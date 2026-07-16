@@ -3,6 +3,7 @@ import {
   formatWorkOrderId,
   goalDisplayHint,
   goalDisplayLabel,
+  isPausedGoal,
   parseWorkOrderId,
 } from "@openx/shared";
 
@@ -14,6 +15,7 @@ export type ChatSlashCommand =
   | { type: "approve" }
   | { type: "rework"; reason?: string }
   | { type: "start" }
+  | { type: "resume"; query?: string; message?: string }
   | { type: "refine"; message: string };
 
 const HELP_TEXT = `OpenX 斜杠命令：
@@ -23,6 +25,7 @@ const HELP_TEXT = `OpenX 斜杠命令：
 /approve — 确认完成当前选中任务（待验收时）
 /rework [原因] — 返工当前选中任务
 /start — 开始推进当前选中任务
+/resume [WO-xxx] [决策] — 显式续跑暂停任务（须指定任务或当前仅有一个暂停）
 /refine [描述] — 整理成任务单
 /help — 显示此帮助`;
 
@@ -67,6 +70,22 @@ export function parseChatSlash(input: string): ChatSlashCommand | null {
     case "推进":
     case "开始":
       return { type: "start" };
+    case "resume":
+    case "续跑":
+    case "继续": {
+      if (!arg) return { type: "resume" };
+      const parts = arg.split(/\s+/);
+      const first = parts[0] ?? "";
+      const wo = parseWorkOrderId(first) ?? (/^\d+$/.test(first) ? Number(first) : null);
+      if (wo != null || /^WO-/i.test(first) || first.length >= 6) {
+        return {
+          type: "resume",
+          query: first,
+          message: parts.slice(1).join(" ").trim() || undefined,
+        };
+      }
+      return { type: "resume", message: arg };
+    }
     case "refine":
     case "派单":
     case "整理":
@@ -80,16 +99,18 @@ export function parseChatSlash(input: string): ChatSlashCommand | null {
 export function formatConversationStatusSummary(goals: Goal[]): string {
   if (goals.length === 0) return "本对话还没有任务单。";
   const running = goals.filter((g) => g.status === "running").length;
+  const paused = goals.filter((g) => isPausedGoal(g)).length;
   const review = goals.filter((g) => g.status === "awaiting_review").length;
   const done = goals.filter((g) => g.status === "done").length;
   const failed = goals.filter(
     (g) => g.status === "failed" || g.status === "cancelled",
   ).length;
-  const draft = goals.length - running - review - done - failed;
+  const draft = goals.length - running - paused - review - done - failed;
   return [
     `本对话共 ${goals.length} 个任务单。`,
     draft > 0 ? `${draft} 未开始` : null,
     running > 0 ? `${running} 进行中` : null,
+    paused > 0 ? `${paused} 等待决策` : null,
     review > 0 ? `${review} 待验收` : null,
     done > 0 ? `${done} 已完成` : null,
     failed > 0 ? `${failed} 失败/取消` : null,
@@ -118,15 +139,45 @@ export function findGoalByLocateQuery(goals: Goal[], query: string): Goal | unde
   if (!q) return undefined;
 
   const orderNo = parseWorkOrderId(q) ?? (/^\d+$/.test(q) ? Number(q) : null);
-  if (orderNo != null && orderNo > 0) {
-    return goals.find((g) => g.orderNo === orderNo);
+  if (orderNo != null && Number.isFinite(orderNo)) {
+    const byOrder = goals.find((g) => g.orderNo === orderNo);
+    if (byOrder) return byOrder;
   }
 
   const lower = q.toLowerCase();
-  return goals.find(
-    (g) =>
-      g.id === q ||
-      g.title.toLowerCase().includes(lower) ||
-      (g.orderNo > 0 && formatWorkOrderId(g.orderNo).toLowerCase() === lower),
+  return (
+    goals.find((g) => g.id === q || g.id.startsWith(q)) ??
+    goals.find((g) => g.title.toLowerCase().includes(lower))
   );
+}
+
+export function resolveResumeTarget(
+  goals: Goal[],
+  selectedGoal: Goal | null | undefined,
+  query?: string,
+): { goal: Goal } | { error: string } {
+  if (query?.trim()) {
+    const found = findGoalByLocateQuery(goals, query.trim());
+    if (!found) return { error: `未找到「${query}」对应的任务单。` };
+    if (!isPausedGoal(found) && !(found.status === "running" && found.crewStatus === "awaiting_user")) {
+      return { error: `「${found.title}」未处于暂停等待决策。` };
+    }
+    return { goal: found };
+  }
+  if (
+    selectedGoal &&
+    (isPausedGoal(selectedGoal) ||
+      (selectedGoal.status === "running" && selectedGoal.crewStatus === "awaiting_user"))
+  ) {
+    return { goal: selectedGoal };
+  }
+  const paused = goals.filter(
+    (g) =>
+      isPausedGoal(g) || (g.status === "running" && g.crewStatus === "awaiting_user"),
+  );
+  if (paused.length === 1) return { goal: paused[0]! };
+  if (paused.length === 0) return { error: "当前没有暂停等待决策的任务。" };
+  return {
+    error: `有 ${paused.length} 个暂停任务，请指定：/resume WO-编号 [决策]`,
+  };
 }

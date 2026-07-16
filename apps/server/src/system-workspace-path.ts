@@ -2,16 +2,16 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Settings } from "@openx/shared";
 import { OPENX_MCP_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
-import { OPENX_DIR } from "./paths.js";
+import { getOpenxHome } from "./paths.js";
 import { normalizeWorkspaceRootForStorage } from "./workspace-path.js";
 import { ensureWorkspaceSkillsLink } from "./workspace-skills-link.js";
 import { ensureWorkspaceAgentsLink } from "./workspace-agents-link.js";
 import { syncWorkspaceMcpJson } from "./workspace-mcp-json.js";
 import { getProjectById, updateProject } from "./db.js";
 
-/** 默认系统工程目录：~/.openx/workspace */
+/** 默认系统工程目录：OPENX_HOME/workspace */
 export function defaultSystemWorkspacePath(): string {
-  return join(OPENX_DIR, "workspace");
+  return join(getOpenxHome(), "workspace");
 }
 
 /** 解析系统工程工作目录（调度台、系统任务、Skills/MCP 链接） */

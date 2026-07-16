@@ -393,55 +393,6 @@ export function resolveCol0SpanTier(preview: {
   });
 }
 
-function seamExpandTier(preview: SeamResizePreview): 1 | 2 | 3 {
-  if (preview.commitSpan != null) return preview.commitSpan;
-  return preview.commitLeftWide ? 2 : 1;
-}
-
-function pickPeakSeamPreview(
-  prev: SeamResizePreview,
-  next: SeamResizePreview,
-): SeamResizePreview {
-  const prevTier = seamExpandTier(prev);
-  const nextTier = seamExpandTier(next);
-  if (nextTier !== prevTier) return nextTier > prevTier ? next : prev;
-  return next.boundaryX >= prev.boundaryX ? next : prev;
-}
-
-function pickMinSeamPreview(
-  prev: SeamResizePreview,
-  next: SeamResizePreview,
-): SeamResizePreview {
-  const prevTier = seamExpandTier(prev);
-  const nextTier = seamExpandTier(next);
-  if (nextTier !== prevTier) return nextTier < prevTier ? next : prev;
-  return next.boundaryX <= prev.boundaryX ? next : prev;
-}
-
-export { pickPeakSeamPreview, pickMinSeamPreview };
-
-/** 松手提交：扩宽取 peak、缩窄取 min，避免松手回弹丢档位 */
-export function pickSeamCommitPreview(
-  startPreview: SeamResizePreview,
-  minPreview: SeamResizePreview,
-  maxPreview: SeamResizePreview,
-  releasePreview: SeamResizePreview | null,
-): SeamResizePreview {
-  const release = releasePreview ?? maxPreview;
-  const startTier = seamExpandTier(startPreview);
-  const releaseTier = seamExpandTier(release);
-  const minTier = seamExpandTier(minPreview);
-  const maxTier = seamExpandTier(maxPreview);
-
-  if (releaseTier < startTier || (releaseTier === startTier && minTier < startTier)) {
-    return minTier < startTier ? minPreview : release;
-  }
-  if (releaseTier > startTier || (releaseTier === startTier && maxTier > startTier)) {
-    return maxTier > startTier ? maxPreview : release;
-  }
-  return release;
-}
-
 /** 将贴边拖拽的指针 X 映射到接缝坐标（修正左右反向） */
 export function resolveSeamPointerX(params: {
   seam: PinSeam;
@@ -791,21 +742,10 @@ function isWidgetWide(layout: PinDesktopLayout, widget: PinWidgetId): boolean {
   return normalizeLayout(layout).wide[col];
 }
 
-/** boundary-0 右拖：左/中均为单列且第三栏空时，优先扩第二栏（避免误扩第一栏把中列挤到第三栏） */
-function preferBoundary0MiddleExpand(
-  norm: PinDesktopLayout,
-  seam: PinSeam,
-  target: 1 | 2 | 3,
-): PinDesktopLayout | null {
-  if (target !== 2) return null;
-  if (seam.boundary !== 0 || seam.leftCol !== 0 || !seam.rightWidget) return null;
-  if (norm.wide[0] || norm.wide[1]) return null;
-  if (isWidgetWide(norm, seam.rightWidget)) return null;
-  if (widgetLogicalCol(norm, seam.rightWidget) !== 1) return null;
-  if (norm.cols[2] != null || norm.split[2]) return null;
-  return setPinSpan(norm, 1, 2);
-}
-
+/**
+ * 112 → 122：宽左卡缩回 1 列时，右侧单卡应扩成 2 列占满腾出的中栏，
+ * 而不是只把右卡拉回中栏留下扩展槽（120）。
+ */
 /** 提交接缝改宽：任意档位变更统一走 setWidgetSpan */
 export function applySeamResizeCommit(
   layout: PinDesktopLayout,
@@ -837,8 +777,6 @@ export function applySeamResizeCommit(
       });
       const current = widgetColumnSpan(norm, seam.leftWidget);
       if (target !== current) {
-        const middleExpand = preferBoundary0MiddleExpand(norm, seam, target);
-        if (middleExpand) return middleExpand;
         return setWidgetSpan(norm, seam.leftWidget, target);
       }
       return norm;
@@ -854,8 +792,6 @@ export function applySeamResizeCommit(
         };
 
   if (commit.commitLeftWide && seam.boundary === 0 && norm.cols[seam.leftCol] === seam.leftWidget) {
-    const middleExpand = preferBoundary0MiddleExpand(norm, seam, 2);
-    if (middleExpand) return middleExpand;
     return setPinSpan(norm, seam.leftCol, 2);
   }
 
@@ -930,19 +866,6 @@ export function applySeamResizeCommit(
     ) {
       const expanded = setWidgetSpan(norm, seam.leftWidget, 2);
       if (widgetColumnSpan(expanded, seam.leftWidget) >= 2) return expanded;
-    }
-    if (
-      seam.boundary === 0 &&
-      seam.leftCol === 0 &&
-      seam.rightWidget &&
-      widgetLogicalCol(norm, seam.rightWidget) === 1 &&
-      !norm.wide[0] &&
-      !norm.wide[1] &&
-      norm.cols[2] == null &&
-      ((preview.commitSpan ?? 0) >= 2 || preview.commitLeftWide)
-    ) {
-      const expanded = preferBoundary0MiddleExpand(norm, seam, 2);
-      if (expanded?.wide[1]) return expanded;
     }
   }
 

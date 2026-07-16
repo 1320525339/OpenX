@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { join } from "node:path";
 
 export type OpenxApiCallInput = {
   baseUrl: string;
@@ -40,7 +40,12 @@ export function resolveInternalToken(explicit?: string): string | undefined {
   if (process.env.OPENX_INTERNAL_TOKEN?.trim()) {
     return process.env.OPENX_INTERNAL_TOKEN.trim();
   }
-  const tokenPath = join(homedir(), ".openx", "internal.token");
+  const home =
+    process.env.OPENX_HOME?.trim() ||
+    (process.env.OPENX_CONFIG_PATH?.trim()
+      ? dirname(process.env.OPENX_CONFIG_PATH.trim())
+      : join(homedir(), ".openx"));
+  const tokenPath = join(home, "internal.token");
   if (existsSync(tokenPath)) {
     const token = readFileSync(tokenPath, "utf8").trim();
     if (token) return token;

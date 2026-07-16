@@ -25,6 +25,14 @@ import {
   SYSTEM_MAIN_CONVERSATION_ID,
   SYSTEM_PROJECT_ID,
 } from "@openx/shared";
+import type { RoundReplyStreamState } from "./round-streams";
+import {
+  applyChatReplyCompleted,
+  applyChatReplyDelta,
+  applyChatReplyFailed,
+  applyChatReplyStarted,
+  clearRoundStreamsForConversation,
+} from "./round-streams";
 import {
   api,
   connectEvents,
@@ -47,8 +55,10 @@ import {
   isIslandCatchupMode,
   requestIsland,
   setIslandCatchupMode,
+  syncAttentionsFromServer,
 } from "./island-queue";
 import { goalNeedsUserAttention } from "./goal-attention";
+import { runTaskAction } from "./task-action";
 import type { AppView } from "../components/SideNav";
 
 export type ExecutorScope = "all" | string;
@@ -69,6 +79,7 @@ export type CoachReplyEvent = {
   intent?: CoachIntent;
   refined?: RefinedGoal;
   clarify?: import("@openx/shared").CoachClarifyPayload;
+  suggestRefine?: boolean;
   meta?: { llmError?: string; quotaExceeded?: boolean };
 };
 
@@ -77,6 +88,8 @@ export type CoachStreamState = {
   streamId: string;
   text: string;
 };
+
+export type { RoundReplyStreamState };
 
 type AppState = {
   view: AppView;
@@ -91,6 +104,10 @@ type AppState = {
   executors: ExecutorInfo[];
   coachRuntime: ModelRuntime | null;
   islandPayload: DynamicIslandPayload | null;
+  /** 当前灵动岛展示令牌，与 island-queue displayToken 对齐 */
+  islandDisplayToken: number | null;
+  /** 服务端 open attention 数量（徽章） */
+  openAttentionCount: number;
   sseStatus: SseStatus;
   logs: LogEntry[];
   runs: Record<string, GoalRunState>;
@@ -105,6 +122,8 @@ type AppState = {
   coachReplyEvent: CoachReplyEvent | null;
   coachStream: CoachStreamState | null;
   coachMessageEvent: CoachMessageRecord | null;
+  /** 圆桌多路流：key = messageId */
+  roundStreams: Record<number, RoundReplyStreamState>;
   detailGoalId: string | null;
 };
 
@@ -126,8 +145,9 @@ type Action =
   | { type: "set_settings"; settings: SettingsResponse }
   | { type: "set_executors"; executors: ExecutorInfo[] }
   | { type: "set_coach_runtime"; runtime: ModelRuntime | null }
-  | { type: "show_island"; payload: DynamicIslandPayload }
+  | { type: "show_island"; payload: DynamicIslandPayload; token: number }
   | { type: "dismiss_island" }
+  | { type: "set_open_attention_count"; count: number }
   | { type: "set_sse_status"; status: SseStatus }
   | { type: "append_log"; log: LogEntry }
   | { type: "set_runs"; updater: (prev: Record<string, GoalRunState>) => Record<string, GoalRunState> }
@@ -157,6 +177,46 @@ type Action =
       streamId: string;
     }
   | { type: "coach_message"; message: CoachMessageRecord }
+  | {
+      type: "chat_reply_started";
+      event: {
+        conversationId: string;
+        roundId: string;
+        messageId: number;
+        speakerId: string;
+        streamId: string;
+      };
+    }
+  | {
+      type: "chat_reply_delta";
+      event: {
+        conversationId: string;
+        roundId: string;
+        messageId: number;
+        speakerId: string;
+        streamId: string;
+        delta: string;
+      };
+    }
+  | {
+      type: "chat_reply_completed";
+      event: {
+        conversationId: string;
+        messageId: number;
+        streamId: string;
+        text: string;
+      };
+    }
+  | {
+      type: "chat_reply_failed";
+      event: {
+        conversationId: string;
+        messageId: number;
+        streamId: string;
+        error: string;
+      };
+    }
+  | { type: "clear_round_streams"; conversationId?: string }
   | { type: "open_goal_detail"; id: string }
   | { type: "close_goal_detail" }
   | { type: "trim_runtime_cache" };
@@ -194,6 +254,8 @@ const initialState: AppState = {
   executors: [],
   coachRuntime: null,
   islandPayload: null,
+  islandDisplayToken: null,
+  openAttentionCount: 0,
   sseStatus: "reconnecting",
   logs: [],
   runs: {},
@@ -208,6 +270,7 @@ const initialState: AppState = {
   coachReplyEvent: null,
   coachStream: null,
   coachMessageEvent: null,
+  roundStreams: {},
   detailGoalId: null,
 };
 
@@ -246,7 +309,7 @@ function reducer(state: AppState, action: Action): AppState {
         view: "console",
         selectedProjectId: action.projectId,
         selectedConversationId: action.conversationId,
-        statusFilter: "all",
+        statusFilter: "running",
         detailGoalId: null,
         tasksEditMode: false,
         tasksSelectedIds: new Set(),
@@ -310,14 +373,25 @@ function reducer(state: AppState, action: Action): AppState {
       const convIds = new Set(
         state.conversations.filter((c) => c.projectId === action.projectId).map((c) => c.id),
       );
+      const removedGoalIds = new Set(
+        state.goals.filter((g) => convIds.has(g.conversationId)).map((g) => g.id),
+      );
       const expanded = new Set(state.expandedProjectIds);
       expanded.delete(action.projectId);
+      const tasksSelectedIds = new Set(
+        [...state.tasksSelectedIds].filter((id) => !removedGoalIds.has(id)),
+      );
       return {
         ...state,
         projects: state.projects.filter((p) => p.id !== action.projectId),
         conversations: state.conversations.filter((c) => c.projectId !== action.projectId),
         goals: state.goals.filter((g) => !convIds.has(g.conversationId)),
         expandedProjectIds: expanded,
+        tasksSelectedIds,
+        selectedId: removedGoalIds.has(state.selectedId ?? "") ? null : state.selectedId,
+        detailGoalId: removedGoalIds.has(state.detailGoalId ?? "")
+          ? null
+          : state.detailGoalId,
         selectedProjectId:
           state.selectedProjectId === action.projectId ? null : state.selectedProjectId,
         selectedConversationId: convIds.has(state.selectedConversationId ?? "")
@@ -373,9 +447,15 @@ function reducer(state: AppState, action: Action): AppState {
     case "set_coach_runtime":
       return { ...state, coachRuntime: action.runtime };
     case "show_island":
-      return { ...state, islandPayload: action.payload };
+      return {
+        ...state,
+        islandPayload: action.payload,
+        islandDisplayToken: action.token,
+      };
     case "dismiss_island":
-      return { ...state, islandPayload: null };
+      return { ...state, islandPayload: null, islandDisplayToken: null };
+    case "set_open_attention_count":
+      return { ...state, openAttentionCount: action.count };
     case "set_sse_status":
       return { ...state, sseStatus: action.status };
     case "append_log":
@@ -441,6 +521,34 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "coach_message":
       return { ...state, coachMessageEvent: action.message };
+    case "chat_reply_started":
+      return {
+        ...state,
+        roundStreams: applyChatReplyStarted(state.roundStreams, action.event),
+      };
+    case "chat_reply_delta":
+      return {
+        ...state,
+        roundStreams: applyChatReplyDelta(state.roundStreams, action.event),
+      };
+    case "chat_reply_completed":
+      return {
+        ...state,
+        roundStreams: applyChatReplyCompleted(state.roundStreams, action.event),
+      };
+    case "chat_reply_failed":
+      return {
+        ...state,
+        roundStreams: applyChatReplyFailed(state.roundStreams, action.event),
+      };
+    case "clear_round_streams":
+      return {
+        ...state,
+        roundStreams: clearRoundStreamsForConversation(
+          state.roundStreams,
+          action.conversationId,
+        ),
+      };
     case "coach_reply":
       return {
         ...state,
@@ -480,20 +588,26 @@ type AppContextValue = {
   state: AppState;
   dispatch: React.Dispatch<Action>;
   refreshGoals: () => Promise<void>;
+  /** 创建/本地补丁后立即写入；并作废飞行中的 refreshGoals */
+  upsertGoals: (goals: Goal[]) => void;
   refreshProjects: () => Promise<void>;
   refreshMeta: () => Promise<void>;
   refreshExecutors: () => Promise<void>;
   createProject: (workspaceDir: string) => Promise<Project | null>;
-  createConversation: (projectId: string) => Promise<Conversation | null>;
+  createConversation: (
+    projectId: string,
+    opts?: { mode?: "foreman" | "roundtable"; title?: string },
+  ) => Promise<Conversation | null>;
+  enableRoundtable: (conversationId: string) => Promise<Conversation | null>;
   deleteProject: (projectId: string) => Promise<boolean>;
   deleteConversation: (conversationId: string) => Promise<boolean>;
   saveWorkspace: (path: string) => Promise<void>;
   saveSystemWorkspace: (path: string) => Promise<void>;
   goalActions: {
-    onApprove: (id: string) => Promise<void>;
-    onRework: (id: string, reason?: string) => Promise<void>;
-    onStart: (id: string) => Promise<void>;
-    onCancel: (id: string) => Promise<void>;
+    onApprove: (id: string) => Promise<boolean>;
+    onRework: (id: string, reason?: string) => Promise<boolean>;
+    onStart: (id: string) => Promise<boolean>;
+    onCancel: (id: string) => Promise<boolean>;
   };
   handleTasksBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
   filteredGoals: Goal[];
@@ -535,20 +649,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const goalsSnapshotRef = useRef(new Map<string, Goal>());
   const hydratedRunIdsRef = useRef(new Set<string>());
   const restoredConvRef = useRef(false);
+  /** 全量 refresh 代次；upsertGoals 时递增以丢弃飞行中的旧列表 */
+  const refreshGoalsGenRef = useRef(0);
 
   const refreshGoals = useCallback(async () => {
+    const gen = ++refreshGoalsGenRef.current;
     try {
       const { goals } = await api.getGoals();
+      if (gen !== refreshGoalsGenRef.current) return;
       for (const goal of goals) {
         goalsSnapshotRef.current.set(goal.id, goal);
       }
       dispatch({ type: "set_goals", goals });
     } catch (err) {
+      if (gen !== refreshGoalsGenRef.current) return;
       dispatch({
         type: "set_load_error",
         error: err instanceof Error ? err.message : "加载目标失败",
       });
     }
+  }, []);
+
+  const upsertGoals = useCallback((goals: Goal[]) => {
+    if (goals.length === 0) return;
+    for (const goal of goals) {
+      goalsSnapshotRef.current.set(goal.id, goal);
+      dispatch({ type: "patch_goal", goal });
+    }
+    // 作废在 upsert 之前起飞的全量列表请求，避免覆盖刚写入的任务
+    refreshGoalsGenRef.current += 1;
   }, []);
 
   const refreshExecutors = useCallback(async () => {
@@ -741,9 +870,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const createConversation = useCallback(async (projectId: string) => {
+  const createConversation = useCallback(async (
+    projectId: string,
+    opts?: { mode?: "foreman" | "roundtable"; title?: string },
+  ) => {
     try {
-      const { conversation } = await api.createConversation(projectId);
+      const { conversation } = await api.createConversation(projectId, opts);
       dispatch({ type: "upsert_conversation", conversation });
       dispatch({
         type: "open_conversation",
@@ -754,6 +886,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       notifyIsland(
         `创建对话失败：${err instanceof Error ? err.message : String(err)}`,
+        { severity: "error" },
+      );
+      return null;
+    }
+  }, []);
+
+  const enableRoundtable = useCallback(async (conversationId: string) => {
+    try {
+      const { conversation } = await api.enableRoundtable(conversationId);
+      dispatch({ type: "upsert_conversation", conversation });
+      return conversation;
+    } catch (err) {
+      notifyIsland(
+        `启用圆桌失败：${err instanceof Error ? err.message : String(err)}`,
         { severity: "error" },
       );
       return null;
@@ -833,15 +979,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     bindIslandQueueHandlers({
-      show: (payload) => dispatch({ type: "show_island", payload }),
-      update: (payload) => dispatch({ type: "show_island", payload }),
+      show: (payload, token) => dispatch({ type: "show_island", payload, token }),
+      update: (payload, token) => dispatch({ type: "show_island", payload, token }),
       dismiss: () => dispatch({ type: "dismiss_island" }),
     });
     setIslandCatchupMode(true);
     void hydrateIslandSeenFromServer();
 
     return connectEvents({
-      onCatchupComplete: () => setIslandCatchupMode(false),
+      onCatchupComplete: () => {
+        setIslandCatchupMode(false);
+        void syncAttentionsFromServer((count) =>
+          dispatch({ type: "set_open_attention_count", count }),
+        );
+      },
       onEvent: (event: SseEvent) => {
         if (event.type === "goal.deleted") {
           goalsSnapshotRef.current.delete(event.goalId);
@@ -896,6 +1047,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (event.type === "island.push") {
           requestIsland(event.payload);
         }
+        if (event.type === "attention.changed") {
+          if (event.state === "open") {
+            void syncAttentionsFromServer((count) =>
+              dispatch({ type: "set_open_attention_count", count }),
+            );
+          } else {
+            dispatch({
+              type: "set_open_attention_count",
+              count: Math.max(0, stateRef.current.openAttentionCount - 1),
+            });
+          }
+        }
         if (event.type === "log.append") {
           dispatch({ type: "append_log", log: event });
         }
@@ -920,6 +1083,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (event.type === "coach.message") {
           dispatch({ type: "coach_message", message: event.message });
         }
+        if (event.type === "chat.reply.started") {
+          dispatch({
+            type: "chat_reply_started",
+            event: {
+              conversationId: event.conversationId,
+              roundId: event.roundId,
+              messageId: event.messageId,
+              speakerId: event.speakerId,
+              streamId: event.streamId,
+            },
+          });
+        }
+        if (event.type === "chat.reply.delta") {
+          dispatch({
+            type: "chat_reply_delta",
+            event: {
+              conversationId: event.conversationId,
+              roundId: event.roundId,
+              messageId: event.messageId,
+              speakerId: event.speakerId,
+              streamId: event.streamId,
+              delta: event.delta,
+            },
+          });
+        }
+        if (event.type === "chat.reply.completed") {
+          dispatch({
+            type: "chat_reply_completed",
+            event: {
+              conversationId: event.conversationId,
+              messageId: event.messageId,
+              streamId: event.streamId,
+              text: event.text,
+            },
+          });
+        }
+        if (event.type === "chat.reply.failed") {
+          dispatch({
+            type: "chat_reply_failed",
+            event: {
+              conversationId: event.conversationId,
+              messageId: event.messageId,
+              streamId: event.streamId,
+              error: event.error,
+            },
+          });
+        }
+        if (
+          event.type === "chat.peer_request.created" ||
+          event.type === "chat.peer_request.resolved"
+        ) {
+          if (event.message) {
+            dispatch({ type: "coach_message", message: event.message });
+          }
+        }
+        if (event.type === "chat.round.cancelled") {
+          dispatch({
+            type: "clear_round_streams",
+            conversationId: event.conversationId,
+          });
+        }
         if (event.type === "coach.reply") {
           dispatch({
             type: "coach_reply",
@@ -943,8 +1167,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           );
         }
       },
-      onGap: () => {
-        void refreshGoals();
+      onGap: async () => {
+        setIslandCatchupMode(true);
+        await Promise.all([refreshGoals(), refreshProjects(), reconcileActiveRuns()]);
+        await syncAttentionsFromServer((count) =>
+          dispatch({ type: "set_open_attention_count", count }),
+        );
       },
       onOpen: () => dispatch({ type: "set_sse_status", status: "connected" }),
       onError: () => dispatch({ type: "set_sse_status", status: "reconnecting" }),
@@ -1042,49 +1270,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const goalActions = useMemo(
     () => ({
       onApprove: async (id: string) => {
-        try {
-          await api.approveGoal(id);
-        } catch (err) {
-          notifyIsland(
-            `确认失败：${err instanceof Error ? err.message : String(err)}`,
-            { severity: "error" },
-          );
+        const result = await runTaskAction({ type: "approve", goalId: id });
+        if (!result.ok) {
+          notifyIsland(`确认失败：${result.error}`, { severity: "error" });
         }
+        return result.ok;
       },
       onRework: async (id: string, reason?: string) => {
-        try {
-          await api.reworkGoal(id, reason);
-        } catch (err) {
-          notifyIsland(
-            `返工失败：${err instanceof Error ? err.message : String(err)}`,
-            { severity: "error" },
-          );
+        const result = await runTaskAction({ type: "rework", goalId: id, reason });
+        if (!result.ok) {
+          notifyIsland(`返工失败：${result.error}`, { severity: "error" });
         }
+        return result.ok;
       },
       onStart: async (id: string) => {
-        try {
-          const goal = state.goals.find((g) => g.id === id);
-          if (goal?.status === "failed") {
-            await api.retryGoal(id);
-          } else {
-            await api.startGoal(id);
-          }
-        } catch (err) {
-          notifyIsland(
-            `启动失败：${err instanceof Error ? err.message : String(err)}`,
-            { severity: "error" },
-          );
+        const goal = state.goals.find((g) => g.id === id);
+        const result = await runTaskAction({
+          type: "start",
+          goalId: id,
+          goalStatus: goal?.status,
+        });
+        if (!result.ok) {
+          notifyIsland(`启动失败：${result.error}`, { severity: "error" });
         }
+        return result.ok;
       },
       onCancel: async (id: string) => {
-        try {
-          await api.cancelGoal(id);
-        } catch (err) {
-          notifyIsland(
-            `取消失败：${err instanceof Error ? err.message : String(err)}`,
-            { severity: "error" },
-          );
+        const result = await runTaskAction({ type: "cancel", goalId: id });
+        if (!result.ok) {
+          notifyIsland(`取消失败：${result.error}`, { severity: "error" });
         }
+        return result.ok;
       },
     }),
     [state.goals],
@@ -1172,7 +1388,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectedConversation = state.conversations.find(
     (c) => c.id === state.selectedConversationId,
   );
-  const inboxBadgeCount = state.goals.filter(goalNeedsUserAttention).length;
+  const inboxBadgeCount = Math.max(
+    state.goals.filter(goalNeedsUserAttention).length,
+    state.openAttentionCount,
+  );
   const consoleBadgeCount = useMemo(() => {
     const systemActive = state.goals.filter(
       (g) =>
@@ -1195,11 +1414,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     state,
     dispatch,
     refreshGoals,
+    upsertGoals,
     refreshProjects,
     refreshMeta,
     refreshExecutors,
     createProject,
     createConversation,
+    enableRoundtable,
     deleteProject,
     deleteConversation,
     saveWorkspace,

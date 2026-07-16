@@ -99,19 +99,13 @@ describe("oxsp", () => {
 
 
   it("resolves dock templates", () => {
-
     expect(OXSP_DOCK_TEMPLATES.some((t) => t.id === "web")).toBe(false);
-
-    expect(resolveTemplateConfig("demo-game")?.kind).toBe("browser");
-
+    expect(OXSP_DOCK_TEMPLATES.some((t) => t.id === "demo-game")).toBe(false);
+    expect(OXSP_DOCK_TEMPLATES.some((t) => t.id === "genshin-web")).toBe(false);
     const browser = resolveTemplateConfig("browser");
-
     expect(browser?.kind).toBe("browser");
-
     expect(browser && "startUrl" in browser ? browser.startUrl : undefined).toBeUndefined();
-
     expect(OXSP_DOCK_TEMPLATES.some((t) => t.id === "markdown")).toBe(false);
-
   });
 
 

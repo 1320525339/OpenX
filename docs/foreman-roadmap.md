@@ -117,7 +117,8 @@ flowchart LR
 ### WS2
 
 - [ ] 执行 prompt 含验收标准与约束块
-- [ ] ACP newSession/loadSession 收到非空 mcpServers（若已配置）
+- [x] ACP newSession/loadSession 收到非空 mcpServers（若已配置）
+- [x] ACP loadSession 续跑注入 OpenX 压缩 transcript（crew + summaries + logs）
 - [ ] 创建含 subGoals 且 autoStart 时子任务也启动
 
 ### WS3

@@ -9,12 +9,18 @@ export { ExecutorIdSchema, type ExecutorId } from "./executor.js";
 export const GoalStatusSchema = z.enum([
   "draft",
   "running",
+  "paused",
   "awaiting_review",
   "done",
   "failed",
   "cancelled",
 ]);
 export type GoalStatus = z.infer<typeof GoalStatusSchema>;
+
+/** 正式暂停态：等待开发商决策（权威字段为 status，非 crewStatus 组合） */
+export function isPausedGoal(goal: { status: GoalStatus }): boolean {
+  return goal.status === "paused";
+}
 
 export const EffectStatusSchema = z.enum(["approved", "rework"]);
 export type EffectStatus = z.infer<typeof EffectStatusSchema>;
@@ -60,6 +66,8 @@ export const GoalSchema = z.object({
   crewSessionId: z.string().optional(),
   /** 施工队 ↔ 工头 协作子状态 */
   crewStatus: CrewStatusSchema.optional(),
+  /** 乐观锁：每次持久化递增，防陈旧覆盖（缺省按 0） */
+  revision: z.number().int().nonnegative().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -133,6 +141,8 @@ export const UpdateGoalSchema = z.object({
   executorId: ExecutorIdSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
   priority: GoalPrioritySchema.optional(),
+  /** 乐观锁基线；传入时与当前 revision 不一致则 409 */
+  baseRevision: z.number().int().nonnegative().optional(),
 });
 
 export const GOAL_PRIORITY_WEIGHT: Record<GoalPriority, number> = {
@@ -159,7 +169,8 @@ export type BatchGoalsInput = z.infer<typeof BatchGoalsSchema>;
 export function canTransition(from: GoalStatus, to: GoalStatus): boolean {
   const allowed: Record<GoalStatus, GoalStatus[]> = {
     draft: ["running", "cancelled"],
-    running: ["awaiting_review", "failed", "cancelled"],
+    running: ["paused", "awaiting_review", "failed", "cancelled"],
+    paused: ["running", "cancelled"],
     awaiting_review: ["done", "running", "cancelled"],
     done: [],
     failed: ["running", "cancelled"],
@@ -171,6 +182,7 @@ export function canTransition(from: GoalStatus, to: GoalStatus): boolean {
 export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
   draft: "先放着",
   running: "正在推进",
+  paused: "等待决策",
   awaiting_review: "等你确认",
   done: "已完成",
   failed: "卡住了",

@@ -1,10 +1,11 @@
 import { z } from "zod";
 
-/** 执行器派单权限：只读侦察 / 写前确认 / 完全授权 */
+/** 执行器派单权限：只读侦察 / 写前确认 / 完全授权 / 无人值守 */
 export const DispatchPermissionModeSchema = z.enum([
   "read_only",
   "ask_write",
   "full",
+  "unattended",
 ]);
 export type DispatchPermissionMode = z.infer<typeof DispatchPermissionModeSchema>;
 
@@ -14,6 +15,12 @@ export const DispatchContextSchema = z.object({
   mcpIds: z.array(z.string()).optional(),
   skillIds: z.array(z.string()).optional(),
   permissionMode: DispatchPermissionModeSchema.optional(),
+  /** 可选工具白名单（与 permissionMode 基线取交集） */
+  allowedTools: z.array(z.string()).optional(),
+  /** 本目标覆盖单轮工具调用上限 */
+  maxToolCalls: z.number().int().min(1).max(500).optional(),
+  /** 本目标大致 token 预算（提示词/用量护栏） */
+  runBudgetTokens: z.number().int().min(1_000).max(2_000_000).optional(),
 });
 export type DispatchContext = z.infer<typeof DispatchContextSchema>;
 
@@ -25,11 +32,17 @@ export function normalizeDispatchContext(
   const mcpIds = input.mcpIds?.map((id) => id.trim()).filter(Boolean);
   const skillIds = input.skillIds?.map((id) => id.trim()).filter(Boolean);
   const permissionMode = input.permissionMode;
+  const allowedTools = input.allowedTools?.map((t) => t.trim()).filter(Boolean);
+  const maxToolCalls = input.maxToolCalls;
+  const runBudgetTokens = input.runBudgetTokens;
   if (
     !agentId &&
     !mcpIds?.length &&
     !skillIds?.length &&
-    !permissionMode
+    !permissionMode &&
+    !allowedTools?.length &&
+    maxToolCalls == null &&
+    runBudgetTokens == null
   ) {
     return undefined;
   }
@@ -38,6 +51,9 @@ export function normalizeDispatchContext(
     ...(mcpIds?.length ? { mcpIds } : {}),
     ...(skillIds?.length ? { skillIds } : {}),
     ...(permissionMode ? { permissionMode } : {}),
+    ...(allowedTools?.length ? { allowedTools } : {}),
+    ...(maxToolCalls != null ? { maxToolCalls } : {}),
+    ...(runBudgetTokens != null ? { runBudgetTokens } : {}),
   };
 }
 
@@ -52,6 +68,9 @@ export function mergeDispatchContext(
     if (part.mcpIds?.length) merged.mcpIds = part.mcpIds;
     if (part.skillIds?.length) merged.skillIds = part.skillIds;
     if (part.permissionMode) merged.permissionMode = part.permissionMode;
+    if (part.allowedTools?.length) merged.allowedTools = part.allowedTools;
+    if (part.maxToolCalls != null) merged.maxToolCalls = part.maxToolCalls;
+    if (part.runBudgetTokens != null) merged.runBudgetTokens = part.runBudgetTokens;
   }
   return normalizeDispatchContext(merged);
 }
@@ -77,6 +96,11 @@ export const DISPATCH_PERMISSION_PROMPTS: Record<
     "【派单权限 · 完全授权】",
     "- 可按任务需要读写代码与配置，仍须遵守验收标准与约束条件",
   ].join("\n"),
+  unattended: [
+    "【派单权限 · 无人值守】",
+    "- 等同完全授权，且无需逐次确认工具权限（适合本地无人值守长任务）",
+    "- 仍须遵守验收标准与约束条件；危险操作应在结果摘要中说明",
+  ].join("\n"),
 };
 
 export function buildDispatchPermissionBlock(
@@ -101,5 +125,9 @@ export const DISPATCH_PERMISSION_LABELS: Record<
   full: {
     label: "完全授权",
     description: "可按任务需要读写代码与配置",
+  },
+  unattended: {
+    label: "无人值守",
+    description: "跳过交互权限确认，适合本地长任务",
   },
 };

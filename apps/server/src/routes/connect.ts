@@ -13,13 +13,18 @@ import {
   isGoalCancelledForConnect,
 } from "../connect-store.js";
 import { getOrCreateInternalToken } from "../internal-auth.js";
-import { listGoals } from "../db.js";
+import {
+  getLatestDispatchReceipt,
+  insertTokenUsageEvent,
+  listGoals,
+  getWorkspaceDirForConversation,
+} from "../db.js";
 import { claimOneConnectPoolGoal } from "../connect-pool.js";
 import { loadSettings } from "../settings-store.js";
 import { resolveSystemWorkspaceRoot } from "../system-workspace-path.js";
 import { enrichGoalWithSkills, resolveExecutorSkills } from "../skills-resolve.js";
-import { getWorkspaceDirForConversation } from "../db.js";
 import { resolveWorkspaceRoot } from "../workspace-path.js";
+
 export const connectRoutes = new Hono();
 
 connectRoutes.delete("/by-executor/:executorId", (c) => {
@@ -46,6 +51,7 @@ connectRoutes.post("/", async (c) => {
       fail: `${base}/internal/goals/{goalId}/fail`,
       log: `${base}/internal/goals/{goalId}/log`,
       runEvent: `${base}/internal/goals/{goalId}/run-event`,
+      ackReceipt: `${base}/internal/dispatch-receipts/ack`,
     },
   });
 });
@@ -59,6 +65,17 @@ connectRoutes.post("/:connectionId/heartbeat", async (c) => {
   const conn = touchConnection(connectionId);
   if (!conn) return c.json({ error: "Not connected" }, 404);
 
+  if (body.tokenUsage) {
+    insertTokenUsageEvent({
+      connectionId,
+      goalId: body.tokenUsage.goalId,
+      runId: body.tokenUsage.runId,
+      model: body.tokenUsage.model,
+      inputTokens: body.tokenUsage.inputTokens,
+      outputTokens: body.tokenUsage.outputTokens,
+    });
+  }
+
   const settings = loadSettings();
 
   const autoClaimPool = body.autoClaimPool !== false;
@@ -70,12 +87,18 @@ connectRoutes.post("/:connectionId/heartbeat", async (c) => {
     .filter((g) => g.executorId === conn.executorId)
     .filter((g) => !isGoalCancelledForConnect(g.id))
     .map((g) => {
-    const projectDir = getWorkspaceDirForConversation(g.conversationId);
-    const workspaceRoot = resolveWorkspaceRoot(
-      projectDir ?? resolveSystemWorkspaceRoot(settings),
-    );
-    return enrichGoalWithSkills(g, settings, workspaceRoot);
-  });
+      const projectDir = getWorkspaceDirForConversation(g.conversationId);
+      const workspaceRoot = resolveWorkspaceRoot(
+        projectDir ?? resolveSystemWorkspaceRoot(settings),
+      );
+      const enriched = enrichGoalWithSkills(g, settings, workspaceRoot);
+      const receipt = getLatestDispatchReceipt(g.id);
+      return {
+        goal: enriched,
+        receiptId: receipt?.receiptId,
+        runId: receipt?.runId,
+      };
+    });
 
   const { hints: enabledSkills } = resolveExecutorSkills(conn.executorId, settings);
 
@@ -103,7 +126,12 @@ connectRoutes.post("/:connectionId/claim", async (c) => {
   if (!claimed) {
     return c.json({ error: "No pool goal available to claim" }, 404);
   }
-  return c.json({ goal: claimed });
+  const receipt = getLatestDispatchReceipt(claimed.id);
+  return c.json({
+    goal: claimed,
+    receiptId: receipt?.receiptId,
+    runId: receipt?.runId,
+  });
 });
 
 connectRoutes.delete("/:connectionId", (c) => {

@@ -62,7 +62,7 @@ export function CrewDialogueSummary({
       <div className={rootClass}>
         {crewStatus === "awaiting_user" ? (
           <p className="crew-dialogue-embedded-hint">
-            工头等待你的决策。请直接在输入框回复，工头会转告施工队继续执行。
+            工头等待你的决策。请点选任务后使用「回复并继续」，或输入 /resume WO-编号 决策内容。
           </p>
         ) : null}
         {error ? <p className="crew-dialogue-embedded-hint warn">{error}</p> : null}
@@ -104,7 +104,7 @@ export function CrewDialogueSummary({
     <div className={rootClass}>
       {crewStatus === "awaiting_user" ? (
         <p className="settings-hint settings-hint-warn crew-dialogue-escalation">
-          工头等待你的决策。请直接在输入框回复，工头会转告施工队继续执行。
+          工头等待你的决策。请点选任务后使用「回复并继续」，或输入 /resume WO-编号 决策内容。
         </p>
       ) : null}
       {error ? <p className="settings-hint settings-hint-warn">{error}</p> : null}

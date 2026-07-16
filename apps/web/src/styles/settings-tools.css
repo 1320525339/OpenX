@@ -14,9 +14,232 @@
   padding-right: 0.25rem;
 }
 
-.tools-section {
-  margin-bottom: 1.65rem;
+.btn.small {
+  padding: 0.2rem 0.55rem;
+  font-size: var(--text-xs);
 }
+
+.miloco-tools .miloco-card {
+  margin-bottom: 1rem;
+}
+
+.miloco-meta-list,
+.miloco-check-list,
+.miloco-goal-list {
+  margin: 0.5rem 0 0.75rem;
+  padding-left: 1.1rem;
+  font-size: var(--text-sm);
+}
+
+.miloco-check-list li.fail {
+  color: var(--danger, #c62828);
+}
+
+.miloco-check-list li.ok {
+  color: var(--text-muted);
+}
+
+.miloco-check-id {
+  display: inline-block;
+  min-width: 7rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
+}
+
+.miloco-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.miloco-pill {
+  margin-left: 0.5rem;
+  font-size: var(--text-xs);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.miloco-pill.ok {
+  background: color-mix(in srgb, var(--success, #2e7d32) 20%, transparent);
+}
+
+.miloco-cam-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+}
+
+.miloco-cam-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.miloco-cam-did,
+.miloco-cam-room {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.miloco-cam-status.miloco-cam-ready {
+  color: var(--success, #2e7d32);
+}
+
+.miloco-cam-status.miloco-cam-warn {
+  color: var(--warn, #ed6c02);
+}
+
+.miloco-cam-status.miloco-cam-off {
+  color: var(--text-muted);
+}
+
+.miloco-layerb-guide ol {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+  font-size: var(--text-sm);
+}
+
+.miloco-goal-status {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8em;
+  margin-right: 0.35rem;
+  color: var(--text-muted);
+}
+
+.miloco-goal-status.ok {
+  color: var(--success, #2a7a4b);
+}
+
+.miloco-goal-status.fail {
+  color: var(--danger, #b33);
+}
+
+.miloco-goal-status.warn {
+  color: var(--warning, #b8860b);
+}
+
+.miloco-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.miloco-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.miloco-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.miloco-metric {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: transparent;
+  padding: 0.65rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.miloco-metric.ok {
+  border-color: color-mix(in srgb, var(--success, #2a7a4b) 40%, var(--border));
+}
+
+.miloco-metric.fail {
+  border-color: color-mix(in srgb, var(--danger, #b33) 40%, var(--border));
+}
+
+.miloco-metric strong {
+  font-size: 0.9rem;
+}
+
+.miloco-metric span {
+  font-size: 0.8rem;
+}
+
+.miloco-metric em {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.miloco-wizard-steps {
+  display: flex;
+  gap: 0.75rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.miloco-wizard-steps .active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.miloco-events-timeline {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.miloco-event-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: var(--text-sm);
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.miloco-event-lane {
+  font-size: 0.72rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.miloco-event-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.miloco-event-link {
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
 
 .tools-section-title {
   font-size: var(--text-base);

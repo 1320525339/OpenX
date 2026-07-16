@@ -31,6 +31,8 @@ import {
   getConversationById,
   getGoalById,
   getWorkspaceDirForConversation,
+  insertDispatchReceipt,
+  listCrewExchanges,
   listExecutionSummaries,
   listReviewRounds,
   listLogs,
@@ -48,7 +50,13 @@ import {
   persistForemanReview,
 } from "./crew-persist.js";
 import type { CrewDirective, CrewQuestion, ForemanTurnReviewInput } from "@openx/shared";
-import { formatCrewForemanReplyForPrompt, foremanTurnDecisionToDirective } from "@openx/shared";
+import {
+  buildResumeTranscriptBlock,
+  ensureCrewRequestId,
+  formatCrewForemanReplyForPrompt,
+  foremanTurnDecisionToDirective,
+  shouldElevateAskWriteOnResume,
+} from "@openx/shared";
 import {
   getConnectionByExecutorId,
   listConnections,
@@ -59,7 +67,7 @@ import { narrateGoalChange } from "./narration.js";
 import { resolveAcpCliCredentialsFromRef } from "./acp-cli-config.js";
 import { bootstrapConnectProfile } from "./cli-bootstrap.js";
 import { getServerBaseUrl } from "./server-base-url.js";
-import { shouldRunPiInWorker, runPiInWorker, cancelPiChild } from "./pi-isolated-run.js";
+import { shouldRunPiInWorker, runPiInWorker, cancelPiChild, hasParkedPiChild, resumePiChild } from "./pi-isolated-run.js";
 import { loadSettings } from "./settings-store.js";
 import { resolveWorkspaceRoot } from "./workspace-path.js";
 import { loadKnowledgeContextForExecutor } from "./knowledge-store.js";
@@ -75,13 +83,17 @@ import { resolveExecutorSkills } from "./skills-resolve.js";
 import {
   emitGoalRunEvent,
   endGoalRun,
+  flushMergeBuffer,
   isRunActive,
   startGoalRun,
 } from "./run-service.js";
 import { broadcast } from "./sse.js";
 import {
+  claimGoalForDispatch,
+  claimPausedGoalForResume,
   markGoalComplete,
   markGoalFailed,
+  parkGoalAsPaused,
   updateGoalProgress,
 } from "./goal-lifecycle.js";
 
@@ -95,7 +107,7 @@ export function resetOrchestrator(): void {
   dispatchLocks.clear();
 }
 
-function ensureExecutors() {
+export function ensureExecutors() {
   if (!registered) {
     if (process.env.OPENX_MOCK_PI === "1") {
       registerExecutor({ ...mockExecutor, id: "pi", displayName: "Pi（Mock 测试）" });
@@ -154,7 +166,15 @@ function buildCallbacks(goalId: string) {
       const g = getGoalById(goalId);
       if (!g || g.status !== "running") return;
       clearGoalCancelledForConnect(goalId);
-      markGoalComplete(goalId, resultSummary, deliverables);
+      const result = markGoalComplete(goalId, resultSummary, deliverables);
+      if (!result.ok) {
+        appendLog(
+          goalId,
+          "warn",
+          `执行器交差被拒绝：${result.error}`,
+        );
+        return;
+      }
       // 动态 import 避免 orchestrator ↔ goal-actions 循环依赖
       const { maybeAutoReview } = await import("./auto-review.js");
       void maybeAutoReview(goalId);
@@ -171,15 +191,7 @@ function buildCallbacks(goalId: string) {
     onParkAwaitingUser: async (checkpointSummary: string) => {
       const g = getGoalById(goalId);
       if (!g || g.status !== "running") return;
-      endGoalRun(goalId, "paused", checkpointSummary);
-      updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
-      appendLog(
-        goalId,
-        "info",
-        "工头已暂停施工队，等待开发商决策（任务单未交差）",
-      );
-      const updated = getGoalById(goalId);
-      if (updated) broadcast({ type: "goal.updated", goal: updated });
+      parkGoalAsPaused(goalId, checkpointSummary);
     },
     onCrewSession: async (crewSessionId: string) => {
       const g = getGoalById(goalId);
@@ -199,19 +211,24 @@ function buildCallbacks(goalId: string) {
           kind: "directive",
           message: "工头暂不可用，请按验收标准自行选择合理方案继续。",
           source: "foreman_rule",
+          ...(question.requestId ? { replyTo: question.requestId } : {}),
         };
       }
+      const correlatedQuestion = ensureCrewRequestId(question);
       syncCrewBinding(goalId, { crewStatus: "awaiting_foreman" });
-      persistCrewQuestion(goalId, question);
+      persistCrewQuestion(goalId, correlatedQuestion);
       const outcome = await handleCrewQuestion({
         goal: g,
-        question,
+        question: correlatedQuestion,
       });
       if (!isGoalCrewBindingWritable(goalId)) {
         return {
           kind: "directive",
           message: "任务已结束，施工队将按最后已知指令收尾。",
           source: "foreman_rule",
+          ...(correlatedQuestion.requestId
+            ? { replyTo: correlatedQuestion.requestId }
+            : {}),
         };
       }
       if (isCrewEscalation(outcome)) {
@@ -229,6 +246,10 @@ function buildCallbacks(goalId: string) {
             : "工头已提请开发商确认。请暂停施工，等待开发商回复后的【工头】指令。",
           source: "foreman_rule",
           pauseUntilUser: true,
+          ...(outcome.replyTo ? { replyTo: outcome.replyTo } : {}),
+          ...(correlatedQuestion.requestId && !outcome.replyTo
+            ? { replyTo: correlatedQuestion.requestId }
+            : {}),
         };
       }
       syncCrewBinding(goalId, { crewStatus: "idle" });
@@ -300,6 +321,15 @@ function buildExecutorContext(goalId: string, isRework?: boolean): ExecutorConte
   }));
   const priorSummaries = listExecutionSummaries(goalId, 10);
   const priorReviewRounds = listReviewRounds(goalId, 8);
+  const crewExchanges = listCrewExchanges(goalId, 24).map((e) => ({
+    direction: e.direction,
+    summary: e.summary,
+  }));
+  const resumeTranscript = buildResumeTranscriptBlock({
+    crewExchanges,
+    priorSummaries,
+    priorLogs,
+  });
   const workspaceRoot = resolveWorkspaceForGoal(goal);
   const conversation = getConversationById(goal.conversationId);
   const projectKnowledge =
@@ -307,13 +337,22 @@ function buildExecutorContext(goalId: string, isRework?: boolean): ExecutorConte
       ? loadKnowledgeContextForExecutor(workspaceRoot, conversation.projectId)
       : undefined;
   const dispatch = goal.dispatchContext;
+  // ACP 默认无人值守：未显式指定权限时应用 settings
+  let effectiveDispatch = dispatch;
+  if (
+    !dispatch?.permissionMode &&
+    goal.executorId.startsWith("acp:") &&
+    settings.executors.acp?.defaultSkipPermissions
+  ) {
+    effectiveDispatch = { ...dispatch, permissionMode: "unattended" };
+  }
   const { hints: enabledSkills } = resolveExecutorSkills(
     goal.executorId,
     settings,
-    dispatch?.skillIds,
+    effectiveDispatch?.skillIds,
   );
-  const mcpServers = resolveDispatchMcpServers(settings, dispatch?.mcpIds);
-  const agentRole = resolveDispatchAgentRole(settings, dispatch?.agentId);
+  const mcpServers = resolveDispatchMcpServers(settings, effectiveDispatch?.mcpIds);
+  const agentRole = resolveDispatchAgentRole(settings, effectiveDispatch?.agentId);
   let spawnEnv: Record<string, string> | undefined;
   if (isAcpCliConfigTarget(goal.executorId)) {
     const modelRef = settings.acpCli?.[goal.executorId];
@@ -341,7 +380,10 @@ function buildExecutorContext(goalId: string, isRework?: boolean): ExecutorConte
     }
   }
   return {
-    goal,
+    goal:
+      effectiveDispatch && effectiveDispatch !== dispatch
+        ? { ...goal, dispatchContext: effectiveDispatch }
+        : goal,
     workspaceRoot,
     settings: {
       pi: settings.executors.pi,
@@ -358,26 +400,63 @@ function buildExecutorContext(goalId: string, isRework?: boolean): ExecutorConte
     llmContext: resolveMergedLlmContext({ goalId }),
     projectKnowledge,
     spawnEnv,
+    resumeTranscript,
+    sandboxConfig: (() => {
+      const sand =
+        goal.executorId === "pi"
+          ? settings.executors.pi?.sandbox
+          : settings.executors.acp?.sandbox;
+      if (!sand?.enabled) return undefined;
+      if (sand.allowedPaths?.length) {
+        appendLog(
+          goalId,
+          "warn",
+          `沙箱已配置但尚未执行隔离（type=${sand.type}，allowedPaths=${sand.allowedPaths.length}）；当前仍在宿主机 cwd 执行`,
+        );
+      } else {
+        appendLog(
+          goalId,
+          "warn",
+          `沙箱已配置但尚未执行隔离（type=${sand.type}）；当前仍在宿主机 cwd 执行`,
+        );
+      }
+      return {
+        type: sand.type,
+        image: sand.image,
+      };
+    })(),
     callbacks: buildCallbacks(goalId),
   };
 }
 
-/** 依赖已满足的 draft 子目标自动启动（approve 后触发，不依赖 autoExecute 开关） */
+/** 依赖已满足的 draft 子目标自动启动（approve 后触发；受 autoStartDependents 控制） */
 export function tryDispatchDependents(completedGoalId: string): void {
+  const settings = loadSettings();
+  if (!settings.autoStartDependents) {
+    appendLog(
+      completedGoalId,
+      "info",
+      "自动策略：依赖子任务未启动（autoStartDependents=false）",
+    );
+    return;
+  }
+
   const candidates = listRunnableDraftGoals().filter((g) =>
     g.dependsOn.includes(completedGoalId),
   );
 
   for (const child of candidates) {
     if (!canTransition(child.status, "running")) continue;
-    child.status = "running";
-    child.progress = 0;
-    child.updatedAt = new Date().toISOString();
-    updateGoal(child);
-    broadcast({ type: "goal.updated", goal: child });
-    narrateGoalChange(child, "start");
-    appendLog(child.id, "info", `依赖 ${completedGoalId} 已完成，自动启动`);
-    void dispatchGoal(child.id);
+    const claimed = claimGoalForDispatch(child.id, ["draft"]);
+    if (!claimed) continue;
+    broadcast({ type: "goal.updated", goal: claimed });
+    narrateGoalChange(claimed, "start");
+    appendLog(
+      claimed.id,
+      "info",
+      `自动策略：依赖 ${completedGoalId} 已完成，自动启动（autoStartDependents）`,
+    );
+    void dispatchGoal(claimed.id);
   }
 }
 
@@ -395,8 +474,12 @@ export async function steerReworkGoal(goalId: string): Promise<boolean> {
       appendLog(goalId, "warn", "返工 steer 跳过：已有活跃 run");
       return false;
     }
+    flushMergeBuffer(goalId);
     startGoalRun(goalId, goal.executorId);
     const ctx = buildExecutorContext(goalId, true);
+    if (goal.executorId === "pi" && hasParkedPiChild(goalId)) {
+      return await resumePiChild(ctx);
+    }
     return await adapter.steerRework(ctx);
   } catch (err) {
     endGoalRun(goalId, "failed", err instanceof Error ? err.message : String(err));
@@ -409,16 +492,30 @@ export async function steerReworkGoal(goalId: string): Promise<boolean> {
   }
 }
 
-/** 对话中开发商回复后，将决策注入已 park 的施工队 session 并续跑 */
+/** 显式续跑：将开发商决策注入已暂停（paused）的施工队 session */
 export async function resumeCrewAfterUserDecision(
   goalId: string,
   userMessage: string,
+  opts?: { alreadyClaimedRunning?: boolean },
 ): Promise<{ ok: boolean; error?: string }> {
   ensureExecutors();
-  const goal = getGoalById(goalId);
+  let goal = getGoalById(goalId);
   if (!goal) return { ok: false, error: "目标不存在" };
-  if (goal.crewStatus !== "awaiting_user") {
-    return { ok: false, error: "目标未在等待开发商决策" };
+
+  // 兼容迁移前：running + awaiting_user → 先升为正式 paused
+  if (goal.status === "running" && goal.crewStatus === "awaiting_user") {
+    const parked = parkGoalAsPaused(goalId);
+    if (!parked.ok) return { ok: false, error: parked.error };
+    goal = parked.goal;
+  }
+
+  if (goal.status !== "paused" && !opts?.alreadyClaimedRunning) {
+    return { ok: false, error: "目标未处于暂停等待决策" };
+  }
+  if (goal.status === "paused" && !opts?.alreadyClaimedRunning) {
+    const claimed = claimPausedGoalForResume(goalId);
+    if (!claimed) return { ok: false, error: "无法从暂停态恢复" };
+    goal = claimed;
   }
   if (goal.status !== "running") {
     return { ok: false, error: "目标未处于执行中" };
@@ -430,8 +527,28 @@ export async function resumeCrewAfterUserDecision(
   const trimmed = userMessage.trim();
   if (!trimmed) return { ok: false, error: "回复不能为空" };
 
+  if (goal.dispatchContext?.permissionMode === "ask_write") {
+    if (shouldElevateAskWriteOnResume(trimmed)) {
+      goal.dispatchContext = {
+        ...goal.dispatchContext,
+        permissionMode: "full",
+      };
+      goal.updatedAt = new Date().toISOString();
+      try {
+        const elevated = updateGoal(goal);
+        appendLog(goalId, "info", "开发商已确认写入，派单权限提升为完全授权");
+        broadcast({ type: "goal.updated", goal: elevated });
+      } catch {
+        appendLog(goalId, "warn", "派单权限提升冲突，将使用当前 goal 状态续跑");
+      }
+    } else {
+      appendLog(goalId, "info", "开发商拒绝写入，保持写前确认（只读工具）");
+    }
+  }
+
   const adapter = resolveExecutor(goal.executorId);
   if (!adapter?.steerRework) {
+    parkGoalAsPaused(goalId, "当前执行器不支持施工队续跑");
     return { ok: false, error: "当前执行器不支持施工队续跑" };
   }
 
@@ -447,6 +564,7 @@ export async function resumeCrewAfterUserDecision(
     broadcast({ type: "goal.updated", goal: updatedAfterDirective });
   }
 
+  flushMergeBuffer(goalId);
   startGoalRun(goalId, goal.executorId);
   const ctx = buildExecutorContext(goalId, false);
   ctx.crewContinuationPrompt = formatCrewForemanReplyForPrompt({
@@ -455,22 +573,32 @@ export async function resumeCrewAfterUserDecision(
   });
 
   try {
+    if (goal.executorId === "pi" && hasParkedPiChild(goalId)) {
+      const ok = await resumePiChild(ctx);
+      if (!ok) {
+        endGoalRun(goalId, "failed", "施工队续跑失败：worker session 不可用");
+        parkGoalAsPaused(goalId, "施工队 session 不可用");
+        return { ok: false, error: "施工队 session 不可用，请重新派发" };
+      }
+      return { ok: true };
+    }
     const ok = await adapter.steerRework(ctx);
     if (!ok) {
       endGoalRun(goalId, "failed", "施工队续跑失败：session 不可用");
-      updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
+      parkGoalAsPaused(goalId, "施工队 session 不可用");
       return { ok: false, error: "施工队 session 不可用，请重新派发" };
     }
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     endGoalRun(goalId, "failed", msg);
-    updateGoalCrewBinding(goalId, { crewStatus: "awaiting_user" });
+    parkGoalAsPaused(goalId, msg);
     return { ok: false, error: msg };
   }
 }
 
-export function findAwaitingUserGoal(
+/** 查找本对话中正式暂停（paused）的任务；无 preferred 时不默认猜最后一个 */
+export function findPausedGoal(
   conversationId: string,
   preferredGoalId?: string,
 ): { id: string } | undefined {
@@ -479,17 +607,28 @@ export function findAwaitingUserGoal(
     if (
       g &&
       g.conversationId === conversationId &&
-      g.status === "running" &&
-      g.crewStatus === "awaiting_user"
+      (g.status === "paused" ||
+        (g.status === "running" && g.crewStatus === "awaiting_user"))
     ) {
       return { id: g.id };
     }
+    return undefined;
   }
-  const candidates = listGoals({ conversationId, status: "running" }).filter(
+  const paused = listGoals({ conversationId, status: "paused" });
+  if (paused.length === 1) return { id: paused[0]!.id };
+  const legacy = listGoals({ conversationId, status: "running" }).filter(
     (g) => g.crewStatus === "awaiting_user",
   );
-  const latest = candidates[candidates.length - 1];
-  return latest ? { id: latest.id } : undefined;
+  if (legacy.length === 1) return { id: legacy[0]!.id };
+  return undefined;
+}
+
+/** @deprecated 使用 findPausedGoal；保留别名以免外部引用断裂 */
+export function findAwaitingUserGoal(
+  conversationId: string,
+  preferredGoalId?: string,
+): { id: string } | undefined {
+  return findPausedGoal(conversationId, preferredGoalId);
 }
 
 async function materializeAutoExecutor(goalId: string): Promise<void> {
@@ -538,8 +677,8 @@ async function materializeAutoExecutor(goalId: string): Promise<void> {
 
   goal.executorId = chosen;
   goal.updatedAt = new Date().toISOString();
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
+  const saved = updateGoal(goal);
+  broadcast({ type: "goal.updated", goal: saved });
 }
 
 const BOOTSTRAP_WAIT_MS = Number(process.env.OPENX_BOOTSTRAP_WAIT_MS ?? 45_000);
@@ -623,6 +762,15 @@ export async function dispatchGoal(goalId: string): Promise<void> {
     const resolved = getGoalById(goalId);
     if (!resolved) throw new Error("Goal not found");
 
+    if (resolved.status === "paused") {
+      appendLog(
+        goalId,
+        "warn",
+        "派发跳过：任务已暂停等待开发商决策；请显式续跑（回复并继续或 /resume）",
+      );
+      return;
+    }
+
     if (resolved.status !== "running") {
       appendLog(goalId, "warn", `派发跳过：目标状态为 ${resolved.status}`);
       return;
@@ -632,7 +780,7 @@ export async function dispatchGoal(goalId: string): Promise<void> {
       appendLog(
         goalId,
         "warn",
-        "派发跳过：工头已暂停施工队，等待开发商决策；请在对话中回复后自动续跑",
+        "派发跳过：工头已暂停施工队，等待开发商决策；请显式续跑（回复并继续或 /resume）",
       );
       return;
     }
@@ -671,7 +819,28 @@ export async function dispatchGoal(goalId: string): Promise<void> {
       }
     }
     const ctx = buildExecutorContext(goalId, resolved.effectStatus === "rework");
-    startGoalRun(goalId, resolved.executorId);
+    const runId = startGoalRun(goalId, resolved.executorId);
+    const receipt = insertDispatchReceipt({
+      goalId,
+      runId,
+      executorId: resolved.executorId,
+      dispatchContext: resolved.dispatchContext,
+      workspaceRoot: ctx.workspaceRoot,
+    });
+    appendLog(
+      goalId,
+      "info",
+      `派单凭证 receipt=${receipt.receiptId} run=${runId} executor=${resolved.executorId}`,
+    );
+    const goalWithReceipt = getGoalById(goalId);
+    if (goalWithReceipt) {
+      broadcast({
+        type: "goal.updated",
+        goal: goalWithReceipt,
+        receiptId: receipt.receiptId,
+        activeRunId: runId,
+      });
+    }
 
     const runExec = () => {
       if (resolved.executorId === "pi" && shouldRunPiInWorker()) {

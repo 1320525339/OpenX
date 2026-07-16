@@ -5,8 +5,10 @@ import {
   type ForemanCrewOptions,
 } from "@openx/coach";
 import {
+  ensureCrewRequestId,
   resolveForemanDirectiveAuto,
   resolveForemanTurnDecisionAuto,
+  withCrewReplyCorrelation,
   type ForemanLoopInput,
   type ForemanTurnReviewLoopInput,
   type ForemanTurnDecision,
@@ -65,49 +67,51 @@ function shouldUseRulesOnly(): boolean {
 
 /** 工头决策：Coach LLM 自然语言对话，失败或未配置时兜底 */
 export async function handleCrewQuestion(input: ForemanLoopInput) {
-  const { goal, question } = input;
+  const question = ensureCrewRequestId(input.question);
+  const bound = { ...input, question };
 
   if (shouldUseRulesOnly()) {
-    return resolveForemanDirectiveAuto(input);
+    return resolveForemanDirectiveAuto(bound);
   }
 
   const settings = loadSettings();
   const runtime = getCoachRuntime(settings);
   if (!runtime.ready) {
-    return resolveForemanDirectiveAuto(input);
+    return resolveForemanDirectiveAuto(bound);
   }
 
   const { outcome, llmError } = await resolveForemanDirectiveViaCoach(
     {
       goal: {
-        id: goal.id,
-        title: goal.title,
-        acceptance: goal.acceptance,
-        executionPrompt: goal.executionPrompt,
-        constraints: goal.constraints,
+        id: bound.goal.id,
+        title: bound.goal.title,
+        acceptance: bound.goal.acceptance,
+        executionPrompt: bound.goal.executionPrompt,
+        constraints: bound.goal.constraints,
       },
       question,
     },
     settings,
     process.env as Record<string, string | undefined>,
-    await buildForemanCrewOptionsAsync(goal),
+    await buildForemanCrewOptionsAsync(bound.goal),
   );
 
   if (outcome) {
+    const correlated = withCrewReplyCorrelation(question, outcome);
     appendLog(
-      goal.id,
+      bound.goal.id,
       "info",
-      `工头 LLM 决策 › ${outcome.kind === "directive" ? outcome.message.slice(0, 160) : outcome.prompt.slice(0, 160)}`,
+      `工头 LLM 决策 › ${correlated.kind === "directive" ? correlated.message.slice(0, 160) : correlated.prompt.slice(0, 160)}`,
     );
-    return outcome;
+    return correlated;
   }
 
   appendLog(
-    goal.id,
+    bound.goal.id,
     "warn",
     `工头 LLM 不可用，使用兜底答复${llmError ? `：${llmError.slice(0, 120)}` : ""}`,
   );
-  return resolveForemanDirectiveAuto(input);
+  return resolveForemanDirectiveAuto(bound);
 }
 
 /** 工头主动轮次审阅：每轮施工反馈后的 loop controller 决策 */

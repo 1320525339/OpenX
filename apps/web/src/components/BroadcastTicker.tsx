@@ -12,8 +12,17 @@ import { ReviewTimelineCompact } from "./ReviewTimelineCompact";
 
 type Props = {
   payload: DynamicIslandPayload | null;
-  onDismiss: () => void;
-  onAction: (action: IslandAction, feedback?: string) => void | Promise<void>;
+  displayToken?: number | null;
+  /** 关闭当前展示；传入 displayToken 供队列层校验所有权 */
+  onDismiss: (token?: number) => void;
+  /**
+   * 动作处理器。返回 true 表示队列层已完成展示，Ticker 不再二次 dismiss；
+   * 返回 false/void 时由 Ticker 走离开动画并 onDismiss。
+   */
+  onAction: (
+    action: IslandAction,
+    feedback?: string,
+  ) => boolean | void | Promise<boolean | void>;
 };
 
 const DEFAULT_AUTO_DISMISS_MS = 6000;
@@ -34,7 +43,7 @@ function islandUsesReviewTimeline(kind: IslandPayloadKind): boolean {
   );
 }
 
-export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
+export function BroadcastTicker({ payload, displayToken, onDismiss, onAction }: Props) {
   const [phase, setPhase] = useState<"hidden" | "entering" | "visible" | "leaving">("hidden");
   const [visiblePayload, setVisiblePayload] = useState<DynamicIslandPayload | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -45,10 +54,17 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
   const hoveredRef = useRef(false);
   const expandedRef = useRef(false);
   const displayKeyRef = useRef<string | null>(null);
+  const displayTokenRef = useRef<number | null>(null);
 
   useEffect(() => {
     expandedRef.current = expanded;
   }, [expanded]);
+
+  useEffect(() => {
+    if (displayToken != null) {
+      displayTokenRef.current = displayToken;
+    }
+  }, [displayToken]);
 
   const clearTimers = useCallback(() => {
     if (dismissTimer.current !== null) {
@@ -63,13 +79,14 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
 
   const dismiss = useCallback(() => {
     clearTimers();
+    const token = displayTokenRef.current ?? undefined;
     setPhase("leaving");
     leaveTimer.current = window.setTimeout(() => {
       setPhase("hidden");
       setExpanded(false);
       expandedRef.current = false;
       setFeedback("");
-      onDismiss();
+      onDismiss(token);
     }, 320);
   }, [clearTimers, onDismiss]);
 
@@ -91,7 +108,10 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
     if (!payload) {
       displayKeyRef.current = null;
       setVisiblePayload(null);
-      return;
+      clearTimers();
+      return () => {
+        clearTimers();
+      };
     }
 
     const nextKey = islandDedupeKey(payload) ?? payload.id;
@@ -132,14 +152,16 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
   const runAction = async (action: IslandAction, useFeedback = false) => {
     if (busy) return;
     setBusy(true);
+    // 动作执行期间暂停自动关闭，避免与异步 handler 竞态
+    clearTimers();
     try {
       const fb = useFeedback ? feedback.trim() : undefined;
-      if (action.type === "rework" && fb) {
-        await onAction({ ...action, reason: fb }, fb);
-      } else {
-        await onAction(action, fb);
-      }
-      if (action.type !== "dismiss") dismiss();
+      const result =
+        action.type === "rework" && fb
+          ? await onAction({ ...action, reason: fb }, fb)
+          : await onAction(action, fb);
+      // 仅当队列层未完成展示时，才由 UI 走 dismiss → onDismiss
+      if (!result) dismiss();
     } finally {
       setBusy(false);
     }
@@ -229,9 +251,12 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
             {visiblePayload.meta?.deliverables && visiblePayload.meta.deliverables.length > 0 && (
               <DeliveryChips items={visiblePayload.meta.deliverables} compact />
             )}
-            {visiblePayload.meta?.resultPreview && (
-              <pre className="dynamic-island-preview">{visiblePayload.meta.resultPreview}</pre>
-            )}
+            {visiblePayload.meta?.resultPreview ? (
+              <div className="dynamic-island-section">
+                <strong>执行摘要</strong>
+                <pre className="dynamic-island-preview">{visiblePayload.meta.resultPreview}</pre>
+              </div>
+            ) : null}
             {visiblePayload.goalId && islandUsesReviewTimeline(visiblePayload.kind) ? (
               <ReviewTimelineCompact
                 goalId={visiblePayload.goalId}
@@ -263,7 +288,7 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
                     : undefined
                 }
               />
-            ) : visiblePayload.message ? (
+            ) : !visiblePayload.meta?.resultPreview && visiblePayload.message ? (
               <p className="dynamic-island-text-block">{visiblePayload.message}</p>
             ) : null}
             {visiblePayload.allowFeedback && !islandUsesReviewTimeline(visiblePayload.kind) ? (
@@ -276,7 +301,15 @@ export function BroadcastTicker({ payload, onDismiss, onAction }: Props) {
               />
             ) : null}
             <div className="dynamic-island-actions">
-              {visiblePayload.actions?.map((btn: IslandActionButton) => (
+              {(islandUsesReviewTimeline(visiblePayload.kind)
+                ? visiblePayload.actions?.filter(
+                    (btn) =>
+                      btn.action.type !== "approve" &&
+                      btn.action.type !== "rework" &&
+                      btn.action.type !== "trigger_review",
+                  )
+                : visiblePayload.actions
+              )?.map((btn: IslandActionButton) => (
                 <button
                   key={btn.id}
                   type="button"

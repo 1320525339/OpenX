@@ -1,6 +1,10 @@
 import { Hono } from "hono";
-import { GoalDeliverableSchema, RunDeltaEventSchema } from "@openx/shared";
-import { getGoalById } from "../db.js";
+import {
+  AckDispatchReceiptSchema,
+  GoalDeliverableSchema,
+  RunDeltaEventSchema,
+} from "@openx/shared";
+import { ackDispatchReceipt, getGoalById } from "../db.js";
 import { internalOnly } from "../internal-auth.js";
 import {
   appendGoalLog,
@@ -13,6 +17,13 @@ import { maybeAutoReview } from "../auto-review.js";
 
 export const internalRoutes = new Hono();
 internalRoutes.use("*", internalOnly);
+
+internalRoutes.post("/dispatch-receipts/ack", async (c) => {
+  const body = AckDispatchReceiptSchema.parse(await c.req.json());
+  const receipt = ackDispatchReceipt(body.receiptId);
+  if (!receipt) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true, receipt });
+});
 
 internalRoutes.post("/goals/:id/progress", async (c) => {
   const goalId = c.req.param("id");

@@ -9,16 +9,22 @@ import {
 } from "./desktop-service.js";
 
 describe("desktop-service", () => {
-  const prev = process.env.OPENX_CONFIG_PATH;
+  let tempDir = "";
+  const prevHome = process.env.OPENX_HOME;
+  const prevConfig = process.env.OPENX_CONFIG_PATH;
 
   beforeEach(() => {
-    const dir = mkdtempSync(join(tmpdir(), "openx-desktop-test-"));
-    process.env.OPENX_CONFIG_PATH = join(dir, "config.json");
+    tempDir = mkdtempSync(join(tmpdir(), "openx-desktop-test-"));
+    process.env.OPENX_HOME = tempDir;
+    process.env.OPENX_CONFIG_PATH = join(tempDir, "config.json");
   });
 
   afterEach(() => {
-    if (prev) process.env.OPENX_CONFIG_PATH = prev;
-    else delete process.env.OPENX_CONFIG_PATH;
+    if (prevHome === undefined) delete process.env.OPENX_HOME;
+    else process.env.OPENX_HOME = prevHome;
+    if (prevConfig === undefined) delete process.env.OPENX_CONFIG_PATH;
+    else process.env.OPENX_CONFIG_PATH = prevConfig;
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("creates and snapshots a web slot", async () => {

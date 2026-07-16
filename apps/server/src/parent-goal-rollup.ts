@@ -182,9 +182,9 @@ async function applyParentRollup(
 
     parent.updatedAt = new Date().toISOString();
 
-    updateGoal(parent);
+    const savedAwaiting = updateGoal(parent);
 
-    broadcast({ type: "goal.updated", goal: parent });
+    broadcast({ type: "goal.updated", goal: savedAwaiting });
 
     appendLog(
 
@@ -220,9 +220,9 @@ async function applyParentRollup(
 
     parent.updatedAt = new Date().toISOString();
 
-    updateGoal(parent);
+    const savedDraft = updateGoal(parent);
 
-    broadcast({ type: "goal.updated", goal: parent });
+    broadcast({ type: "goal.updated", goal: savedDraft });
 
   }
 

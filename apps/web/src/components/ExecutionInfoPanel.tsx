@@ -19,10 +19,10 @@ type Props = {
   onHydrateRun: (goalId: string) => Promise<void>;
   onSelectGoal: (id: string) => void;
   onOpenTasks: (goalId?: string) => void;
-  onApprove: (id: string) => Promise<void>;
-  onRework: (id: string, reason?: string) => Promise<void>;
-  onStart: (id: string) => Promise<void>;
-  onCancel: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<boolean>;
+  onRework: (id: string, reason?: string) => Promise<boolean>;
+  onStart: (id: string) => Promise<boolean>;
+  onCancel: (id: string) => Promise<boolean>;
 };
 
 function taskSortWeight(goal: Goal): number {
@@ -88,7 +88,7 @@ export function ExecutionInfoPanel({
     void onHydrateRun(id);
   };
 
-  const runAction = async (id: string, fn: () => Promise<void>) => {
+  const runAction = async (id: string, fn: () => Promise<boolean | void>) => {
     setBusyId(id);
     try {
       await fn();

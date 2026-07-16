@@ -24,7 +24,7 @@ describe("buildForemanCrewUserPrompt", () => {
     expect(prompt).toContain("登录页");
     expect(prompt).toContain("单元测试通过");
     expect(prompt).toContain("REST 还是 GraphQL");
-    expect(prompt).toContain("自然语言");
+    expect(prompt).toContain("选项ID");
   });
 });
 
@@ -32,6 +32,7 @@ describe("mapForemanTextReply", () => {
   const question = {
     kind: "question" as const,
     prompt: "选方案",
+    requestId: "req-c",
     options: [
       { id: "a", label: "A" },
       { id: "b", label: "B" },
@@ -43,6 +44,7 @@ describe("mapForemanTextReply", () => {
     expect(outcome.kind).toBe("directive");
     if (outcome.kind === "directive") {
       expect(outcome.source).toBe("foreman_llm");
+      expect(outcome.replyTo).toBe("req-c");
     }
   });
 

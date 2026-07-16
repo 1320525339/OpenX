@@ -1,4 +1,8 @@
 import type { Context, Next } from "hono";
+import {
+  extractApiTokenFromRequest,
+  resolveRuntimeMode,
+} from "./runtime-mode.js";
 
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:5173",
@@ -11,9 +15,7 @@ const STATE_CHANGING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function originAllowed(origin: string): boolean {
   if (ALLOWED_ORIGINS.has(origin)) return true;
-  // Tauri 自定义协议 (e.g. https://com.openx.desktop.localhost)
   if (origin.endsWith(".tauri.localhost")) return true;
-  // file:// 协议（桌面应用 WebView）
   if (origin === "null" || origin === "file://") return true;
   return false;
 }
@@ -25,6 +27,29 @@ function refererAllowed(referer: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * remote 模式：/api/*（health 除外）必须携带 OPENX_API_TOKEN。
+ * desktop-local：不强制 token，仍走 CSRF 守卫。
+ */
+export async function apiAccessGuard(c: Context, next: Next) {
+  const mode = resolveRuntimeMode();
+  if (mode === "remote") {
+    const path = new URL(c.req.url).pathname;
+    if (path !== "/api/health") {
+      const expected =
+        process.env.OPENX_API_TOKEN?.trim() ||
+        process.env.OPENX_REMOTE_API_TOKEN?.trim();
+      const provided = extractApiTokenFromRequest({
+        get: (name) => c.req.header(name),
+      });
+      if (!expected || !provided || provided !== expected) {
+        return c.json({ error: "Unauthorized: remote 模式需要 API token" }, 401);
+      }
+    }
+  }
+  await browserCsrfGuard(c, next);
 }
 
 /**
@@ -62,6 +87,5 @@ export async function browserCsrfGuard(c: Context, next: Next) {
     return;
   }
 
-  // 无 Origin/Referer：Connect CLI、curl、本机脚本等非浏览器客户端
   await next();
 }

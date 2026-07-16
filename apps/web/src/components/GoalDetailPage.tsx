@@ -16,9 +16,9 @@ type Props = {
   run?: GoalRunState;
   allGoals?: Goal[];
   onBack: () => void;
-  onApprove: (id: string) => Promise<void>;
-  onRework: (id: string, reason?: string) => Promise<void>;
-  onStart: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<boolean>;
+  onRework: (id: string, reason?: string) => Promise<boolean>;
+  onStart: (id: string) => Promise<boolean>;
 };
 
 export function GoalDetailPage({

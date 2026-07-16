@@ -28,7 +28,7 @@ const ConversationWorkspace = lazy(() =>
 import type { IslandAction } from "@openx/shared";
 import { canMutateGoal, SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
 import { islandFromSimpleMessage } from "./lib/island-payload";
-import { completeIslandDisplay, requestIsland } from "./lib/island-queue";
+import { completeIslandDisplay, getIslandDisplayToken, requestIsland } from "./lib/island-queue";
 import { AppProvider, useAppState } from "./lib/app-state";
 import { usePaneResize } from "./lib/use-pane-resize";
 import { useSidebar } from "./lib/use-sidebar";
@@ -66,6 +66,7 @@ function AppContent() {
     state,
     dispatch,
     refreshGoals,
+    upsertGoals,
     refreshExecutors,
     refreshMeta,
     refreshProjects,
@@ -232,43 +233,53 @@ function AppContent() {
   const openGoalDetail = (id: string) => dispatch({ type: "open_goal_detail", id });
   const closeGoalDetail = () => dispatch({ type: "close_goal_detail" });
 
-  const navigateToGoal = (goalId: string) => {
+  const navigateToGoal = (goalId: string): boolean => {
     const goal = state.goals.find((g) => g.id === goalId);
-    if (!goal) return;
+    if (!goal) return false;
     const conv = state.conversations.find((c) => c.id === goal.conversationId);
-    if (!conv) return;
+    if (!conv) return false;
     dispatch({
       type: "open_conversation",
       projectId: conv.projectId,
       conversationId: conv.id,
       goalId,
     });
-    completeIslandDisplay();
+    completeIslandDisplay({ token: getIslandDisplayToken() ?? undefined });
+    return true;
   };
 
-  const handleIslandAction = async (action: IslandAction, feedback?: string) => {
+  const handleIslandAction = async (
+    action: IslandAction,
+    feedback?: string,
+  ): Promise<boolean> => {
+    const token = getIslandDisplayToken() ?? undefined;
     switch (action.type) {
       case "dismiss":
-        completeIslandDisplay();
-        return;
+        completeIslandDisplay({ token });
+        return true;
       case "navigate":
-        navigateToGoal(action.goalId);
-        return;
-      case "approve":
-        await goalActions.onApprove(action.goalId);
-        completeIslandDisplay();
-        return;
-      case "rework":
-        await goalActions.onRework(action.goalId, action.reason ?? feedback);
-        completeIslandDisplay();
-        return;
-      case "retry":
-        await goalActions.onStart(action.goalId);
-        return;
+        return navigateToGoal(action.goalId);
+      case "approve": {
+        const ok = await goalActions.onApprove(action.goalId);
+        if (ok) completeIslandDisplay({ token });
+        // 失败不 ack；返回 true 阻止 BroadcastTicker 走 dismiss→onDismiss 二次 ack
+        return true;
+      }
+      case "rework": {
+        const ok = await goalActions.onRework(action.goalId, action.reason ?? feedback);
+        if (ok) completeIslandDisplay({ token });
+        return true;
+      }
+      case "retry": {
+        const ok = await goalActions.onStart(action.goalId);
+        if (ok) completeIslandDisplay({ token });
+        return true;
+      }
       case "trigger_review":
         try {
           await api.triggerGoalReview(action.goalId, { force: true });
-          completeIslandDisplay();
+          completeIslandDisplay({ token });
+          return true;
         } catch (err) {
           requestIsland(
             islandFromSimpleMessage(
@@ -277,8 +288,9 @@ function AppContent() {
               { severity: "error", goalId: action.goalId },
             ),
           );
+          // 失败不 ack 原 attention
+          return true;
         }
-        return;
     }
   };
 
@@ -413,6 +425,9 @@ function AppContent() {
           await createProject(workspaceDir);
         }}
         onNewConversation={(projectId) => void createConversation(projectId)}
+        onNewRoundtable={(projectId) =>
+          void createConversation(projectId, { mode: "roundtable", title: "新圆桌" })
+        }
         onDeleteProject={handleDeleteProject}
         onDeleteConversation={handleDeleteConversation}
         onSettings={() => {
@@ -519,6 +534,12 @@ function AppContent() {
                     })
                   }
                   onNewConversation={() => void createConversation(selectedProject.id)}
+                  onNewRoundtable={() =>
+                    void createConversation(selectedProject.id, {
+                      mode: "roundtable",
+                      title: "新圆桌",
+                    })
+                  }
                   onDeleteConversation={handleDeleteConversation}
                   onBatchAction={handleTasksBatchAction}
                   goalActions={goalActions}
@@ -563,6 +584,7 @@ function AppContent() {
                   cliProfiles={settings.cliProfiles ?? []}
                   defaultExecutorId={settings.defaultExecutorId}
                   onRefreshed={refreshGoals}
+                  upsertGoals={upsertGoals}
                   onOpenGoalDetail={openGoalDetail}
                   onLocateGoal={locateGoalInTasks}
                   onNavigateToGoal={navigateToGoal}
@@ -573,6 +595,7 @@ function AppContent() {
                   conversationTitles={allConversationTitleMap}
                   projectTitles={projectTitleMap}
                   conversationProjectIds={conversationProjectIdMap}
+                  logs={state.logs}
                 />
               )}
 
@@ -584,6 +607,7 @@ function AppContent() {
                     conversationTitle={
                       conversationTitleMap[state.selectedConversationId]
                     }
+                    conversationMode={selectedConversation?.mode ?? "foreman"}
                     projectId={conversationProjectIdMap[state.selectedConversationId]}
                     goals={conversationGoals}
                     selectedGoal={selected}
@@ -616,6 +640,7 @@ function AppContent() {
                     executors={state.executors}
                     defaultExecutorId={settings.defaultExecutorId}
                     onRefreshed={refreshGoals}
+                    upsertGoals={upsertGoals}
                     onLocateGoal={locateGoalInTasks}
                     coachReplyEvent={state.coachReplyEvent}
                     coachStream={state.coachStream}
@@ -740,7 +765,8 @@ function AppContent() {
 
       <BroadcastTicker
         payload={state.islandPayload}
-        onDismiss={() => completeIslandDisplay(state.islandPayload?.id)}
+        displayToken={state.islandDisplayToken}
+        onDismiss={(token) => completeIslandDisplay({ token })}
         onAction={handleIslandAction}
       />
 
@@ -754,7 +780,8 @@ function AppContent() {
           modalTitle={state.view === "console" ? "发布系统任务" : "新目标"}
           onClose={() => dispatch({ type: "set_show_new_goal", show: false })}
           onCreated={(g) => {
-            dispatch({ type: "set_selected", id: g.id });
+            upsertGoals([g]);
+            locateGoalInTasks(g.id);
             dispatch({ type: "set_show_new_goal", show: false });
             void refreshGoals();
           }}

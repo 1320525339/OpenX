@@ -15,15 +15,17 @@ import {
   MAX_SSE_CATCHUP,
 } from "../db.js";
 import { getOpenxSkillsDir } from "@openx/shared/skills-path";
-import { browserCsrfGuard } from "../api-guard.js";
+import { apiAccessGuard } from "../api-guard.js";
 import {
   loadSettings,
   mergeAndSaveSettings,
   patchSettings,
   saveSettings,
+  settingsForApi,
   SettingsRevisionConflictError,
 } from "../settings-store.js";
 import { addSseClient, removeSseClient } from "../sse.js";
+import { parseSseLastEventId } from "../sse-resume.js";
 import {
   listSkillCatalog,
   loadSkillManifest,
@@ -69,6 +71,8 @@ import { desktopRoutes } from "./desktop.js";
 import { systemRoutes } from "./system.js";
 import { bootstrapRoutes } from "./bootstrap.js";
 import { operatorRoutes } from "./operator.js";
+import { integrationsRoutes } from "./integrations.js";
+import { roundtableRoutes } from "./roundtable.js";
 
 export const app = new Hono();
 
@@ -89,7 +93,7 @@ app.use(
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   }),
 );
-app.use("/api/*", browserCsrfGuard);
+app.use("/api/*", apiAccessGuard);
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 
@@ -99,33 +103,32 @@ app.route("/api/operator", operatorRoutes);
 app.get("/api/catalog", (c) => c.json(buildApiCatalogResponse()));
 
 app.get("/api/events", (c) => {
-  const lastEventIdHeader = c.req.header("Last-Event-ID");
-  const parsedLastId = lastEventIdHeader ? Number.parseInt(lastEventIdHeader, 10) : undefined;
+  const parsedLastId = parseSseLastEventId(c.req.header("Last-Event-ID"));
 
   return streamSSE(c, async (stream) => {
-    if (parsedLastId !== undefined && !Number.isNaN(parsedLastId)) {
+    if (parsedLastId !== undefined) {
       if (!getSseEventById(parsedLastId)) {
         await stream.writeSSE({
           event: "gap",
           data: JSON.stringify({ reason: "invalid_last_event_id" }),
         });
-      } else {
-        const pending = countSseEventsAfter(parsedLastId);
-        if (pending > MAX_SSE_CATCHUP) {
-          await stream.writeSSE({
-            event: "gap",
-            data: JSON.stringify({ reason: "catchup_truncated", pending }),
-          });
-        } else {
-          const missed = listSseEventsAfter(parsedLastId);
-          for (const stored of missed) {
-            await stream.writeSSE({
-              id: String(stored.id),
-              event: stored.eventType,
-              data: JSON.stringify(stored.payload),
-            });
-          }
-        }
+        return;
+      }
+      const pending = countSseEventsAfter(parsedLastId);
+      if (pending > MAX_SSE_CATCHUP) {
+        await stream.writeSSE({
+          event: "gap",
+          data: JSON.stringify({ reason: "catchup_truncated", pending }),
+        });
+        return;
+      }
+      const missed = listSseEventsAfter(parsedLastId);
+      for (const stored of missed) {
+        await stream.writeSSE({
+          id: String(stored.id),
+          event: stored.eventType,
+          data: JSON.stringify(stored.payload),
+        });
       }
     } else {
       const recent = listRecentSseEvents(80);
@@ -151,8 +154,8 @@ app.get("/api/events", (c) => {
       });
     });
 
+    // connected 不写 SSE id，避免覆盖浏览器 Last-Event-ID（历史 id=0 会破坏重连游标）
     await stream.writeSSE({
-      id: "0",
       event: "connected",
       data: JSON.stringify({ type: "connected", clientId }),
     });
@@ -166,7 +169,9 @@ app.get("/api/events", (c) => {
   });
 });
 
-app.get("/api/settings", (c) => c.json(withWorkspaceResolved(loadSettings())));
+app.get("/api/settings", (c) =>
+  c.json(settingsForApi(withWorkspaceResolved(loadSettings()))),
+);
 
 app.put("/api/settings", async (c) => {
   try {
@@ -185,7 +190,7 @@ app.put("/api/settings", async (c) => {
       },
       { baseRevision },
     );
-    return c.json(withWorkspaceResolved(settings));
+    return c.json(settingsForApi(withWorkspaceResolved(settings)));
   } catch (err) {
     if (err instanceof SettingsRevisionConflictError) {
       return c.json({ error: err.message, revision: err.currentRevision }, 409);
@@ -209,7 +214,7 @@ app.patch("/api/settings", async (c) => {
       patch.systemWorkspaceRoot = normalizeWorkspaceRootForStorage(parsed.systemWorkspaceRoot);
     }
     const settings = patchSettings(patch, { baseRevision });
-    return c.json(withWorkspaceResolved(settings));
+    return c.json(settingsForApi(withWorkspaceResolved(settings)));
   } catch (err) {
     if (err instanceof SettingsRevisionConflictError) {
       return c.json({ error: err.message, revision: err.currentRevision }, 409);
@@ -384,6 +389,7 @@ app.post("/api/skills/sync", async (c) => {
 app.route("/api/projects", projectsRoutes);
 app.route("/api/knowledge", knowledgeRoutes);
 app.route("/api/conversations", conversationsRoutes);
+app.route("/api/roundtable", roundtableRoutes);
 app.route("/api/goals", goalsRoutes);
 app.route("/api/logs", logsRoutes);
 app.route("/api/cli", cliRoutes);
@@ -393,4 +399,5 @@ app.route("/api/connect", connectRoutes);
 app.route("/api/island", islandRoutes);
 app.route("/api/desktop", desktopRoutes);
 app.route("/api/system", systemRoutes);
+app.route("/api/integrations", integrationsRoutes);
 app.route("/internal", internalRoutes);

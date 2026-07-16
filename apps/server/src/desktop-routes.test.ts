@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { app } from "./routes.js";
@@ -7,14 +7,21 @@ import { app } from "./routes.js";
 describe("desktop routes", () => {
   let tempDir = "";
   const jsonHeaders = { "Content-Type": "application/json" };
+  const prevHome = process.env.OPENX_HOME;
+  const prevConfig = process.env.OPENX_CONFIG_PATH;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "openx-desktop-route-test-"));
+    process.env.OPENX_HOME = tempDir;
     process.env.OPENX_CONFIG_PATH = join(tempDir, "config.json");
   });
 
   afterEach(() => {
-    delete process.env.OPENX_CONFIG_PATH;
+    if (prevHome === undefined) delete process.env.OPENX_HOME;
+    else process.env.OPENX_HOME = prevHome;
+    if (prevConfig === undefined) delete process.env.OPENX_CONFIG_PATH;
+    else process.env.OPENX_CONFIG_PATH = prevConfig;
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("GET /api/desktop/slots returns empty bundle", async () => {
@@ -66,6 +73,7 @@ describe("desktop routes", () => {
         pinCol: 0,
       }),
     });
+    expect(createRes.status).toBe(200);
     const created = (await createRes.json()) as { slotId: string; revision: number };
 
     const cmdRes = await app.request(
@@ -97,6 +105,7 @@ describe("desktop routes", () => {
         pinCol: 0,
       }),
     });
+    expect(createRes.status).toBe(200);
     const created = (await createRes.json()) as { slotId: string; revision: number };
 
     const snapRes = await app.request(
@@ -129,6 +138,7 @@ describe("desktop routes", () => {
         pinCol: 0,
       }),
     });
+    expect(createRes.status).toBe(200);
     const created = (await createRes.json()) as { slotId: string; revision: number };
 
     const delRes = await app.request(`/api/desktop/slots/${created.slotId}?scope=console`, {

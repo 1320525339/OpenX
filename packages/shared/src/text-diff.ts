@@ -315,7 +315,7 @@ export function countDiffChanges(lines: DiffLine[]): { added: number; removed: n
 export function buildToolFileDiff(
   before: string,
   after: string,
-  opts?: { path?: string; maxLines?: number },
+  opts?: { path?: string; maxLines?: number; maxBytes?: number },
 ): { diff: string; added: number; removed: number; path?: string } | null {
   const rows = diffLineRows(before, after);
   const { added, removed } = countDiffChanges(rows);
@@ -334,11 +334,14 @@ type IndexedDiffLine = {
   newLine: number;
 };
 
-/** 统一 diff 文本，供审查员和 UI 读取。 */
+/** 默认 diff 字节上限（对齐 openclaude 1MB byte cap） */
+export const DEFAULT_DIFF_MAX_BYTES = 1_048_576;
+
+/** 统一 diff 文本，供审查员和 UI 读取。按行数与字节取更严截断。 */
 export function formatUnifiedDiff(
   before: string,
   after: string,
-  opts?: { path?: string; maxLines?: number },
+  opts?: { path?: string; maxLines?: number; maxBytes?: number },
 ): string {
   const contextLines = 3;
   const rawRows = diffLineRows(before, after);
@@ -384,7 +387,9 @@ export function formatUnifiedDiff(
 
   const body: string[] = [];
   const maxLines = opts?.maxLines ?? 160;
+  const maxBytes = opts?.maxBytes ?? DEFAULT_DIFF_MAX_BYTES;
   let lineCount = 0;
+  let byteCount = Buffer.byteLength(header.join("\n"), "utf8");
   let truncated = false;
 
   for (const hunk of hunks) {
@@ -398,8 +403,15 @@ export function formatUnifiedDiff(
       truncated = true;
       break;
     }
-    body.push(`@@ -${first.oldLine},${oldCount} +${first.newLine},${newCount} @@`);
+    const hunkHeader = `@@ -${first.oldLine},${oldCount} +${first.newLine},${newCount} @@`;
+    const hunkHeaderBytes = Buffer.byteLength(hunkHeader, "utf8") + 1;
+    if (byteCount + hunkHeaderBytes > maxBytes && body.length > 0) {
+      truncated = true;
+      break;
+    }
+    body.push(hunkHeader);
     lineCount += 1;
+    byteCount += hunkHeaderBytes;
 
     for (const { row } of hunkRows) {
       if (lineCount >= maxLines) {
@@ -407,8 +419,15 @@ export function formatUnifiedDiff(
         break;
       }
       const prefix = row.type === "add" ? "+" : row.type === "remove" ? "-" : " ";
-      body.push(`${prefix}${row.text}`);
+      const line = `${prefix}${row.text}`;
+      const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+      if (byteCount + lineBytes > maxBytes) {
+        truncated = true;
+        break;
+      }
+      body.push(line);
       lineCount += 1;
+      byteCount += lineBytes;
     }
     if (truncated) break;
   }

@@ -124,23 +124,31 @@ export async function generateStructuredObject<T>(options: {
   }
 }
 
-/** 工头↔施工队自然语言对话（纯文本，无 JSON schema） */
+/** 工头↔施工队自然语言对话（纯文本，无 JSON schema）；空响应自动重试 */
 export async function generateCoachText(options: {
   model: ReturnType<ReturnType<typeof createOpenAICompatible>>;
   system: string;
   prompt: string;
   temperature?: number;
+  /** 空响应最大重试次数（不含首次），默认 2 */
+  emptyRetry?: number;
 }): Promise<string> {
+  const maxRetry = Math.max(0, options.emptyRetry ?? 2);
   const { signal, cancel } = coachLlmAbortSignal();
   try {
-    const { text } = await generateText({
-      model: options.model,
-      system: options.system,
-      prompt: options.prompt.trim(),
-      temperature: options.temperature ?? 0.4,
-      abortSignal: signal,
-    });
-    return text.trim();
+    let last = "";
+    for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
+      const { text } = await generateText({
+        model: options.model,
+        system: options.system,
+        prompt: options.prompt.trim(),
+        temperature: options.temperature ?? 0.4,
+        abortSignal: signal,
+      });
+      last = text.trim();
+      if (last) return last;
+    }
+    return last;
   } finally {
     cancel();
   }

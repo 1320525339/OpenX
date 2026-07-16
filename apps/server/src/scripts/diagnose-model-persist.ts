@@ -2,7 +2,6 @@
  * 诊断 zen/big-pickle 回写：模拟 load/save 链路
  */
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   SettingsSchema,
@@ -11,10 +10,12 @@ import {
   mergeSettingsForSave,
   mergeSettingsPatch,
   isDefaultZenModelSection,
+  resolveOpenxHome,
 } from "@openx/shared";
 import { resolveProvidersForLoad } from "../providers-store.js";
 
-const configPath = join(homedir(), ".openx", "config.json");
+const configPath =
+  process.env.OPENX_CONFIG_PATH?.trim() || join(resolveOpenxHome(), "config.json");
 const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
 const providers = resolveProvidersForLoad();
 

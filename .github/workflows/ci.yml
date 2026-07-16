@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build packages
+        run: pnpm --filter @openx/shared --filter @openx/executor-core --filter @openx/executor-pi --filter @openx/executor-acp --filter @openx/coach build
+
+      - name: Unit tests (shared + core + server lifecycle)
+        env:
+          OPENX_ZVEC_ENABLED: "0"
+          OPENX_MOCK_PI: "1"
+        run: |
+          pnpm --filter @openx/shared test
+          pnpm --filter @openx/executor-core test
+          pnpm --filter @openx/executor-acp test
+          pnpm --filter @openx/server exec vitest run src/goal-lifecycle.test.ts src/runtime-mode.test.ts src/api-catalog-sync.test.ts src/miloco-integration-settings.test.ts src/pi-isolated-run.test.ts

@@ -1,4 +1,5 @@
 import type { Conversation, Project } from "@openx/shared";
+import { MILOCO_CRON_CONVERSATION_ID, MILOCO_EVENTS_CONVERSATION_ID } from "@openx/shared";
 import { loadSettings } from "./settings-store.js";
 import {
   getConversationById,
@@ -21,10 +22,15 @@ export function isSystemProjectId(id: string): boolean {
 }
 
 export function isSystemConversationId(id: string): boolean {
-  return id === SYSTEM_CLI_CONVERSATION_ID || id === SYSTEM_MAIN_CONVERSATION_ID;
+  return (
+    id === SYSTEM_CLI_CONVERSATION_ID ||
+    id === SYSTEM_MAIN_CONVERSATION_ID ||
+    id === MILOCO_EVENTS_CONVERSATION_ID ||
+    id === MILOCO_CRON_CONVERSATION_ID
+  );
 }
 
-function ensureSystemProject(): Project {
+export function ensureSystemProject(): Project {
   const settings = loadSettings();
   const workspaceDir = syncSystemWorkspaceLayout(settings);
   let project = getProjectById(SYSTEM_PROJECT_ID);

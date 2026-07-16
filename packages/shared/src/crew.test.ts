@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  createCrewRequestId,
+  ensureCrewRequestId,
   formatCrewDirectiveForPrompt,
   formatCrewForemanReplyForPrompt,
   formatCrewQuestionBlock,
@@ -24,6 +26,16 @@ describe("crew protocol", () => {
     const text = `分析完成。\n${formatCrewQuestionBlock(question)}`;
     expect(parseCrewQuestionFromText(text)?.options?.[1]?.id).toBe("b");
     expect(parseCrewMessageFromText(text)?.context).toBe(text);
+  });
+
+  it("ensureCrewRequestId fills missing id", () => {
+    const id = createCrewRequestId();
+    expect(id.length).toBeGreaterThan(8);
+    const withId = ensureCrewRequestId(question);
+    expect(withId.requestId).toBeTruthy();
+    expect(ensureCrewRequestId({ ...question, requestId: "fixed" }).requestId).toBe(
+      "fixed",
+    );
   });
 
   it("parses natural language foreman ask", () => {

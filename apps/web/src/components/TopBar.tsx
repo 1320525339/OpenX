@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Conversation, Goal, Project } from "@openx/shared";
+import { isPausedGoal } from "@openx/shared";
 import type { AppView } from "./SideNav";
 import { goalNeedsUserAttention } from "../lib/goal-attention";
 import { goalStatusText } from "../lib/goal-detail";
@@ -57,10 +58,8 @@ export function TopBar({
   );
 
   const urgentGoal = useMemo(() => {
-    const awaitingUser = goals.find(
-      (g) => g.status === "running" && g.crewStatus === "awaiting_user",
-    );
-    if (awaitingUser) return awaitingUser;
+    const paused = goals.find((g) => isPausedGoal(g));
+    if (paused) return paused;
     const review = goals.find((g) => g.status === "awaiting_review");
     if (review) return review;
     return goals.find((g) => g.status === "failed") ?? null;

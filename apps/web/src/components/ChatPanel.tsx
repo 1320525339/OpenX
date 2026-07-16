@@ -6,12 +6,14 @@ import type {
   KnowledgeContextSelection,
   KnowledgeSourceRef,
 } from "@openx/shared";
-import { DEFAULT_EXECUTION_AGENT_ID, formatWorkOrderId, SYSTEM_MAIN_CONVERSATION_ID } from "@openx/shared";
+import { DEFAULT_EXECUTION_AGENT_ID, formatWorkOrderId, isPausedGoal, SYSTEM_MAIN_CONVERSATION_ID } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import { defaultExecutorChoice } from "../lib/executors";
 import { ChatWorkOrderCard } from "./ChatWorkOrderCard";
 import { ChatClarifyCard } from "./ChatClarifyCard";
 import { ChatOperatorActionCard } from "./ChatOperatorActionCard";
+import { ChatDispatchPermissionCard } from "./ChatDispatchPermissionCard";
+import { ChatThreadViewport } from "./ChatThreadViewport";
 import { ChatContextPicker } from "./ChatContextPicker";
 import { ChatExecutionCard } from "./ChatExecutionCard";
 import { ChatTaskChip } from "./ChatTaskChip";
@@ -60,6 +62,7 @@ import {
   formatConversationTasksList,
   findGoalByLocateQuery,
   parseChatSlash,
+  resolveResumeTarget,
   type ChatSlashCommand,
 } from "../lib/chat-slash";
 
@@ -73,11 +76,13 @@ type Props = {
   executors: ExecutorInfo[];
   defaultExecutorId?: string;
   onRefreshed: () => void;
+  /** 创建任务后立即写入全局 goals，避免被飞行中的 refresh 覆盖 */
+  upsertGoals: (goals: Goal[]) => void;
   onOpenGoalDetail?: (goalId: string) => void;
   onLocateGoal?: (goalId: string) => void;
-  onStartGoal?: (id: string) => Promise<void>;
-  onApproveGoal?: (id: string) => Promise<void>;
-  onReworkGoal?: (id: string, reason?: string) => Promise<void>;
+  onStartGoal?: (id: string) => Promise<boolean>;
+  onApproveGoal?: (id: string) => Promise<boolean>;
+  onReworkGoal?: (id: string, reason?: string) => Promise<boolean>;
   coachReplyEvent?: CoachReplyEvent | null;
   coachStream?: CoachStreamState | null;
   coachMessageEvent?: CoachMessageRecord | null;
@@ -99,6 +104,7 @@ export function ChatPanel({
   executors,
   defaultExecutorId,
   onRefreshed,
+  upsertGoals,
   onOpenGoalDetail,
   onLocateGoal,
   onStartGoal,
@@ -122,6 +128,9 @@ export function ChatPanel({
   const [operatorActionLoading, setOperatorActionLoading] = useState<number | null>(
     null,
   );
+  const [dispatchPermissionLoading, setDispatchPermissionLoading] = useState<
+    number | null
+  >(null);
   const [loadingMode, setLoadingMode] = useState<"streaming" | "structuring">(
     "streaming",
   );
@@ -232,17 +241,21 @@ export function ChatPanel({
     [goals, conversationId],
   );
 
-  const awaitingUserGoal = useMemo(() => {
+  const pausedGoal = useMemo(() => {
     if (
-      selectedGoal?.status === "running" &&
-      selectedGoal.crewStatus === "awaiting_user"
+      selectedGoal &&
+      (isPausedGoal(selectedGoal) ||
+        (selectedGoal.status === "running" &&
+          selectedGoal.crewStatus === "awaiting_user"))
     ) {
       return selectedGoal;
     }
     const waiting = conversationGoals.filter(
-      (g) => g.status === "running" && g.crewStatus === "awaiting_user",
+      (g) =>
+        isPausedGoal(g) ||
+        (g.status === "running" && g.crewStatus === "awaiting_user"),
     );
-    return waiting[waiting.length - 1];
+    return waiting.length === 1 ? waiting[0] : undefined;
   }, [selectedGoal, conversationGoals]);
 
   const handleContextChange = useCallback(
@@ -362,28 +375,33 @@ export function ChatPanel({
     }
     setRefineSuggestion(null);
     setCancelledRefinedIds(new Set());
-    void api.getCoachMessages(conversationId).then(({ messages: loaded }) => {
-      if (cancelled) return;
-      skipNextScrollRef.current = true;
-      setThreadRecords(loaded);
-      setMessageWarnById({});
-      const dismissed = findDismissedRefinedRecordIds(loaded);
-      setCancelledRefinedIds(dismissed);
-      const convGoals = goalsRef.current.filter(
-        (g) => g.conversationId === conversationId,
-      );
-      const latestRefined = findLatestPendingRefinedRecord(
-        loaded,
-        convGoals,
-        dismissed,
-      );
-      setRefinedPreview(
-        latestRefined?.refined
-          ? enrichRefinedWithChatContext(latestRefined.refined, chatCtxRef.current)
-          : null,
-      );
-      setRefinedMessageId(latestRefined?.id ?? null);
-    });
+    void api
+      .getCoachMessages(conversationId)
+      .then(({ messages: loaded }) => {
+        if (cancelled) return;
+        skipNextScrollRef.current = true;
+        setThreadRecords(loaded);
+        setMessageWarnById({});
+        const dismissed = findDismissedRefinedRecordIds(loaded);
+        setCancelledRefinedIds(dismissed);
+        const convGoals = goalsRef.current.filter(
+          (g) => g.conversationId === conversationId,
+        );
+        const latestRefined = findLatestPendingRefinedRecord(
+          loaded,
+          convGoals,
+          dismissed,
+        );
+        setRefinedPreview(
+          latestRefined?.refined
+            ? enrichRefinedWithChatContext(latestRefined.refined, chatCtxRef.current)
+            : null,
+        );
+        setRefinedMessageId(latestRefined?.id ?? null);
+      })
+      .catch(() => {
+        /* 后端短暂不可用（重启/断线）时保留现有线程，避免 Uncaught */
+      });
     return () => {
       cancelled = true;
     };
@@ -552,18 +570,17 @@ export function ChatPanel({
             return;
           }
           if (!onApproveGoal) return;
-          try {
-            await onApproveGoal(selectedGoal.id);
-            onRefreshed();
-            const wo =
-              selectedGoal.orderNo > 0
-                ? formatWorkOrderId(selectedGoal.orderNo)
-                : selectedGoal.id.slice(0, 8);
-            appendLocalCoach(`已确认完成 ${wo} · ${selectedGoal.title}`);
-          } catch (e) {
-            const errText = e instanceof Error ? e.message : "验收失败";
-            appendLocalCoach(`验收失败：${errText}`, true);
+          const ok = await onApproveGoal(selectedGoal.id);
+          if (!ok) {
+            appendLocalCoach("验收失败：操作未成功。", true);
+            return;
           }
+          onRefreshed();
+          const wo =
+            selectedGoal.orderNo > 0
+              ? formatWorkOrderId(selectedGoal.orderNo)
+              : selectedGoal.id.slice(0, 8);
+          appendLocalCoach(`已确认完成 ${wo} · ${selectedGoal.title}`);
           return;
         }
         case "rework": {
@@ -571,19 +588,22 @@ export function ChatPanel({
             appendLocalCoach("请先在任务区选择任务单。", true);
             return;
           }
-          if (!onReworkGoal) return;
-          try {
-            await onReworkGoal(selectedGoal.id, cmd.reason);
-            onRefreshed();
-            appendLocalCoach(
-              cmd.reason
-                ? `已提交返工：${cmd.reason}`
-                : `已提交返工「${selectedGoal.title}」。`,
-            );
-          } catch (e) {
-            const errText = e instanceof Error ? e.message : "返工失败";
-            appendLocalCoach(`返工失败：${errText}`, true);
+          if (selectedGoal.status !== "awaiting_review") {
+            appendLocalCoach("当前任务不在待验收状态，无法返工。", true);
+            return;
           }
+          if (!onReworkGoal) return;
+          const ok = await onReworkGoal(selectedGoal.id, cmd.reason);
+          if (!ok) {
+            appendLocalCoach("返工失败：操作未成功。", true);
+            return;
+          }
+          onRefreshed();
+          appendLocalCoach(
+            cmd.reason
+              ? `已提交返工：${cmd.reason}`
+              : `已提交返工「${selectedGoal.title}」。`,
+          );
           return;
         }
         case "start": {
@@ -592,13 +612,45 @@ export function ChatPanel({
             return;
           }
           if (!onStartGoal) return;
+          const ok = await onStartGoal(selectedGoal.id);
+          if (!ok) {
+            appendLocalCoach("启动失败：操作未成功。", true);
+            return;
+          }
+          onRefreshed();
+          appendLocalCoach(`已开始推进「${selectedGoal.title}」。`);
+          return;
+        }
+        case "resume": {
+          const target = resolveResumeTarget(
+            conversationGoals,
+            selectedGoal,
+            cmd.query,
+          );
+          if ("error" in target) {
+            appendLocalCoach(target.error, true);
+            return;
+          }
+          const decision = cmd.message?.trim();
+          if (!decision) {
+            appendLocalCoach(
+              "请提供决策内容：/resume WO-编号 你的回复，或先选中任务后 /resume 决策内容",
+              true,
+            );
+            return;
+          }
           try {
-            await onStartGoal(selectedGoal.id);
+            await api.resumeCrewGoal(target.goal.id, decision);
             onRefreshed();
-            appendLocalCoach(`已开始推进「${selectedGoal.title}」。`);
+            const wo =
+              target.goal.orderNo > 0
+                ? formatWorkOrderId(target.goal.orderNo)
+                : target.goal.id.slice(0, 8);
+            appendLocalCoach(`已续跑 ${wo} · ${target.goal.title}`);
+            await syncThread();
           } catch (e) {
-            const errText = e instanceof Error ? e.message : "启动失败";
-            appendLocalCoach(`启动失败：${errText}`, true);
+            const errText = e instanceof Error ? e.message : "续跑失败";
+            appendLocalCoach(`续跑失败：${errText}`, true);
           }
           return;
         }
@@ -616,6 +668,7 @@ export function ChatPanel({
               mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
               knowledge: coachKnowledgePayload,
               forceRefine: true,
+              permissionMode: chatPermissionMode,
             });
             await syncThread();
             stickToBottomRef.current = true;
@@ -685,23 +738,21 @@ export function ChatPanel({
     setRefinedPreview(null);
     setRefinedMessageId(null);
     setRefineSuggestion(null);
-    const resumeGoal = awaitingUserGoal;
-    const ambiguous = resumeGoal ? false : shouldTryLlmClarify(text);
+    const ambiguous = shouldTryLlmClarify(text);
     setStructuringKind(ambiguous ? "clarify" : "refine");
     setLoadingMode(
-      resumeGoal || (!ambiguous && shouldUseCoachStreaming(text))
-        ? "streaming"
-        : "structuring",
+      !ambiguous && shouldUseCoachStreaming(text) ? "streaming" : "structuring",
     );
     setLoading(true);
     try {
       const { suggestRefine, meta } = await api.coachChat(text, {
         conversationId,
-        goalId: resumeGoal?.id ?? selectedGoal?.id,
+        goalId: selectedGoal?.id,
         skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
         mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
         knowledge: coachKnowledgePayload,
         skipRefine: dismiss || undefined,
+        permissionMode: chatPermissionMode,
       });
       if (suggestRefine) {
         setRefineSuggestion(text);
@@ -728,6 +779,33 @@ export function ChatPanel({
     }
   };
 
+  const resumeAndContinue = async () => {
+    const text = draft.trim();
+    if (!text || !pausedGoal) return;
+    stickToBottomRef.current = true;
+    setThreadRecords((records) =>
+      appendCoachRecord(records, { role: "user", text }, conversationId),
+    );
+    setDraft("");
+    setLoadingMode("streaming");
+    setLoading(true);
+    try {
+      await api.resumeCrewGoal(pausedGoal.id, text);
+      onRefreshed();
+      const wo =
+        pausedGoal.orderNo > 0
+          ? formatWorkOrderId(pausedGoal.orderNo)
+          : pausedGoal.id.slice(0, 8);
+      appendLocalCoach(`已转告施工队继续执行（${wo} · ${pausedGoal.title}）。`);
+      await syncThread();
+    } catch (e) {
+      const errText = e instanceof Error ? e.message : "续跑失败";
+      appendLocalCoach(`续跑失败：${errText}`, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const requestRefineFromSuggestion = async () => {
     const text = refineSuggestion;
     if (!text || loading) return;
@@ -745,6 +823,7 @@ export function ChatPanel({
         mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
         knowledge: coachKnowledgePayload,
         forceRefine: true,
+        permissionMode: chatPermissionMode,
       });
       await syncThread();
       stickToBottomRef.current = true;
@@ -798,7 +877,7 @@ export function ChatPanel({
         skillIds: chatSkillIds,
         permissionMode: chatPermissionMode,
       });
-      await api.createGoal({
+      const { goal, children } = await api.createGoal({
         conversationId,
         userDraft: lastUserDraft || refinedPreview.title,
         executorId: execId,
@@ -816,6 +895,8 @@ export function ChatPanel({
         skillIds: dispatchContext?.skillIds,
         dispatchContext,
       });
+      upsertGoals([goal, ...(children ?? [])]);
+      onLocateGoal?.(goal.id);
       setRefinedPreview(null);
       setRefinedMessageId(null);
       await syncThread({ restorePreview: false });
@@ -870,6 +951,8 @@ export function ChatPanel({
         mapRefinedSubGoals(refinedPreview.subGoals, executorId),
         autoExecute,
       );
+      upsertGoals(children);
+      if (children[0]) onLocateGoal?.(children[0].id);
       setRefinedPreview(null);
       setRefinedMessageId(null);
       onRefreshed();
@@ -895,6 +978,29 @@ export function ChatPanel({
       appendLocalCoach(`操作确认失败：${errText}`, true);
     } finally {
       setOperatorActionLoading(null);
+    }
+  };
+
+  const respondDispatchPermission = async (
+    messageId: number,
+    outcome: "confirmed" | "dismissed",
+  ) => {
+    setDispatchPermissionLoading(messageId);
+    try {
+      await api.respondDispatchPermission(messageId, {
+        conversationId,
+        outcome,
+      });
+      await syncThread({ restorePreview: false });
+      stickToBottomRef.current = true;
+      appendLocalCoach(
+        outcome === "confirmed" ? "已确认派单权限变更。" : "已保持当前派单权限。",
+      );
+    } catch (e) {
+      const errText = e instanceof Error ? e.message : "处理失败";
+      appendLocalCoach(`派单权限确认失败：${errText}`, true);
+    } finally {
+      setDispatchPermissionLoading(null);
     }
   };
 
@@ -1135,11 +1241,30 @@ export function ChatPanel({
           onScroll={syncStickToBottom}
         >
           <div className="chat-column chat-thread">
-            {threadItems.map((item) => {
+            <ChatThreadViewport
+              items={threadItems}
+              renderItem={(item) => {
               if (item.kind === "date_separator") {
                 return (
                   <div key={item.key} className="chat-date-separator" role="separator">
                     <span>{item.label}</span>
+                  </div>
+                );
+              }
+
+              if (item.kind === "dispatch_permission") {
+                return (
+                  <div key={item.key} className="chat-turn chat-turn-refined">
+                    <ChatDispatchPermissionCard
+                      permission={item.dispatchPermission}
+                      loading={dispatchPermissionLoading === item.recordId}
+                      onConfirm={() =>
+                        void respondDispatchPermission(item.recordId, "confirmed")
+                      }
+                      onDismiss={() =>
+                        void respondDispatchPermission(item.recordId, "dismissed")
+                      }
+                    />
                   </div>
                 );
               }
@@ -1400,7 +1525,9 @@ export function ChatPanel({
                   </div>
                 </div>
               );
-            })}
+            }}
+              tail={
+                <>
             {refinedPreview && activeRefinedId == null && (
               <div className="chat-turn chat-turn-refined">
                 {renderWorkOrderCard()}
@@ -1446,6 +1573,9 @@ export function ChatPanel({
                 }
               />
             )}
+                </>
+              }
+            />
           </div>
         </div>
 
@@ -1526,14 +1656,24 @@ export function ChatPanel({
                     }
                   }}
                   placeholder={
-                    awaitingUserGoal
-                      ? "回复工头，转告施工队继续执行…"
+                    pausedGoal
+                      ? "普通聊天不会续跑；要点「回复并继续」或 /resume"
                       : "说你想推进的事… 或 /help 查看斜杠命令"
                   }
                   rows={2}
                 />
               </div>
               <div className="chat-composer-actions">
+                {pausedGoal ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={loading || !draft.trim()}
+                    onClick={() => void resumeAndContinue()}
+                  >
+                    {loading ? "续跑中…" : "回复并继续"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn primary"
@@ -1545,12 +1685,8 @@ export function ChatPanel({
                       ? structuringKind === "clarify"
                         ? "准备澄清中…"
                         : "整理工单中…"
-                      : awaitingUserGoal
-                        ? "转告施工队…"
-                        : "回复中…"
-                    : awaitingUserGoal
-                      ? "转告施工队"
-                      : "发送"}
+                      : "回复中…"
+                    : "发送"}
                 </button>
               </div>
             </div>

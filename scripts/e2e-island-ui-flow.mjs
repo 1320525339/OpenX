@@ -69,26 +69,34 @@ async function main() {
   const health = await json("/api/health");
   step("health", health.ok === true);
 
-  const island = await json("/api/system/island/push", {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tokenPath = path.join(os.homedir(), ".openx", "internal.token");
+  const internalToken =
+    process.env.OPENX_INTERNAL_TOKEN?.trim() ||
+    (fs.existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : "");
+
+  const islandRes = await fetch(`${BASE}/api/system/island/push`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(internalToken ? { "x-openx-internal-token": internalToken } : {}),
+    },
     body: JSON.stringify({
-      id: `e2e-island-${Date.now()}`,
       kind: "broadcast",
+      id: `e2e-island-${Date.now()}`,
       severity: "info",
       title: "自动验收",
       message: "灵动岛协议推送正常",
-      expanded: true,
-      actions: [
-        {
-          id: "dismiss",
-          label: "知道了",
-          variant: "primary",
-          action: { type: "dismiss" },
-        },
-      ],
     }),
   });
-  step("island_push", island.ok === true, `id=${island.id}`);
+  const island = await islandRes.json().catch(() => ({}));
+  step(
+    "island_push",
+    islandRes.ok && island.ok === true,
+    `status=${islandRes.status} id=${island.id ?? ""}`,
+  );
 
   const { goal: created } = await json("/api/goals", {
     method: "POST",

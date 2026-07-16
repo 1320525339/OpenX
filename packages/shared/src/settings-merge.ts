@@ -28,8 +28,32 @@ export function mergeSettingsPatch(current: Settings, patch: Partial<Settings>):
     executors: patchExecutors,
     cliProfiles: patchCliProfiles,
     defaultConstraints: patchConstraints,
+    integrations: patchIntegrations,
     ...scalarPatch
   } = patch;
+
+  const nextIntegrations = patchIntegrations
+    ? {
+        ...(current.integrations ?? {}),
+        ...Object.fromEntries(
+          Object.entries(patchIntegrations).map(([id, entry]) => {
+            const prev = current.integrations?.[id];
+            return [
+              id,
+              {
+                enabled: entry.enabled ?? prev?.enabled ?? false,
+                migrationCompleted:
+                  entry.migrationCompleted ?? prev?.migrationCompleted ?? false,
+                config: {
+                  ...(prev?.config ?? {}),
+                  ...(entry.config ?? {}),
+                },
+              },
+            ];
+          }),
+        ),
+      }
+    : current.integrations;
 
   const next: Settings = {
     ...current,
@@ -56,6 +80,7 @@ export function mergeSettingsPatch(current: Settings, patch: Partial<Settings>):
       : current.executors,
     cliProfiles: patchCliProfiles ?? current.cliProfiles,
     defaultConstraints: patchConstraints ?? current.defaultConstraints,
+    integrations: nextIntegrations,
   };
 
   return next;

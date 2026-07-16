@@ -9,6 +9,7 @@ import {
   isDefaultZenModelSection,
   mergeSettingsForSave,
   mergeSettingsPatch,
+  sanitizeSettingsForApi,
   type Settings,
   type ProvidersMap,
 } from "@openx/shared";
@@ -23,6 +24,10 @@ import {
   resolveProvidersForLoad,
   writeProvidersToDisk,
 } from "./providers-store.js";
+import {
+  readPersistCommitMarker,
+  writePersistCommitMarker,
+} from "./persist-commit.js";
 
 let migrationsChecked = false;
 
@@ -135,8 +140,29 @@ export function runSettingsMigrations(): Settings {
   if (!raw || needsPersistMigration(parsed, normalized)) {
     return saveSettings(normalized);
   }
+  // 跨文件对账：config 有 revision 但 providers 缺失时补写
+  const marker = readPersistCommitMarker();
+  const providersOnDisk = readProvidersFromDisk();
+  if (
+    Object.keys(providersOnDisk).length === 0 &&
+    Object.keys(normalized.providers ?? {}).length > 0
+  ) {
+    writeProvidersToDisk(normalized.providers ?? {});
+    writePersistCommitMarker(normalized.revision ?? 0);
+  } else if (marker && marker.revision !== (normalized.revision ?? 0)) {
+    console.warn(
+      `[settings] persist-commit 与 config revision 不一致 (marker=${marker.revision}, config=${normalized.revision ?? 0})，以 config 为准并对账 providers`,
+    );
+    writeProvidersToDisk(normalized.providers ?? {});
+    writePersistCommitMarker(normalized.revision ?? 0);
+  }
   syncSystemWorkspaceLayout(normalized);
   return normalized;
+}
+
+/** API 响应用：脱敏 providers 中的明文 apiKey */
+export function settingsForApi(settings: Settings): Settings {
+  return sanitizeSettingsForApi(settings);
 }
 
 export function loadSettings(): Settings {
@@ -189,6 +215,7 @@ export function saveSettings(settings: Settings, opts?: { baseRevision?: number 
   writeProvidersToDisk(withRevision.providers ?? {});
   const core = stripProvidersForCoreConfigSave(withRevision) as Settings;
   atomicWriteJson(getConfigPath(), core);
+  writePersistCommitMarker(withRevision.revision ?? 0);
   syncSystemWorkspaceLayout(withRevision);
 
   return withRevision;

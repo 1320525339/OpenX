@@ -8,6 +8,7 @@ type Props = {
   onPinChange?: (pinned: boolean) => void;
   dragHandle?: boolean;
   onHeaderPointerDown?: (e: PointerEvent<HTMLElement>) => void;
+  onResizePointerDown?: (e: PointerEvent<HTMLElement>) => void;
 };
 
 export function FlexibleWidgetFrame({
@@ -18,6 +19,7 @@ export function FlexibleWidgetFrame({
   onPinChange,
   dragHandle = false,
   onHeaderPointerDown,
+  onResizePointerDown,
 }: Props) {
   return (
     <section className="flexible-widget">
@@ -47,6 +49,15 @@ export function FlexibleWidgetFrame({
           ) : null}
         </div>
       </header>
+      {onResizePointerDown ? (
+        <div
+          className="flexible-widget-resize flexible-widget-resize-right"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`拖动调整${title}宽度`}
+          onPointerDown={onResizePointerDown}
+        />
+      ) : null}
       <div className="flexible-widget-body">{children}</div>
     </section>
   );

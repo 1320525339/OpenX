@@ -8,11 +8,11 @@ import { truncate } from "../lib/goal-detail";
 
 export type GoalTaskActionHandlers = {
 
-  onStart?: (id: string) => Promise<void>;
+  onStart?: (id: string) => Promise<boolean>;
 
-  onApprove?: (id: string) => Promise<void>;
+  onApprove?: (id: string) => Promise<boolean>;
 
-  onRework?: (id: string, reason?: string) => Promise<void>;
+  onRework?: (id: string, reason?: string) => Promise<boolean>;
 
   onOpenDetail?: () => void;
 
@@ -76,7 +76,7 @@ export function GoalTaskActions({ goal, handlers, compact }: Props) {
 
 
 
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (fn: () => Promise<boolean | void>) => {
 
     if (busy) return;
 

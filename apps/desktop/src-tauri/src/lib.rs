@@ -1,7 +1,10 @@
 mod desktop_prefs;
 mod tray_icon;
 
+use std::fs::{create_dir_all, OpenOptions};
+use std::io::Write;
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -13,6 +16,24 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, State, WebviewWindow,
 };
 use tauri_plugin_shell::ShellExt;
+
+fn openx_log_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(PathBuf::from(home).join(".openx").join("logs"))
+}
+
+fn append_desktop_log(line: &str) {
+    let Some(dir) = openx_log_dir() else {
+        return;
+    };
+    if create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("desktop.log");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", line);
+    }
+}
 
 /// 等待 Hono server 在 :3921 就绪
 fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
@@ -227,6 +248,11 @@ pub fn run() {
                 if start_minimized {
                     let _ = window.hide();
                 }
+                // debug / 测试包：打开 DevTools，便于看前端与网络日志
+                #[cfg(debug_assertions)]
+                {
+                    window.open_devtools();
+                }
             }
 
             // ---- Spawn Node.js sidecar ----
@@ -242,6 +268,14 @@ pub fn run() {
             let pid = child.pid();
             app.manage(SidecarPid(pid));
             println!("[openx-desktop] sidecar spawned, pid={}", pid);
+            append_desktop_log(&format!("[openx-desktop] sidecar spawned, pid={}", pid));
+            #[cfg(debug_assertions)]
+            if let Some(dir) = openx_log_dir() {
+                println!(
+                    "[openx-desktop] 日志文件: {}\\desktop.log",
+                    dir.display()
+                );
+            }
 
             std::thread::spawn(move || {
                 use tauri_plugin_shell::process::CommandEvent;
@@ -249,14 +283,20 @@ pub fn run() {
                     match event {
                         CommandEvent::Stdout(line) => {
                             let text = String::from_utf8_lossy(&line);
-                            println!("[sidecar] {}", text.trim());
+                            let msg = format!("[sidecar] {}", text.trim());
+                            println!("{}", msg);
+                            append_desktop_log(&msg);
                         }
                         CommandEvent::Stderr(line) => {
                             let text = String::from_utf8_lossy(&line);
-                            eprintln!("[sidecar:err] {}", text.trim());
+                            let msg = format!("[sidecar:err] {}", text.trim());
+                            eprintln!("{}", msg);
+                            append_desktop_log(&msg);
                         }
                         CommandEvent::Terminated(payload) => {
-                            println!("[sidecar] terminated: code={:?}", payload.code);
+                            let msg = format!("[sidecar] terminated: code={:?}", payload.code);
+                            println!("{}", msg);
+                            append_desktop_log(&msg);
                             break;
                         }
                         _ => {}
@@ -287,6 +327,7 @@ pub fn run() {
                 }
             });
 
+            // 仅代码侧创建托盘，避免与 tauri.conf.json trayIcon 重复导致双图标
             TrayIconBuilder::with_id("openx-tray")
                 .icon(tray_icon_booting())
                 .tooltip("OpenX — 启动中…")

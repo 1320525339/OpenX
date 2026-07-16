@@ -313,10 +313,10 @@
   --island-collapsed-h: 2.3125rem;
   --island-collapsed-min-w: 7.875rem;
   --island-collapsed-max-w: 17.5rem;
-  /* 展开：固定宽 + 黄金比例区间高度 */
-  --island-expanded-w: 22.5rem;
+  /* 展开：更宽一些，预览可滚动阅读 */
+  --island-expanded-w: 26rem;
   --island-expanded-min-h: 9.5rem;
-  --island-expanded-max-h: min(58vh, 20rem);
+  --island-expanded-max-h: min(70vh, 28rem);
   --island-pill-radius: 999px;
   --island-expanded-radius: 1.375rem;
   --island-surface: rgba(28, 28, 30, 0.94);
@@ -372,8 +372,12 @@ html[data-desktop="true"] .dynamic-island-portal {
   max-width: min(var(--island-expanded-w), 92vw);
   min-width: min(var(--island-expanded-w), 92vw);
   min-height: var(--island-expanded-min-h);
+  height: auto;
+  max-height: none;
   border-radius: var(--island-expanded-radius);
   aspect-ratio: auto;
+  /* 圆角裁剪即可；内容高度交给内部 .dynamic-island-expanded 滚动 */
+  overflow: hidden;
 }
 
 .dynamic-island-portal.app-minimal .dynamic-island-head {
@@ -407,10 +411,11 @@ html[data-desktop="true"] .dynamic-island-portal {
 }
 
 .dynamic-island-portal.app-minimal .dynamic-island-expanded {
-  padding: 0.5rem 0.65rem 0.6rem;
+  padding: 0.55rem 0.7rem 0.7rem;
   max-height: var(--island-expanded-max-h);
-  gap: 0.45rem;
+  gap: 0.5rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .dynamic-island-portal.app-minimal .dynamic-island-title {
@@ -446,21 +451,43 @@ html[data-desktop="true"] .dynamic-island-portal {
   margin-top: 0.12rem;
 }
 
-.dynamic-island-portal.app-minimal .dynamic-island-section strong {
-  color: var(--island-fg-muted);
-  font-weight: 500;
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.dynamic-island-portal.app-minimal .dynamic-island-text-block {
+  margin: 0;
+  color: var(--island-fg-dim);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.dynamic-island-portal.app-minimal .dynamic-island-preview,
+.dynamic-island-portal.app-minimal .dynamic-island-preview {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.6rem;
+  border: 0.5px solid var(--island-separator);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--island-fg);
+  font-size: 0.74rem;
+  line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  /* overflow≠visible 时 flex 最小高度可被压成 0 */
+  flex: 0 0 auto;
+  min-height: 5.5rem;
+  max-height: min(46vh, 16rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .dynamic-island-portal.app-minimal .dynamic-island-feedback {
   border-radius: 0.5rem;
   border: none;
   background: var(--island-inset);
-  color: var(--island-fg-dim);
-  font-size: 0.66rem;
+  color: var(--island-fg);
+  font-size: 0.72rem;
 }
 
 .dynamic-island-portal.app-minimal .dynamic-island-actions {

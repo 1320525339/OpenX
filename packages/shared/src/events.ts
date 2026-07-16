@@ -5,6 +5,7 @@ import { CoachMessageRecordSchema } from "./coach-messages.js";
 import { DynamicIslandPayloadSchema } from "./island.js";
 import { GoalSchema } from "./goal.js";
 import { RunDeltaEventSchema, RunEndStatusSchema } from "./run.js";
+import { ChatRoundStatusSchema, PeerRequestSchema } from "./roundtable.js";
 
 export const SseEventTypeSchema = z.enum([
   "goal.updated",
@@ -17,11 +18,23 @@ export const SseEventTypeSchema = z.enum([
   "coach.message",
   "coach.tool_call",
   "coach.tool_result",
+  "chat.round.started",
+  "chat.reply.started",
+  "chat.reply.delta",
+  "chat.reply.completed",
+  "chat.reply.failed",
+  "chat.round.completed",
+  "chat.round.cancelled",
+  "chat.peer_request.created",
+  "chat.peer_request.resolved",
   "run.started",
   "run.event",
   "run.ended",
   "island.push",
+  "attention.changed",
   "desktop.layout_changed",
+  "integration.updated",
+  "integration.run.updated",
 ]);
 export type SseEventType = z.infer<typeof SseEventTypeSchema>;
 
@@ -35,6 +48,9 @@ export const SseEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("goal.updated"),
     goal: GoalSchema,
+    /** 派单凭证（dispatch 成功时附带） */
+    receiptId: z.string().optional(),
+    activeRunId: z.string().optional(),
   }),
   z.object({
     type: z.literal("goal.deleted"),
@@ -60,6 +76,8 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     intent: CoachIntentSchema.optional(),
     refined: RefinedGoalSchema.optional(),
     clarify: CoachClarifyPayloadSchema.optional(),
+    /** 是否建议用户进入目标精炼（与 HTTP coachChat 对齐） */
+    suggestRefine: z.boolean().optional(),
     meta: z
       .object({
         llmError: z.string().optional(),
@@ -100,6 +118,81 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     timestamp: z.string().optional(),
   }),
   z.object({
+    type: z.literal("chat.round.started"),
+    conversationId: z.string(),
+    roundId: z.string(),
+    mode: z.enum(["direct", "diverge"]),
+    participantIds: z.array(z.string()),
+    estimatedCalls: z.number().int(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.reply.started"),
+    conversationId: z.string(),
+    roundId: z.string(),
+    messageId: z.number().int(),
+    speakerId: z.string(),
+    streamId: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.reply.delta"),
+    conversationId: z.string(),
+    roundId: z.string(),
+    messageId: z.number().int(),
+    speakerId: z.string(),
+    streamId: z.string(),
+    delta: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.reply.completed"),
+    conversationId: z.string(),
+    roundId: z.string(),
+    messageId: z.number().int(),
+    speakerId: z.string(),
+    streamId: z.string(),
+    text: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.reply.failed"),
+    conversationId: z.string(),
+    roundId: z.string(),
+    messageId: z.number().int(),
+    speakerId: z.string(),
+    streamId: z.string(),
+    error: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.round.completed"),
+    conversationId: z.string(),
+    roundId: z.string(),
+    status: ChatRoundStatusSchema,
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.round.cancelled"),
+    conversationId: z.string(),
+    roundIds: z.array(z.string()),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.peer_request.created"),
+    conversationId: z.string(),
+    request: PeerRequestSchema,
+    message: CoachMessageRecordSchema,
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("chat.peer_request.resolved"),
+    conversationId: z.string(),
+    request: PeerRequestSchema,
+    message: CoachMessageRecordSchema.optional(),
+    timestamp: z.string(),
+  }),
+  z.object({
     type: z.literal("run.started"),
     goalId: z.string(),
     runId: z.string(),
@@ -125,9 +218,35 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     payload: DynamicIslandPayloadSchema,
   }),
   z.object({
+    type: z.literal("attention.changed"),
+    key: z.string(),
+    revision: z.number().int().positive(),
+    state: z.enum(["open", "acknowledged", "resolved"]),
+    goalId: z.string().optional(),
+  }),
+  z.object({
     type: z.literal("desktop.layout_changed"),
     scope: z.enum(["console", "conversation"]),
     revision: z.number(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("integration.updated"),
+    integrationId: z.string(),
+    enabled: z.boolean(),
+    health: z.enum(["ok", "degraded", "disabled", "starting"]),
+    healthDetail: z.string().optional(),
+    diagnosticsRefreshing: z.boolean().optional(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("integration.run.updated"),
+    integrationId: z.string(),
+    runId: z.string(),
+    status: z.string(),
+    title: z.string().optional(),
+    lane: z.string().optional(),
+    goalId: z.string().optional(),
     timestamp: z.string(),
   }),
 ]);

@@ -43,9 +43,9 @@ type Props = {
   onSelectAllVisible: () => void;
   onClearSelection: () => void;
   onBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
-  onApprove: (id: string) => Promise<void>;
-  onRework: (id: string, reason?: string) => Promise<void>;
-  onStart: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<boolean>;
+  onRework: (id: string, reason?: string) => Promise<boolean>;
+  onStart: (id: string) => Promise<boolean>;
   /** 对话区任务芯片点击定位：滚动到对应任务并高亮 */
   locateRequest?: { goalId: string; tick: number } | null;
   showConnectClaimStatus?: boolean;
@@ -92,9 +92,9 @@ function countForFilter(
 function buildActionHandlers(
   g: Goal,
   editable: boolean,
-  onStart: (id: string) => Promise<void>,
-  onApprove: (id: string) => Promise<void>,
-  onRework: (id: string) => Promise<void>,
+  onStart: (id: string) => Promise<boolean>,
+  onApprove: (id: string) => Promise<boolean>,
+  onRework: (id: string) => Promise<boolean>,
   onOpenDetail?: (id: string) => void,
 ): GoalTaskActionHandlers {
   if (editable) {

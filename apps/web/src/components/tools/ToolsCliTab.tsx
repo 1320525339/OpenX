@@ -223,6 +223,71 @@ export function ToolsCliTab({
               onChange={(e) => onChange({ ...settings, autoExecute: e.target.checked })}
             />
           </div>
+          <div className="mech-switch">
+            <span>依赖完成后自动启动子任务</span>
+            <input
+              type="checkbox"
+              checked={settings.autoStartDependents}
+              onChange={(e) =>
+                onChange({ ...settings, autoStartDependents: e.target.checked })
+              }
+            />
+          </div>
+          <div className="mech-switch">
+            <span>验收失败自动返工</span>
+            <input
+              type="checkbox"
+              checked={settings.autoRework}
+              onChange={(e) => onChange({ ...settings, autoRework: e.target.checked })}
+            />
+          </div>
+          <div className="mech-switch">
+            <span>ACP 默认无人值守（跳过权限确认）</span>
+            <input
+              type="checkbox"
+              checked={settings.executors.acp?.defaultSkipPermissions ?? false}
+              onChange={(e) =>
+                onChange({
+                  ...settings,
+                  executors: {
+                    ...settings.executors,
+                    pi: settings.executors.pi,
+                    acp: {
+                      ...settings.executors.acp,
+                      defaultSkipPermissions: e.target.checked,
+                    },
+                  },
+                })
+              }
+            />
+          </div>
+          <p className="settings-hint">
+            无人值守仅建议在本机桌面模式开启；与「写前确认」互斥，派单时选 unattended。
+          </p>
+          <div className="mech-switch">
+            <span>Pi 沙箱配置（仅记录，尚未隔离执行）</span>
+            <input
+              type="checkbox"
+              checked={settings.executors.pi?.sandbox?.enabled ?? false}
+              onChange={(e) =>
+                onChange({
+                  ...settings,
+                  executors: {
+                    ...settings.executors,
+                    pi: {
+                      ...settings.executors.pi,
+                      sandbox: {
+                        type: settings.executors.pi?.sandbox?.type ?? "docker",
+                        enabled: e.target.checked,
+                        image: settings.executors.pi?.sandbox?.image,
+                        allowedPaths: settings.executors.pi?.sandbox?.allowedPaths,
+                      },
+                    },
+                  },
+                })
+              }
+            />
+          </div>
         </div>
       </div>
 
@@ -243,6 +308,7 @@ export function ToolsCliTab({
               onChange({
                 ...settings,
                 executors: {
+                  ...settings.executors,
                   pi: { ...settings.executors.pi, runTimeoutMs: minutes * 60_000 },
                 },
               });
@@ -263,6 +329,7 @@ export function ToolsCliTab({
               onChange({
                 ...settings,
                 executors: {
+                  ...settings.executors,
                   pi: { ...settings.executors.pi, maxToolCalls: n },
                 },
               });

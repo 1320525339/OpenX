@@ -1,5 +1,11 @@
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
-import type { AcpRuntimeId, CrewDirective } from "@openx/shared";
+import {
+  createCrewRequestId,
+  resolveEffectivePermissionMode,
+  type AcpRuntimeId,
+  type CrewDirective,
+  type DispatchPermissionMode,
+} from "@openx/shared";
 import type { ExecutorContext } from "@openx/executor-core";
 
 export function parseStoredAcpSessionId(
@@ -25,43 +31,59 @@ function autoApprove(
   return { outcome: "cancelled" };
 }
 
-/** 从工头自然语言回复中匹配权限选项 */
+function autoReject(
+  params: RequestPermissionRequest,
+): RequestPermissionResponse["outcome"] {
+  const reject =
+    params.options.find((o) => o.kind === "reject_once") ??
+    params.options.find((o) => o.kind === "reject_always");
+  if (reject) return { outcome: "selected", optionId: reject.optionId };
+  return { outcome: "cancelled" };
+}
+
+/**
+ * 仅接受结构化 selectedOptionId 命中。
+ * 禁止自然语言猜测批准（substring / approve regex）。
+ */
 export function pickPermissionOptionFromForemanReply(
   directive: CrewDirective,
   options: RequestPermissionRequest["options"],
 ) {
-  if (directive.selectedOptionId) {
-    const byId = options.find((o) => o.optionId === directive.selectedOptionId);
-    if (byId) return byId;
-  }
-  const msg = directive.message;
-  for (const o of options) {
-    const label = o.name ?? o.kind ?? o.optionId;
-    if (msg.includes(label) || msg.includes(o.optionId)) return o;
-  }
-  if (/允许|批准|可以|继续|approve/i.test(msg)) {
-    return (
-      options.find((o) => o.kind === "allow_once") ??
-      options.find((o) => o.kind === "allow_always")
-    );
-  }
-  if (/拒绝|取消|deny|reject/i.test(msg)) {
-    return options.find((o) => o.kind === "reject_once" || o.kind === "reject_always");
-  }
-  return undefined;
+  const selectedId = directive.selectedOptionId?.trim();
+  if (!selectedId) return undefined;
+  return options.find((o) => o.optionId === selectedId);
 }
 
 export async function resolvePermissionViaForeman(
   params: RequestPermissionRequest,
   callbacks: ExecutorContext["callbacks"],
+  opts?: {
+    permissionMode?: DispatchPermissionMode | null;
+    sessionId?: string | null;
+  },
 ): Promise<RequestPermissionResponse["outcome"]> {
-  if (!callbacks.onCrewQuestion || !params.options?.length) {
+  const mode = resolveEffectivePermissionMode(opts?.permissionMode);
+
+  // 只读侦察：一律拒绝写权限请求，禁止静默放行
+  if (mode === "read_only") {
+    return autoReject(params);
+  }
+
+  // 无人值守：跳过工头交互，直接放行
+  if (mode === "unattended") {
     return autoApprove(params);
   }
+
+  // 写前确认 / 完全授权：必须经工头结构化选项；无通道或无选项时拒绝
+  if (!callbacks.onCrewQuestion || !params.options?.length) {
+    return autoReject(params);
+  }
+
   const raw = params as {
     toolCall?: { title?: string };
     title?: string;
   };
+  const requestId = createCrewRequestId();
   const question = {
     kind: "question" as const,
     prompt:
@@ -72,13 +94,16 @@ export async function resolvePermissionViaForeman(
       id: o.optionId,
       label: o.name ?? o.kind ?? o.optionId,
     })),
+    requestId,
+    ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+    permissionKind: "write" as const,
   };
   try {
     const directive = await callbacks.onCrewQuestion(question);
     const pick = pickPermissionOptionFromForemanReply(directive, params.options);
     if (pick) return { outcome: "selected", optionId: pick.optionId };
-    return autoApprove(params);
+    return autoReject(params);
   } catch {
-    return autoApprove(params);
+    return autoReject(params);
   }
 }

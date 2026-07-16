@@ -94,7 +94,7 @@ pnpm workspace with `packages/*` and `apps/*`. All packages are `@openx/*` scope
 - **Database** (`src/db.ts`): `better-sqlite3` with WAL mode. Single SQLite file at `~/.openx/openx.db`. Schema migrations inline via `ensureColumn`/`ensureTable`. Key tables: `goals`, `goal_logs`, `coach_messages`, `execution_summaries`, `sse_events`, `conversations`, `projects`.
 - **SSE** (`src/sse.ts`): Server-Sent Events for real-time push to web client. Events are persisted in `sse_events` table for catchup on reconnect.
 - **Settings** (`src/settings-store.ts`): JSON file at `~/.openx/config.json`. Contains LLM providers, model mappings, executor config, CLI profiles, MCP servers, etc.
-- **Goal Lifecycle** (`src/goal-lifecycle.ts`, `src/goal-actions.ts`): GoalStatus 6 态（见下方状态机）。Rework 是 `awaiting_review → running`（附 `effectStatus="rework"`），非独立状态。
+- **Goal Lifecycle** (`src/goal-lifecycle.ts`, `src/goal-actions.ts`): GoalStatus 7 态（见下方状态机）。Rework 是 `awaiting_review → running`（附 `effectStatus="rework"`），非独立状态。`paused` 为正式等待开发商决策态。
 - **Auto-Review** (`src/auto-review.ts`): After goal completion, Coach LLM reviews deliverables against acceptance criteria. Can trigger rework with `maxIterations` guard (default 20). Includes `review-verify.ts` that runs actual test commands and reads files to verify completion.
 - **Goal Completion Gate** (`src/goal-completion-gate.ts`): Blocks parent goal completion until all non-waived child goals are done.
 - **Sub-Goal Routing** (`src/sub-goals.ts`): When parent review fails, routes rework to specific child goals via `routeParentReviewFail()`.
@@ -111,12 +111,14 @@ pnpm workspace with `packages/*` and `apps/*`. All packages are `@openx/*` scope
 
 ### Goal State Machine
 
-GoalStatus has **6 states** (defined in `@openx/shared` `goal.ts`):
+GoalStatus has **7 states** (defined in `@openx/shared` `goal.ts`):
 
 ```
 draft ──→ running ──→ awaiting_review ──→ done
   │          │              │
   │          │              └──→ running  (rework loop, effectStatus="rework")
+  │          │
+  │          ├──→ paused ──→ running  (显式续跑 /resume)
   │          │
   │          └──→ failed ──→ running  (retry)
   │               │
@@ -126,13 +128,14 @@ cancelled     cancelled
 
 `canTransition()` allowed transitions:
 - `draft` → `running`, `cancelled`
-- `running` → `awaiting_review`, `failed`, `cancelled`
+- `running` → `awaiting_review`, `paused`, `failed`, `cancelled`
+- `paused` → `running`, `cancelled`
 - `awaiting_review` → `done`, `running` (rework), `cancelled`
 - `failed` → `running`, `cancelled`
 - `done` → (terminal)
 - `cancelled` → (terminal)
 
-**Important**: `rework` is NOT a GoalStatus — it is an `EffectStatus` (`"approved" | "rework"`) on the Goal object. The rework loop is `awaiting_review → running` with `goal.effectStatus = "rework"` set. `done` and `cancelled` are both terminal states.
+**Important**: `rework` is NOT a GoalStatus — it is an `EffectStatus` (`"approved" | "rework"`) on the Goal object. The rework loop is `awaiting_review → running` with `goal.effectStatus = "rework"` set. `paused` is the formal park-for-user-decision state; resume requires explicit TaskCommand. `done` and `cancelled` are both terminal states.
 
 Sub-goal dependencies via `dependsOn` enable chained execution. Parent goals are blocked by `goal-completion-gate` until all children complete.
 

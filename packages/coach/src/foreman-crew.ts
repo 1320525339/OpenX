@@ -44,6 +44,7 @@ const FOREMAN_CREW_PLAYBOOK = [
   "3. 结合目标验收标准与派单说明做判断，但回复保持简洁。",
   "4. 仅在必须由用户（开发商）决策时，回复**开头**写 [上报开发商] 并说明原因（删库/生产/费用/权限等）。",
   "5. 不要输出 JSON、markdown 代码块或 crew-question 块。",
+  "6. 若施工队列出了可选方案（含选项 id），回复**第一行**必须写：选项ID: <id>（从列表中原样抄写），第二行起再写自然语言说明。权限类请求未明确批准时选拒绝类选项。",
 ].join("\n");
 
 export function buildForemanCrewUserPrompt(
@@ -65,11 +66,21 @@ export function buildForemanCrewUserPrompt(
     "## 施工队消息",
     question.context?.trim() || question.prompt,
   ];
+  if (question.requestId) {
+    parts.push("", `- requestId: ${question.requestId}`);
+  }
+  if (question.permissionKind) {
+    parts.push(`- permissionKind: ${question.permissionKind}`);
+  }
   if (question.options?.length) {
     parts.push(
       "",
-      "### 施工队列出的可选方案（供参考，不必拘泥 id）",
+      "### 施工队列出的可选方案（必须用选项ID 行选定其一）",
       ...question.options.map((o) => `- ${o.label}${o.id ? ` (${o.id})` : ""}`),
+      "",
+      "回复格式示例：",
+      "选项ID: <上列 id>",
+      "……自然语言说明……",
     );
   }
   if (question.escalate) {
@@ -78,7 +89,12 @@ export function buildForemanCrewUserPrompt(
   if (options?.browserDesktopContext?.trim()) {
     parts.push("", "## 工头可见浏览器（桌面 Pin）", options.browserDesktopContext.trim());
   }
-  parts.push("", "请直接用自然语言回复施工队。");
+  parts.push(
+    "",
+    question.options?.length
+      ? "请按格式回复（有选项时第一行必须是 选项ID: …）。"
+      : "请直接用自然语言回复施工队。",
+  );
   return parts.filter((line) => line !== "").join("\n");
 }
 

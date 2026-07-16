@@ -9,6 +9,24 @@ export const CrewQuestionOptionSchema = z.object({
 });
 export type CrewQuestionOption = z.infer<typeof CrewQuestionOptionSchema>;
 
+export const CrewPermissionKindSchema = z.enum([
+  "general",
+  "write",
+  "shell",
+  "read",
+]);
+export type CrewPermissionKind = z.infer<typeof CrewPermissionKindSchema>;
+
+/** 消息关联字段（新路径应填写；旧消息兼容缺省） */
+export const CrewCorrelationFieldsSchema = z.object({
+  requestId: z.string().min(1).optional(),
+  replyTo: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  turnId: z.number().int().nonnegative().optional(),
+  permissionKind: CrewPermissionKindSchema.optional(),
+});
+export type CrewCorrelationFields = z.infer<typeof CrewCorrelationFieldsSchema>;
+
 export const CrewQuestionSchema = z.object({
   kind: z.literal("question"),
   prompt: z.string().min(1),
@@ -17,6 +35,11 @@ export const CrewQuestionSchema = z.object({
   context: z.string().optional(),
   /** 强制上报开发商（用户） */
   escalate: z.boolean().optional(),
+  requestId: z.string().min(1).optional(),
+  replyTo: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  turnId: z.number().int().nonnegative().optional(),
+  permissionKind: CrewPermissionKindSchema.optional(),
 });
 export type CrewQuestion = z.infer<typeof CrewQuestionSchema>;
 
@@ -27,6 +50,11 @@ export const CrewDirectiveSchema = z.object({
   source: z.enum(["foreman_auto", "foreman_llm", "foreman_user", "foreman_rule"]).default("foreman_auto"),
   /** 工头已提请开发商决策，施工队应 park 并等待续跑 */
   pauseUntilUser: z.boolean().optional(),
+  requestId: z.string().min(1).optional(),
+  replyTo: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  turnId: z.number().int().nonnegative().optional(),
+  permissionKind: CrewPermissionKindSchema.optional(),
 });
 export type CrewDirective = z.infer<typeof CrewDirectiveSchema>;
 
@@ -35,8 +63,26 @@ export const CrewEscalationSchema = z.object({
   prompt: z.string().min(1),
   options: z.array(CrewQuestionOptionSchema).optional(),
   reason: z.string().optional(),
+  requestId: z.string().min(1).optional(),
+  replyTo: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  turnId: z.number().int().nonnegative().optional(),
+  permissionKind: CrewPermissionKindSchema.optional(),
 });
 export type CrewEscalation = z.infer<typeof CrewEscalationSchema>;
+
+/** 生成施工队请求关联 ID */
+export function createCrewRequestId(): string {
+  const c = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  return `crew-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** 确保 CrewQuestion 带 requestId（缺则补齐） */
+export function ensureCrewRequestId(question: CrewQuestion): CrewQuestion {
+  if (question.requestId?.trim()) return question;
+  return { ...question, requestId: createCrewRequestId() };
+}
 
 export type CrewForemanOutcome = CrewDirective | CrewEscalation;
 

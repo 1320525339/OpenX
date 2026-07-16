@@ -21,7 +21,6 @@ import {
 } from "@openx/shared";
 
 import {
-  buildExecutionPrompt,
   createRunEmitter,
   dispositionForemanManagedLoop,
   runCrewDialogueLoop,
@@ -32,7 +31,6 @@ import {
   type RunEventEmitter,
 } from "@openx/executor-core";
 import {
-  CREW_FOREMAN_PROMPT_APPENDIX,
   buildAcpCrewSessionKey,
 } from "@openx/shared";
 import { handleAcpSessionUpdate, type AcpSessionState } from "./session-updates.js";
@@ -41,6 +39,7 @@ import {
   parseStoredAcpSessionId,
   resolvePermissionViaForeman,
 } from "./acp-crew.js";
+import { buildAcpTurnPrompt } from "./acp-prompt.js";
 import {
   buildCodexAcpSpawnArgs,
   buildCodexAcpSpawnEnv,
@@ -98,6 +97,8 @@ function buildSessionClient(
   state: AcpSessionState,
   run: RunEventEmitter | null,
   workspaceRoot: string,
+  permissionMode?: import("@openx/shared").DispatchPermissionMode | null,
+  sessionRef?: { current?: string },
 ): Client {
   return {
     async writeTextFile() {
@@ -130,7 +131,10 @@ function buildSessionClient(
       });
     },
     async requestPermission(params) {
-      const outcome = await resolvePermissionViaForeman(params, callbacks);
+      const outcome = await resolvePermissionViaForeman(params, callbacks, {
+        permissionMode,
+        sessionId: sessionRef?.current,
+      });
       return { outcome };
     },
   };
@@ -181,21 +185,18 @@ async function runAcpTurn(
 }> {
   const { goal, callbacks, workspaceRoot } = ctx;
   const spawnCfg = resolveAcpSpawn(runtimeId);
-  const continuation = ctx.crewContinuationPrompt?.trim();
-  const promptText = continuation
-    ? continuation
-    : [
-        buildExecutionPrompt(goal, ctx.priorLogs ?? [], ctx.enabledSkills, {
-          isRework: ctx.isRework,
-          priorSummaries: ctx.priorSummaries,
-          priorReviewRounds: ctx.priorReviewRounds,
-          agentRole: ctx.agentRole,
-          workspaceRoot: ctx.workspaceRoot,
-          llmContext: ctx.llmContext,
-          projectKnowledge: (ctx as { projectKnowledge?: string }).projectKnowledge,
-        }),
-        CREW_FOREMAN_PROMPT_APPENDIX,
-      ].join("\n\n");
+  const resumeId =
+    opts?.resumeSessionId ?? parseStoredAcpSessionId(goal.crewSessionId, runtimeId);
+  const promptText = buildAcpTurnPrompt(ctx, {
+    resume: Boolean(resumeId),
+    steer: Boolean(opts?.steer),
+  });
+  if ((resumeId || opts?.steer) && ctx.resumeTranscript?.trim()) {
+    await callbacks.onLog(
+      "info",
+      `[${runtimeId}] 已注入 OpenX 续跑 transcript（${ctx.resumeTranscript.length} 字符）`,
+    );
+  }
   const mcpServers = ctx.mcpServers ?? [];
   const spawnCreds =
     runtimeId === "acp:codex" &&
@@ -259,7 +260,18 @@ async function runAcpTurn(
     if (line) void callbacks.onLog("debug", `[${runtimeId}] ${line}`);
   });
 
-  const client = buildSessionClient(runtimeId, callbacks, state, run, workspaceRoot);
+  const sessionRef: { current?: string } = {
+    current: resumeId || undefined,
+  };
+  const client = buildSessionClient(
+    runtimeId,
+    callbacks,
+    state,
+    run,
+    workspaceRoot,
+    goal.dispatchContext?.permissionMode,
+    sessionRef,
+  );
   const input = Writable.toWeb(proc.stdin!);
   const output = Readable.toWeb(proc.stdout!) as ReadableStream<Uint8Array>;
   const conn = new ClientSideConnection(() => client, ndJsonStream(input, output));
@@ -278,24 +290,31 @@ async function runAcpTurn(
     await conn.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} });
 
     let sessionId: string;
-    const resumeId =
-      opts?.resumeSessionId ?? parseStoredAcpSessionId(goal.crewSessionId, runtimeId);
+    // resumeId 已在构造 prompt 时解析
 
     if (resumeId) {
       sessionId = resumeId;
+      sessionRef.current = sessionId;
       await conn.loadSession({ sessionId, cwd: workspaceRoot, mcpServers });
       await callbacks.onProgress(22, "ACP 会话已恢复");
       await callbacks.onLog("info", `[${runtimeId}] loadSession 续跑 ${sessionId}`);
     } else {
       const opened = await conn.newSession({ cwd: workspaceRoot, mcpServers });
       sessionId = opened.sessionId;
+      sessionRef.current = sessionId;
       await callbacks.onProgress(22, "ACP 会话已创建");
       const crewKey = buildAcpCrewSessionKey(goal.id, runtimeId);
       await callbacks.onCrewSession?.(`${runtimeId}:${sessionId}`);
       await callbacks.onLog("info", `[${runtimeId}] crewSession ${crewKey} → ${sessionId}`);
     }
 
-    const runOnePrompt = async (prompt: string) => {
+    const runOnePrompt = async (prompt: string, steer?: boolean) => {
+      if (steer) {
+        await callbacks.onLog(
+          "info",
+          `[${runtimeId}] ACP follow-up prompt（steer 语义；协议层仍用 prompt）`,
+        );
+      }
       const resp = await conn.prompt({
         sessionId,
         prompt: [{ type: "text", text: prompt }],
@@ -307,9 +326,9 @@ async function runAcpTurn(
       { conn, sessionId, state },
       promptText,
       ctx,
-      async (_handle, followPrompt) => {
+      async (_handle, followPrompt, _turnCtx, turnOpts) => {
         state.assistantText = "";
-        const resp = await runOnePrompt(followPrompt);
+        const resp = await runOnePrompt(followPrompt, turnOpts?.steer);
         return {
           summary:
             state.assistantText.trim() ||

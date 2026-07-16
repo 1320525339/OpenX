@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LlmContextSettingsSchema } from "./llm-context-config.js";
+import { ConversationModeSchema } from "./roundtable.js";
 
 export const ProjectSchema = z.object({
   id: z.string(),
@@ -28,6 +29,8 @@ export const ConversationSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   title: z.string(),
+  /** 缺省为 foreman；圆桌会话为 roundtable */
+  mode: ConversationModeSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -35,10 +38,15 @@ export type Conversation = z.infer<typeof ConversationSchema>;
 
 export const CreateConversationSchema = z.object({
   title: z.string().optional(),
+  mode: ConversationModeSchema.optional(),
+  participantProfileIds: z.array(z.string().min(1)).optional(),
 });
 export type CreateConversationInput = z.infer<typeof CreateConversationSchema>;
 
 export const UpdateConversationSchema = z.object({
-  title: z.string().min(1),
+  title: z.string().min(1).optional(),
+  mode: ConversationModeSchema.optional(),
+}).refine((v) => v.title !== undefined || v.mode !== undefined, {
+  message: "至少提供 title 或 mode",
 });
 export type UpdateConversationInput = z.infer<typeof UpdateConversationSchema>;

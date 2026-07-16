@@ -8,7 +8,7 @@ import {
   ReworkSchema,
   BatchGoalsSchema,
   RecommendExecutorInputSchema,
-  canTransition,
+  TaskCommandHttpBodySchema,
   canMutateGoal,
   DEFAULT_AUTO_REVIEW,
   goalMutationDeniedMessage,
@@ -17,6 +17,7 @@ import {
   mergeDispatchContext,
   normalizeDispatchContext,
   type Goal,
+  type TaskCommand,
 } from "@openx/shared";
 import {
   listGoals,
@@ -36,6 +37,7 @@ import {
   listCrewExchanges,
   areDependenciesMet,
   deleteGoals,
+  GoalRevisionConflictError,
 } from "../db.js";
 import { triggerGoalReview } from "../auto-review.js";
 import { loadSettings } from "../settings-store.js";
@@ -46,15 +48,30 @@ import {
   dispatchGoal,
   detectExecutors,
   cancelRunning,
-  resumeCrewAfterUserDecision,
 } from "../orchestrator.js";
 import { narrateGoalChange } from "../narration.js";
 import { recommendExecutorForGoal, resolveGoalExecutorId } from "../executor-recommend-service.js";
-import { cancelGoalStatus, claimGoalForDispatch } from "../goal-lifecycle.js";
-import { approveGoal, reworkGoal, waiveChildGoal } from "../goal-actions.js";
+import { claimGoalForDispatch } from "../goal-lifecycle.js";
+import { waiveChildGoal } from "../goal-actions.js";
 import { checkGoalApprovalGate } from "../goal-completion-gate.js";
 import { buildGoalDispatchContext } from "../goal-dispatch.js";
 import { goalMutationForbidden, parseGoalAccessActor } from "../goal-access-http.js";
+import { executeTaskCommand } from "../task-command.js";
+
+function commandFromHttp(
+  goalId: string,
+  type: TaskCommand["type"],
+  actor: ReturnType<typeof parseGoalAccessActor>,
+  extra?: Partial<TaskCommand>,
+): TaskCommand {
+  return {
+    type,
+    goalId,
+    source: "api",
+    actor,
+    ...extra,
+  };
+}
 
 export const goalsRoutes = new Hono();
 
@@ -293,11 +310,11 @@ goalsRoutes.post("/", async (c) => {
     if (claimed) {
       claimed.progress = 0;
       claimed.updatedAt = new Date().toISOString();
-      updateGoal(claimed);
-      broadcast({ type: "goal.updated", goal: claimed });
-      narrateGoalChange(claimed, "start");
-      appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
-      void dispatchGoal(claimed.id);
+      const savedClaimed = updateGoal(claimed);
+      broadcast({ type: "goal.updated", goal: savedClaimed });
+      narrateGoalChange(savedClaimed, "start");
+      appendLog(savedClaimed.id, "info", `任务启动，执行器：${savedClaimed.executorId}`);
+      void dispatchGoal(savedClaimed.id);
     }
   }
 
@@ -309,11 +326,11 @@ goalsRoutes.post("/", async (c) => {
       if (!claimedChild) continue;
       claimedChild.progress = 0;
       claimedChild.updatedAt = new Date().toISOString();
-      updateGoal(claimedChild);
-      broadcast({ type: "goal.updated", goal: claimedChild });
-      narrateGoalChange(claimedChild, "start");
-      appendLog(claimedChild.id, "info", `任务启动，执行器：${claimedChild.executorId}`);
-      void dispatchGoal(claimedChild.id);
+      const savedChild = updateGoal(claimedChild);
+      broadcast({ type: "goal.updated", goal: savedChild });
+      narrateGoalChange(savedChild, "start");
+      appendLog(savedChild.id, "info", `任务启动，执行器：${savedChild.executorId}`);
+      void dispatchGoal(savedChild.id);
     }
   }
 
@@ -330,6 +347,9 @@ goalsRoutes.get("/:id/children", (c) => {
 goalsRoutes.post("/:id/sub-goals", async (c) => {
   const parent = getGoalById(c.req.param("id"));
   if (!parent) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, parent);
+  if (denied) return denied;
   const body = AddSubGoalsSchema.parse(await c.req.json());
   const children = await createSubGoalsUnderParent(
     parent.id,
@@ -365,30 +385,64 @@ goalsRoutes.get("/:id/crew-messages", (c) => {
   return c.json({ messages: listCrewExchanges(goal.id) });
 });
 
+goalsRoutes.post("/:id/commands", async (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const body = TaskCommandHttpBodySchema.parse(await c.req.json());
+  const result = await executeTaskCommand(
+    commandFromHttp(goal.id, body.type, actor, {
+      reason: body.reason,
+      idempotencyKey: body.idempotencyKey,
+      userDecision: body.userDecision,
+      reworkReason: body.reworkReason,
+    }),
+  );
+  if (!result.ok) {
+    return c.json(
+      { error: result.error, gateReasons: result.gateReasons },
+      result.status,
+    );
+  }
+  return c.json({
+    ok: true,
+    goal: result.goal,
+    mode: result.mode,
+    idempotentReplay: result.idempotentReplay,
+  });
+});
+
 goalsRoutes.post("/:id/crew/resume", async (c) => {
-  const goalId = c.req.param("id");
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
   const body = (await c.req.json().catch(() => ({}))) as { message?: string };
   const message = typeof body.message === "string" ? body.message : "";
-  const result = await resumeCrewAfterUserDecision(goalId, message);
+  const result = await executeTaskCommand(
+    commandFromHttp(goal.id, "resume", actor, { userDecision: message }),
+  );
   if (!result.ok) {
-    return c.json({ error: result.error ?? "续跑失败" }, 400);
+    return c.json({ error: result.error ?? "续跑失败" }, result.status);
   }
-  const goal = getGoalById(goalId);
-  return c.json({ ok: true, goal });
+  return c.json({ ok: true, goal: result.goal });
 });
 
 goalsRoutes.post("/:id/trigger-review", async (c) => {
+  const goal = getGoalById(c.req.param("id"));
+  if (!goal) return c.json({ error: "Not found" }, 404);
+  const actor = parseGoalAccessActor(c);
+  const denied = goalMutationForbidden(c, actor, goal);
+  if (denied) return denied;
   const body = (await c.req.json().catch(() => ({}))) as { force?: boolean };
-  const goalId = c.req.param("id");
-  const result = await triggerGoalReview(goalId, { force: body.force ?? true });
+  const result = await triggerGoalReview(goal.id, { force: body.force ?? true });
   if (!result.ok) {
     return c.json({ error: result.error ?? "审查失败" }, 400);
   }
-  const goal = getGoalById(goalId);
+  const updated = getGoalById(goal.id);
   return c.json({
     ok: true,
-    goal,
-    rounds: goal ? listReviewRoundEntries(goal.id) : [],
+    goal: updated,
+    rounds: updated ? listReviewRoundEntries(updated.id) : [],
   });
 });
 
@@ -400,7 +454,9 @@ goalsRoutes.patch("/:id", async (c) => {
   if (denied) return denied;
   const patch = UpdateGoalSchema.parse(await c.req.json());
   if (
-    (goal.status === "running" || goal.status === "awaiting_review") &&
+    (goal.status === "running" ||
+      goal.status === "paused" ||
+      goal.status === "awaiting_review") &&
     (patch.executorId !== undefined || patch.dependsOn !== undefined)
   ) {
     return c.json(
@@ -408,10 +464,30 @@ goalsRoutes.patch("/:id", async (c) => {
       409,
     );
   }
-  Object.assign(goal, patch, { updatedAt: new Date().toISOString() });
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  return c.json({ goal });
+  if (patch.baseRevision !== undefined && patch.baseRevision !== (goal.revision ?? 0)) {
+    return c.json(
+      {
+        error: "Goal revision conflict",
+        currentRevision: goal.revision ?? 0,
+      },
+      409,
+    );
+  }
+  const { baseRevision: _base, ...fields } = patch;
+  Object.assign(goal, fields, { updatedAt: new Date().toISOString() });
+  try {
+    const saved = updateGoal(goal);
+    broadcast({ type: "goal.updated", goal: saved });
+    return c.json({ goal: saved });
+  } catch (err) {
+    if (err instanceof GoalRevisionConflictError) {
+      return c.json(
+        { error: "Goal revision conflict", currentRevision: err.currentRevision },
+        409,
+      );
+    }
+    throw err;
+  }
 });
 
 goalsRoutes.post("/:id/refine", async (c) => {
@@ -436,35 +512,26 @@ goalsRoutes.post("/:id/refine", async (c) => {
   goal.executionPrompt = refined.executionPrompt;
   goal.constraints = refined.constraints;
   goal.updatedAt = new Date().toISOString();
-  updateGoal(goal);
-  broadcast({ type: "goal.updated", goal });
-  return c.json({ goal, refined, meta: { llmError, quotaExceeded } });
+  const saved = updateGoal(goal);
+  broadcast({ type: "goal.updated", goal: saved });
+  return c.json({ goal: saved, refined, meta: { llmError, quotaExceeded } });
 });
 
 goalsRoutes.post("/:id/start", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   const actor = parseGoalAccessActor(c);
-  const denied = goalMutationForbidden(c, actor, goal);
-  if (denied) return denied;
-  if (goal.status === "running") {
-    return c.json({ goal });
+  const result = await executeTaskCommand(commandFromHttp(goal.id, "publish", actor));
+  if (!result.ok) {
+    return c.json(
+      {
+        error: result.error,
+        dependsOn: result.status === 409 ? goal.dependsOn : undefined,
+      },
+      result.status,
+    );
   }
-  if (!areDependenciesMet(goal)) {
-    return c.json({ error: "Dependencies not completed", dependsOn: goal.dependsOn }, 409);
-  }
-  const claimed = claimGoalForDispatch(goal.id, ["draft", "failed"]);
-  if (!claimed) {
-    return c.json({ error: `Cannot start from ${goal.status}` }, 400);
-  }
-  claimed.progress = 0;
-  claimed.updatedAt = new Date().toISOString();
-  updateGoal(claimed);
-  broadcast({ type: "goal.updated", goal: claimed });
-  narrateGoalChange(claimed, "start");
-  appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
-  void dispatchGoal(claimed.id);
-  return c.json({ goal: claimed });
+  return c.json({ goal: result.goal });
 });
 
 /** failed 任务重试（等价于 start，语义更明确） */
@@ -472,37 +539,27 @@ goalsRoutes.post("/:id/retry", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   const actor = parseGoalAccessActor(c);
-  const denied = goalMutationForbidden(c, actor, goal);
-  if (denied) return denied;
   if (goal.status !== "failed") {
     return c.json({ error: "Only failed goals can be retried" }, 400);
   }
-  if (!areDependenciesMet(goal)) {
-    return c.json({ error: "Dependencies not completed", dependsOn: goal.dependsOn }, 409);
+  const result = await executeTaskCommand(commandFromHttp(goal.id, "publish", actor));
+  if (!result.ok) {
+    return c.json(
+      {
+        error: result.error,
+        dependsOn: result.status === 409 ? goal.dependsOn : undefined,
+      },
+      result.status,
+    );
   }
-  const claimed = claimGoalForDispatch(goal.id, ["failed"]);
-  if (!claimed) {
-    return c.json({ error: "Cannot retry goal" }, 400);
-  }
-  claimed.progress = 0;
-  claimed.effectStatus = undefined;
-  claimed.reworkReason = undefined;
-  claimed.updatedAt = new Date().toISOString();
-  updateGoal(claimed);
-  broadcast({ type: "goal.updated", goal: claimed });
-  narrateGoalChange(claimed, "start");
-  appendLog(claimed.id, "info", `失败任务重试，执行器：${claimed.executorId}`);
-  void dispatchGoal(claimed.id);
-  return c.json({ goal: claimed });
+  return c.json({ goal: result.goal });
 });
 
-goalsRoutes.post("/:id/approve", (c) => {
+goalsRoutes.post("/:id/approve", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   const actor = parseGoalAccessActor(c);
-  const denied = goalMutationForbidden(c, actor, goal);
-  if (denied) return denied;
-  const result = approveGoal(c.req.param("id"), { source: "user" });
+  const result = await executeTaskCommand(commandFromHttp(goal.id, "approve", actor));
   if (!result.ok) {
     return c.json(
       { error: result.error, gateReasons: result.gateReasons },
@@ -535,24 +592,27 @@ goalsRoutes.post("/:id/rework", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   const actor = parseGoalAccessActor(c);
-  const denied = goalMutationForbidden(c, actor, goal);
-  if (denied) return denied;
   const body = ReworkSchema.parse(await c.req.json().catch(() => ({})));
-  const result = await reworkGoal(c.req.param("id"), body.reason, {
-    source: "user",
-  });
+  const result = await executeTaskCommand(
+    commandFromHttp(goal.id, "rework", actor, {
+      reason: body.reason,
+      reworkReason: body.reason,
+    }),
+  );
   if (!result.ok) return c.json({ error: result.error }, result.status);
   return c.json({ goal: result.goal, mode: result.mode });
 });
 
-goalsRoutes.post("/:id/cancel", (c) => {
+goalsRoutes.post("/:id/cancel", async (c) => {
   const goal = getGoalById(c.req.param("id"));
   if (!goal) return c.json({ error: "Not found" }, 404);
   const actor = parseGoalAccessActor(c);
-  const denied = goalMutationForbidden(c, actor, goal);
-  if (denied) return denied;
-  cancelRunning(goal.id);
-  const result = cancelGoalStatus(goal.id);
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+  const result = await executeTaskCommand(
+    commandFromHttp(goal.id, "cancel", actor, {
+      reason: typeof body.reason === "string" ? body.reason : undefined,
+    }),
+  );
   if (!result.ok) return c.json({ error: result.error }, result.status);
   return c.json({ goal: result.goal });
 });
@@ -564,7 +624,7 @@ goalsRoutes.delete("/:id", (c) => {
   const actor = parseGoalAccessActor(c);
   const denied = goalMutationForbidden(c, actor, goal);
   if (denied) return denied;
-  if (goal.status === "running") {
+  if (goal.status === "running" || goal.status === "paused") {
     cancelRunning(goal.id);
   }
   const result = deleteGoals([id]);
@@ -595,7 +655,7 @@ goalsRoutes.post("/batch", async (c) => {
         failed.push({ id, error: goalMutationDeniedMessage() });
         continue;
       }
-      if (goal.status === "running") {
+      if (goal.status === "running" || goal.status === "paused") {
         cancelRunning(goal.id);
       }
     }
@@ -619,43 +679,31 @@ goalsRoutes.post("/batch", async (c) => {
     }
     try {
       if (action === "start") {
-        if (goal.status === "running") {
-          ok.push(id);
+        const result = await executeTaskCommand(
+          commandFromHttp(goal.id, "publish", actor),
+        );
+        if (!result.ok) {
+          failed.push({ id, error: result.error });
           continue;
         }
-        if (!areDependenciesMet(goal)) {
-          failed.push({ id, error: "前置目标未完成" });
-          continue;
-        }
-        const claimed = claimGoalForDispatch(goal.id, ["draft", "failed"]);
-        if (!claimed) {
-          failed.push({ id, error: `无法从 ${goal.status} 启动` });
-          continue;
-        }
-        claimed.progress = 0;
-        claimed.updatedAt = new Date().toISOString();
-        updateGoal(claimed);
-        broadcast({ type: "goal.updated", goal: claimed });
-        narrateGoalChange(claimed, "start");
-        appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
-        void dispatchGoal(claimed.id);
         ok.push(id);
       } else if (action === "cancel") {
-        if (!canTransition(goal.status, "cancelled")) {
-          failed.push({ id, error: `无法从 ${goal.status} 取消` });
-          continue;
-        }
-        cancelRunning(goal.id);
-        const cancelled = cancelGoalStatus(goal.id);
-        if (!cancelled.ok) {
-          failed.push({ id, error: cancelled.error });
+        const result = await executeTaskCommand(
+          commandFromHttp(goal.id, "cancel", actor, {
+            reason: "批量取消",
+          }),
+        );
+        if (!result.ok) {
+          failed.push({ id, error: result.error });
           continue;
         }
         ok.push(id);
       } else if (action === "approve") {
-        const approved = approveGoal(goal.id);
-        if (!approved.ok) {
-          failed.push({ id, error: approved.error });
+        const result = await executeTaskCommand(
+          commandFromHttp(goal.id, "approve", actor),
+        );
+        if (!result.ok) {
+          failed.push({ id, error: result.error });
           continue;
         }
         ok.push(id);

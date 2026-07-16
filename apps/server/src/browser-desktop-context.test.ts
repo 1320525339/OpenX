@@ -8,16 +8,22 @@ import { createOxspSlot } from "./desktop-service.js";
 
 describe("browser-desktop-context", () => {
   let tempDir = "";
+  const prevHome = process.env.OPENX_HOME;
+  const prevConfig = process.env.OPENX_CONFIG_PATH;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "openx-browser-ctx-"));
+    process.env.OPENX_HOME = tempDir;
     process.env.OPENX_CONFIG_PATH = join(tempDir, "config.json");
     process.env.OPENX_BROWSER_MOCK = "1";
   });
 
   afterEach(async () => {
     await closeAllBrowserSessions();
-    delete process.env.OPENX_CONFIG_PATH;
+    if (prevHome === undefined) delete process.env.OPENX_HOME;
+    else process.env.OPENX_HOME = prevHome;
+    if (prevConfig === undefined) delete process.env.OPENX_CONFIG_PATH;
+    else process.env.OPENX_CONFIG_PATH = prevConfig;
     delete process.env.OPENX_BROWSER_MOCK;
   });
 

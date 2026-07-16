@@ -3,11 +3,90 @@ import type {
   CrewEscalation,
   CrewForemanOutcome,
   CrewQuestion,
+  CrewQuestionOption,
   ForemanTurnDecision,
   ForemanTurnReviewInput,
 } from "./crew.js";
 import type { Goal } from "./goal.js";
 import { parseCrewMessageFromText } from "./crew.js";
+
+/** 将回复关联到原请求（replyTo = question.requestId） */
+export function withCrewReplyCorrelation(
+  question: CrewQuestion,
+  outcome: CrewForemanOutcome,
+): CrewForemanOutcome {
+  const replyTo = question.requestId?.trim();
+  if (!replyTo) return outcome;
+  if (outcome.kind === "directive") {
+    return {
+      ...outcome,
+      replyTo,
+      ...(question.sessionId && !outcome.sessionId
+        ? { sessionId: question.sessionId }
+        : {}),
+      ...(question.permissionKind && !outcome.permissionKind
+        ? { permissionKind: question.permissionKind }
+        : {}),
+      ...(question.turnId != null && outcome.turnId == null
+        ? { turnId: question.turnId }
+        : {}),
+    };
+  }
+  return {
+    ...outcome,
+    replyTo,
+    ...(question.sessionId && !outcome.sessionId
+      ? { sessionId: question.sessionId }
+      : {}),
+    ...(question.permissionKind && !outcome.permissionKind
+      ? { permissionKind: question.permissionKind }
+      : {}),
+    ...(question.turnId != null && outcome.turnId == null
+      ? { turnId: question.turnId }
+      : {}),
+  };
+}
+
+/** 权限类选项中优先选 reject（默认拒绝） */
+export function pickDenySafeOptionId(
+  question: CrewQuestion,
+): string | undefined {
+  const options = question.options ?? [];
+  if (!options.length) return undefined;
+
+  const looksPermission =
+    question.permissionKind === "write" ||
+    question.permissionKind === "shell" ||
+    options.some(
+      (o) =>
+        /reject|deny/i.test(o.id) ||
+        /拒绝|deny|reject/i.test(o.label),
+    );
+
+  if (!looksPermission) return undefined;
+
+  const reject = options.find(
+    (o) =>
+      /reject/i.test(o.id) ||
+      o.id === "deny" ||
+      /拒绝|deny|reject/i.test(o.label),
+  );
+  return reject?.id;
+}
+
+function parseSelectedOptionIdFromText(
+  text: string,
+  options: CrewQuestionOption[],
+): { selectedOptionId?: string; message: string } {
+  const match = text.match(
+    /^(?:选项ID|selectedOptionId)\s*[：:]\s*(\S+)\s*\n?/i,
+  );
+  if (!match?.[1]) return { message: text };
+  const id = match[1].trim();
+  const valid = options.some((o) => o.id === id);
+  const message = text.slice(match[0].length).trim() || text;
+  return { selectedOptionId: valid ? id : undefined, message };
+}
 
 export type ForemanTurnReviewLoopInput = {
   goal: Pick<
@@ -122,18 +201,26 @@ export function mapForemanTextReply(
 ): CrewForemanOutcome {
   const trimmed = text.trim();
   if (/^\[上报开发商\]/.test(trimmed)) {
-    return {
+    return withCrewReplyCorrelation(question, {
       kind: "escalation",
       prompt: question.prompt,
       options: question.options,
       reason: trimmed.replace(/^\[上报开发商\]\s*/, "").trim() || "工头提请开发商决策",
-    };
+    });
   }
-  return {
+
+  const options = question.options ?? [];
+  const { selectedOptionId, message } = parseSelectedOptionIdFromText(
+    trimmed,
+    options,
+  );
+
+  return withCrewReplyCorrelation(question, {
     kind: "directive",
-    message: trimmed,
+    message: message || trimmed,
+    selectedOptionId,
     source: "foreman_llm",
-  };
+  });
 }
 
 /** 将 LLM 结构化决策映射为 crew 协议（兼容旧路径） */
@@ -142,12 +229,12 @@ export function mapForemanLlmDecision(
   decision: ForemanLlmDecision,
 ): CrewForemanOutcome {
   if (decision.action === "escalate") {
-    return {
+    return withCrewReplyCorrelation(question, {
       kind: "escalation",
       prompt: question.prompt,
       options: question.options,
       reason: decision.reason?.trim() || decision.message.trim() || "工头提请开发商决策",
-    };
+    });
   }
 
   const options = question.options ?? [];
@@ -163,7 +250,7 @@ export function mapForemanLlmDecision(
     selectedOptionId: selectedId,
     source: "foreman_llm",
   };
-  return directive;
+  return withCrewReplyCorrelation(question, directive);
 }
 /** 工头不可用时的兜底答复（非规则引擎，仅传递上下文） */
 export function resolveForemanDirectiveAuto(
@@ -172,19 +259,23 @@ export function resolveForemanDirectiveAuto(
   const { question } = input;
 
   if (question.escalate) {
-    return {
+    return withCrewReplyCorrelation(question, {
       kind: "escalation",
       prompt: question.prompt,
       options: question.options,
       reason: "施工队请求开发商决策",
-    };
+    });
   }
 
-  return {
+  const denyOptionId = pickDenySafeOptionId(question);
+  return withCrewReplyCorrelation(question, {
     kind: "directive",
-    message: `收到。关于「${question.prompt}」，请结合验收标准做出合理判断并继续施工；仍有疑问可再次向工头请示。`,
+    message: denyOptionId
+      ? `权限请求未获明确结构化批准，默认拒绝（选项 ${denyOptionId}）。关于「${question.prompt}」，如需写入请由开发商明确批准后重试。`
+      : `收到。关于「${question.prompt}」，请结合验收标准做出合理判断并继续施工；仍有疑问可再次向工头请示。`,
+    selectedOptionId: denyOptionId,
     source: "foreman_rule",
-  };
+  });
 }
 
 export function isCrewEscalation(

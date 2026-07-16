@@ -84,10 +84,10 @@ function startRunnableDraft(goal: Goal): void {
   if (!claimed) return;
   claimed.progress = 0;
   claimed.updatedAt = new Date().toISOString();
-  updateGoal(claimed);
-  broadcast({ type: "goal.updated", goal: claimed });
-  appendLog(claimed.id, "info", `任务启动，执行器：${claimed.executorId}`);
-  void dispatchGoal(claimed.id);
+  const saved = updateGoal(claimed);
+  broadcast({ type: "goal.updated", goal: saved });
+  appendLog(saved.id, "info", `任务启动，执行器：${saved.executorId}`);
+  void dispatchGoal(saved.id);
 }
 
 export async function createSubGoalsUnderParent(
@@ -171,8 +171,8 @@ function resetParentAfterReviewFail(parent: Goal): void {
   parent.status = "draft";
   parent.progress = Math.min(parent.progress, 90);
   parent.updatedAt = new Date().toISOString();
-  updateGoal(parent);
-  broadcast({ type: "goal.updated", goal: parent });
+  const saved = updateGoal(parent);
+  broadcast({ type: "goal.updated", goal: saved });
 }
 
 /** 父目标合成验收 fail：优先精准打回子任务，否则创建修补子任务 */
@@ -213,7 +213,7 @@ export async function routeParentReviewFail(
   return spawnReviewFixSubGoals(parentId, verdict.reason, verdict.reworkInstruction);
 }
 
-/** 父目标合成验收未通过：创建修补子任务并自动启动（compose:feedback 闭环） */
+/** 父目标合成验收未通过：创建修补子任务并按 autoRework 策略启动 */
 export function spawnReviewFixSubGoals(
   parentId: string,
   reason: string,
@@ -223,6 +223,15 @@ export function spawnReviewFixSubGoals(
   if (!parent) return [];
 
   const settings = loadSettings();
+  if (!settings.autoRework) {
+    appendLog(
+      parentId,
+      "info",
+      "自动策略：验收失败未创建修补子任务（autoRework=false）",
+    );
+    return [];
+  }
+
   const instruction = reworkInstruction?.trim() || reason;
   const now = new Date().toISOString();
   const fix: Goal = {
@@ -260,7 +269,7 @@ export function spawnReviewFixSubGoals(
   appendLog(
     parentId,
     "warn",
-    `父目标合成验收未通过，已创建修补子任务「${fix.title}」`,
+    `自动策略：父目标合成验收未通过，已创建修补子任务「${fix.title}」（autoRework）`,
   );
 
   resetParentAfterReviewFail(parent);
@@ -278,6 +287,7 @@ function hasActiveSiblingDrafts(
       g.id !== excludeId &&
       (g.status === "draft" ||
         g.status === "running" ||
+        g.status === "paused" ||
         g.status === "awaiting_review"),
   );
 }

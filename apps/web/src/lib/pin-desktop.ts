@@ -435,6 +435,54 @@ export function setWidgetSpan(
   return norm;
 }
 
+/**
+ * 卡片头部的明确尺寸控件使用的安全缩放规则。
+ *
+ * 与旧的接缝拖拽不同，它从不为了放大一张卡而移动、挖掉或叠放其他卡片。
+ * 只有右侧所需的网格位真正为空时才允许放大，因此用户在点击
+ * 1 / 2 / 3 列时能直接预测到结果。
+ */
+export function canSetWidgetSpanWithoutDisplacing(
+  layout: PinDesktopLayout,
+  widget: PinWidgetId,
+  span: 1 | 2 | 3,
+): boolean {
+  const norm = normalizeLayout(layout);
+  const anchor = widgetColumn(norm, widget);
+  if (anchor == null) return false;
+
+  const current = widgetColumnSpan(norm, widget);
+  if (span === current || span < current) return true;
+  if (anchor + span > MAX_PIN_COLUMNS) return false;
+
+  for (let col = anchor + current; col < anchor + span; col++) {
+    if (norm.cols[col] != null || isColumnMerged(norm, col)) return false;
+  }
+  return true;
+}
+
+export function setWidgetSpanWithoutDisplacing(
+  layout: PinDesktopLayout,
+  widget: PinWidgetId,
+  span: 1 | 2 | 3,
+): PinDesktopLayout {
+  const norm = normalizeLayout(layout);
+  const anchor = widgetColumn(norm, widget);
+  if (anchor == null || !canSetWidgetSpanWithoutDisplacing(norm, widget, span)) {
+    return norm;
+  }
+
+  const current = widgetColumnSpan(norm, widget);
+  if (span === current) return norm;
+
+  if (span === 1) {
+    const wide = [false, false, false] as PinDesktopLayout["wide"];
+    return normalizeLayout({ ...norm, wide });
+  }
+
+  return setPinSpan(norm, anchor, span);
+}
+
 /** 底栏拖拽落点：已 Pin 则换位/挪动；未 Pin 先填入再落到目标列（仅整列交换，带 zone 请用 placePinWidgetAtDrop） */
 export function placePinWidgetAtColumn(
   layout: PinDesktopLayout,

@@ -32,6 +32,10 @@ import {
   deleteUserKnowledgeProject,
 } from "../knowledge-store.js";
 import { registerProjectKnowledgeRoutes } from "./knowledge.js";
+import {
+  auditProjectReadiness,
+  readinessBadgeLabel,
+} from "../project-readiness.js";
 
 export const projectsRoutes = new Hono();
 
@@ -67,6 +71,17 @@ projectsRoutes.get("/:id", (c) => {
   if (!project) return c.json({ error: "Not found" }, 404);
   const conversations = listConversations(project.id);
   return c.json({ project, conversations });
+});
+
+projectsRoutes.get("/:id/readiness", (c) => {
+  const project = getProjectById(c.req.param("id"));
+  if (!project) return c.json({ error: "Not found" }, 404);
+  const workspaceRoot = resolveWorkspaceRoot(project.workspaceDir);
+  const report = auditProjectReadiness(workspaceRoot);
+  return c.json({
+    readiness: report,
+    badge: readinessBadgeLabel(report.level),
+  });
 });
 
 projectsRoutes.patch("/:id", async (c) => {
@@ -118,13 +133,24 @@ projectsRoutes.post("/:id/conversations", async (c) => {
   if (!project) return c.json({ error: "Not found" }, 404);
   const input = CreateConversationSchema.parse(await c.req.json().catch(() => ({})));
   const now = new Date().toISOString();
+  const mode = input.mode ?? "foreman";
   const conversation = insertConversation({
     id: nanoid(),
     projectId: project.id,
-    title: input.title?.trim() || "新对话",
+    title:
+      input.title?.trim() ||
+      (mode === "roundtable" ? "新圆桌" : "新对话"),
+    mode,
     createdAt: now,
     updatedAt: now,
   });
+  if (mode === "roundtable") {
+    const { seedRoundtableParticipants } = await import("../db/roundtable-repo.js");
+    seedRoundtableParticipants(
+      conversation.id,
+      input.participantProfileIds ?? [],
+    );
+  }
   ensureRuntimeMemoryInitialized(resolveWorkspaceRoot(project.workspaceDir), project.id);
   return c.json({ conversation }, 201);
 });
@@ -142,7 +168,17 @@ conversationsRoutes.patch("/:id", async (c) => {
   const conversation = getConversationById(c.req.param("id"));
   if (!conversation) return c.json({ error: "Not found" }, 404);
   const patch = UpdateConversationSchema.parse(await c.req.json());
-  conversation.title = patch.title;
+  if (patch.title !== undefined) conversation.title = patch.title;
+  if (patch.mode !== undefined) {
+    conversation.mode = patch.mode;
+    if (patch.mode === "roundtable") {
+      const { listConversationParticipants, seedRoundtableParticipants } =
+        await import("../db/roundtable-repo.js");
+      if (listConversationParticipants(conversation.id).length === 0) {
+        seedRoundtableParticipants(conversation.id, []);
+      }
+    }
+  }
   conversation.updatedAt = new Date().toISOString();
   updateConversation(conversation);
   return c.json({ conversation });

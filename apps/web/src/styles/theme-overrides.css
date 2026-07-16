@@ -90,12 +90,7 @@
   background: var(--primary-hover);
 }
 
-.app-minimal .dynamic-island.dynamic-island-toast {
-  background: var(--surface-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-toast, 0 6px 24px rgba(0, 0, 0, 0.08));
-}
+/* 灵动岛保持独立深色表面（见 minimal.css），勿用主题 surface 覆盖，否则 preview 白字会不可读 */
 
 .chat-markdown .chat-md-pre,
 .chat-markdown code.chat-md-code {

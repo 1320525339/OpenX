@@ -6,7 +6,6 @@ import {
   computeSeamResizePreview,
   defaultSeamBoundaryX,
   isSeamVisuallyPlaced,
-  pickSeamCommitPreview,
   resolveSeamBoundaryX,
   resolveSeamPointerX,
   seamAffectsWidget,
@@ -107,15 +106,16 @@ describe("pin-desktop-seam", () => {
     expect(wideDefault).toBeCloseTo(297.3, 0);
   });
 
-  it("prefers middle-column expand on boundary-0 when third column is empty", () => {
+  it("expands left card on boundary-0 and pushes neighbor to third column", () => {
     const layout = normalizeLayout({
       cols: ["chat", "tasks", null],
       wide: [false, false, false],
     });
     const seam = buildPinSeams(layout)[0];
     const next = applySeamResizeCommit(layout, seam, true);
-    expect(next.cols).toEqual(["chat", "tasks", null]);
-    expect(next.wide[1]).toBe(true);
+    expect(next.cols).toEqual(["chat", null, "tasks"]);
+    expect(next.wide[0]).toBe(true);
+    expect(next.wide[1]).toBe(false);
   });
 
   it("finds seam when only third column is pinned beside empty middle", () => {
@@ -331,7 +331,7 @@ describe("pin-desktop-seam", () => {
     expect(extensionSlotColumn(next)).toBe(null);
   });
 
-  it("expands middle column via boundary-0 when third column is empty", () => {
+  it("expands left card via boundary-0 when third column is empty", () => {
     const layout = normalizeLayout({
       cols: ["chat", "tasks", null],
       wide: [false, false, false],
@@ -346,24 +346,17 @@ describe("pin-desktop-seam", () => {
     })!;
     expect(preview.commitSpan).toBe(2);
     const next = applySeamResizeCommit(layout, seam, preview);
-    expect(next.cols).toEqual(["chat", "tasks", null]);
-    expect(next.wide).toEqual([false, true, false]);
+    expect(next.cols).toEqual(["chat", null, "tasks"]);
+    expect(next.wide).toEqual([true, false, false]);
     expect(extensionSlotColumn(next)).toBe(null);
   });
 
-  it("pickSeamCommitPreview keeps wide tier when release position snaps back", () => {
+  it("uses the release tier after the pointer returns from a wider preview", () => {
     const layout = normalizeLayout({
       cols: ["chat", "tasks", null],
       wide: [false, false, false],
     });
     const seam = buildPinSeams(layout).find((s) => s.leftWidget === "tasks")!;
-    const startPreview = computeSeamResizePreview({
-      seam,
-      clientX: 300,
-      gridRect: rect,
-      gapPx: 8,
-      layout,
-    })!;
     const maxPreview = computeSeamResizePreview({
       seam,
       clientX: 360,
@@ -380,31 +373,17 @@ describe("pin-desktop-seam", () => {
     })!;
     expect(maxPreview.commitLeftWide).toBe(true);
     expect(releasePreview.commitLeftWide).toBe(false);
-    const commitPreview = pickSeamCommitPreview(
-      startPreview,
-      startPreview,
-      maxPreview,
-      releasePreview,
-    );
-    expect(commitPreview.commitLeftWide).toBe(true);
-    const next = applySeamResizeCommit(layout, seam, commitPreview);
-    expect(next.wide[1]).toBe(true);
-    expect(extensionSlotColumn(next)).toBe(null);
+    const next = applySeamResizeCommit(layout, seam, releasePreview);
+    expect(next.wide[1]).toBe(false);
+    expect(extensionSlotColumn(next)).toBe(2);
   });
 
-  it("pickSeamCommitPreview keeps narrow tier when shrinking span-3 from fullscreen", () => {
+  it("uses the release tier after the pointer returns from a narrower preview", () => {
     const layout = normalizeLayout({
       cols: ["chat", null, null],
       wide: [true, false, true],
     });
     const seam = buildPinSeams(layout)[0]!;
-    const startPreview = computeSeamResizePreview({
-      seam,
-      clientX: 390,
-      gridRect: rect,
-      gapPx: 8,
-      layout,
-    })!;
     const minPreview = computeSeamResizePreview({
       seam,
       clientX: 300,
@@ -419,19 +398,11 @@ describe("pin-desktop-seam", () => {
       gapPx: 8,
       layout,
     })!;
-    expect(startPreview.commitSpan).toBe(3);
     expect(minPreview.commitSpan).toBe(2);
     expect(releasePreview.commitSpan).toBe(3);
-    const commitPreview = pickSeamCommitPreview(
-      startPreview,
-      minPreview,
-      startPreview,
-      releasePreview,
-    );
-    expect(commitPreview.commitSpan).toBe(2);
-    const next = applySeamResizeCommit(layout, seam, commitPreview);
-    expect(columnSpan(next, 0)).toBe(2);
-    expect(next.wide).toEqual([true, false, false]);
+    const next = applySeamResizeCommit(layout, seam, releasePreview);
+    expect(columnSpan(next, 0)).toBe(3);
+    expect(next.wide).toEqual([true, false, true]);
   });
 
   it("shrinks lone span-3 chat back to single column", () => {
@@ -471,7 +442,7 @@ describe("pin-desktop-seam", () => {
     ).toBe(true);
   });
 
-  it("restores middle column when shrinking wide-left that displaced neighbor", () => {
+  it("shrinks 112 wide-left into two single cards by moving the right neighbor", () => {
     const layout = normalizeLayout({
       cols: ["chat", null, "tasks"],
       wide: [true, false, false],
@@ -837,7 +808,7 @@ describe("pin-desktop-seam", () => {
     expect(next.wide).toEqual([true, false, false]);
   });
 
-  it("shrinks wide-left with third-column card back to one column", () => {
+  it("shrinks 112 wide-left with third-column card into two single cards", () => {
     const layout = normalizeLayout({
       cols: ["detail", null, "tasks"],
       wide: [true, false, false],
@@ -953,37 +924,13 @@ describe("pin-desktop-seam", () => {
     expect(columnSpan(layout, 0)).toBe(2);
 
     const seam2 = buildPinSeams(layout)[0]!;
-    const atRestX = defaultSeamBoundaryX(seam2, layout, rect, 8);
-    const commitPreview = pickSeamCommitPreview(
-      computeSeamResizePreview({
-        seam: seam2,
-        clientX: atRestX,
-        gridRect: rect,
-        gapPx: 8,
-        layout,
-      })!,
-      computeSeamResizePreview({
-        seam: seam2,
-        clientX: 220,
-        gridRect: rect,
-        gapPx: 8,
-        layout,
-      })!,
-      computeSeamResizePreview({
-        seam: seam2,
-        clientX: atRestX,
-        gridRect: rect,
-        gapPx: 8,
-        layout,
-      })!,
-      computeSeamResizePreview({
-        seam: seam2,
-        clientX: atRestX,
-        gridRect: rect,
-        gapPx: 8,
-        layout,
-      })!,
-    );
+    const commitPreview = computeSeamResizePreview({
+      seam: seam2,
+      clientX: 220,
+      gridRect: rect,
+      gapPx: 8,
+      layout,
+    })!;
     expect(commitPreview.commitSpan).toBe(1);
     layout = applySeamResizeCommit(layout, seam2, commitPreview);
     expect(columnSpan(layout, 0)).toBe(1);

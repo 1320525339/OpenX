@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Context, Next } from "hono";
-import { INTERNAL_TOKEN_PATH } from "./paths.js";
+import { getInternalTokenPath } from "./paths.js";
 
 function isLoopbackHost(host: string | undefined): boolean {
   if (!host) return false;
@@ -12,21 +12,22 @@ function isLoopbackHost(host: string | undefined): boolean {
 
 let cachedToken: string | undefined;
 
-/** 获取或生成 ~/.openx/internal.token（Connect /internal 回调使用） */
+/** 获取或生成 OPENX_HOME/internal.token（Connect /internal 回调使用） */
 export function getOrCreateInternalToken(): string {
   if (process.env.OPENX_INTERNAL_TOKEN?.trim()) {
     return process.env.OPENX_INTERNAL_TOKEN.trim();
   }
   if (cachedToken) return cachedToken;
 
-  if (existsSync(INTERNAL_TOKEN_PATH)) {
-    cachedToken = readFileSync(INTERNAL_TOKEN_PATH, "utf8").trim();
+  const tokenPath = getInternalTokenPath();
+  if (existsSync(tokenPath)) {
+    cachedToken = readFileSync(tokenPath, "utf8").trim();
     if (cachedToken) return cachedToken;
   }
 
   cachedToken = randomBytes(32).toString("hex");
-  mkdirSync(dirname(INTERNAL_TOKEN_PATH), { recursive: true });
-  writeFileSync(INTERNAL_TOKEN_PATH, cachedToken, { mode: 0o600 });
+  mkdirSync(dirname(tokenPath), { recursive: true });
+  writeFileSync(tokenPath, cachedToken, { mode: 0o600 });
   return cachedToken;
 }
 
@@ -55,7 +56,7 @@ export async function internalOnly(c: Context, next: Next) {
   return c.json(
     {
       error:
-        "Internal API: missing x-openx-internal-token（见 Connect 注册响应或 ~/.openx/internal.token）",
+        "Internal API: missing x-openx-internal-token（见 Connect 注册响应或 OPENX_HOME/internal.token）",
     },
     403,
   );

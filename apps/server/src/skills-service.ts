@@ -24,7 +24,7 @@ import {
 } from "@openx/shared";
 import { getOpenxSkillsDir } from "@openx/shared/skills-path";
 import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
-import { OPENX_DIR } from "./paths.js";
+import { getOpenxHome } from "./paths.js";
 import { loadSettings } from "./settings-store.js";
 import { ensureWorkspaceSkillsLink } from "./workspace-skills-link.js";
 
@@ -207,7 +207,7 @@ export async function syncBuiltinSkills(force = false): Promise<SkillManifest> {
   if (syncPromise && !force) return syncPromise;
 
   const run = async (): Promise<SkillManifest> => {
-    mkdirSync(OPENX_DIR, { recursive: true });
+    mkdirSync(getOpenxHome(), { recursive: true });
     cleanupSkillTempDirs();
     const manifest = loadSkillManifest();
 

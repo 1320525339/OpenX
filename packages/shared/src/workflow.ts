@@ -105,6 +105,13 @@ export const BUILTIN_WORKFLOW_SUMMARIES: WorkflowSummary[] = [
     minTier: "read",
     stepCount: 1,
   },
+  {
+    id: "miloco_health_check",
+    title: "Miloco 健康检查",
+    description: "同步 Skills、检查服务状态与 Dashboard 可达性",
+    minTier: "read",
+    stepCount: 3,
+  },
 ];
 
 export function listBuiltinWorkflowSummaries(): WorkflowSummary[] {

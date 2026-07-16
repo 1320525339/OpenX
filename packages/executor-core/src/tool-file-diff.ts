@@ -11,6 +11,7 @@ export function toolFileDiffFromDeliverable(
     buildToolFileDiff(deliverable.previousContent, deliverable.preview, {
       path: deliverable.path,
       maxLines: 80,
+      maxBytes: 1_048_576,
     }) ?? undefined
   );
 }

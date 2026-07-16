@@ -1,7 +1,7 @@
 import { useMemo, useRef, type ReactNode } from "react";
 import type { CoachMessageRecord, Goal, GoalRunState } from "@openx/shared";
-import { goalMatchesDisplayFilter } from "@openx/shared";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
+import { useAppState } from "../lib/app-state";
 import { usePinDesktop } from "../lib/use-pin-desktop";
 import { usePinDockDrag } from "../lib/use-pin-dock-drag";
 import type { PinWidgetId } from "../lib/pin-desktop";
@@ -9,6 +9,7 @@ import { extWidgetId } from "../lib/oxsp-catalog";
 import type { ExecutorInfo } from "../api";
 import type { BatchGoalsAction, GoalAccessActor } from "@openx/shared";
 import { ChatPanel } from "./ChatPanel";
+import { RoundtableChatPanel } from "./roundtable/RoundtableChatPanel";
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { PreviewRail } from "./PreviewRail";
 import { HyperPinDesktop } from "./smart-cabin/HyperPinDesktop";
@@ -16,17 +17,16 @@ import { PinDesktopCanvas } from "./smart-cabin/PinDesktopCanvas";
 import { PinDesktopPager } from "./smart-cabin/PinDesktopPager";
 import { OxspSlotRenderer } from "./smart-cabin/OxspSlotRenderer";
 import { PinDock } from "./smart-cabin/PinDock";
-import { TaskIndexCard } from "./smart-cabin/TaskIndexCard";
-
 type GoalActions = {
-  onApprove: (id: string) => Promise<void>;
-  onRework: (id: string, reason?: string) => Promise<void>;
-  onStart: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<boolean>;
+  onRework: (id: string, reason?: string) => Promise<boolean>;
+  onStart: (id: string) => Promise<boolean>;
 };
 
 type Props = {
   conversationId: string;
   conversationTitle?: string;
+  conversationMode?: "foreman" | "roundtable";
   projectId?: string;
   goals: Goal[];
   selectedGoal: Goal | undefined;
@@ -51,6 +51,7 @@ type Props = {
   executors: ExecutorInfo[];
   defaultExecutorId?: string;
   onRefreshed: () => void;
+  upsertGoals: (goals: Goal[]) => void;
   onLocateGoal: (goalId: string) => void;
   coachReplyEvent: CoachReplyEvent | null;
   coachStream: CoachStreamState | null;
@@ -60,6 +61,7 @@ type Props = {
 export function ConversationWorkspace(props: Props) {
   const {
     conversationId,
+    conversationMode: conversationModeProp = "foreman",
     projectId,
     goals,
     selectedGoal,
@@ -84,11 +86,17 @@ export function ConversationWorkspace(props: Props) {
     executors,
     defaultExecutorId,
     onRefreshed,
+    upsertGoals,
     onLocateGoal,
     coachReplyEvent,
     coachStream,
     coachMessageEvent,
   } = props;
+
+  const { state, enableRoundtable } = useAppState();
+  const conversationMode =
+    state.conversations.find((c) => c.id === conversationId)?.mode ??
+    conversationModeProp;
 
   const {
     layout,
@@ -119,11 +127,6 @@ export function ConversationWorkspace(props: Props) {
     onDockDragCancel,
   } = usePinDockDrag(layout, placeAtDrop, () => getCellRectRef.current);
 
-  const filteredGoals = useMemo(
-    () => goals.filter((g) => goalMatchesDisplayFilter(g, statusFilter)),
-    [goals, statusFilter],
-  );
-
   const selectedRun = selectedGoal ? runs[selectedGoal.id] : undefined;
 
   const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
@@ -137,6 +140,7 @@ export function ConversationWorkspace(props: Props) {
       executors,
       defaultExecutorId,
       onRefreshed,
+      upsertGoals,
       onOpenGoalDetail: onOpenDetail,
       onLocateGoal,
       onStartGoal: goalActions.onStart,
@@ -150,25 +154,17 @@ export function ConversationWorkspace(props: Props) {
     const builtinWidgets: Partial<Record<PinWidgetId, ReactNode>> = {
       chat: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-assistant">
-          <ChatPanel {...chatPanelProps} />
+          {conversationMode === "roundtable" ? (
+            <RoundtableChatPanel conversationId={conversationId} />
+          ) : (
+            <ChatPanel {...chatPanelProps} />
+          )}
         </div>
       ),
       tasks: (
-        <div className="flexible-widget-fill">
-          <TaskIndexCard
-            goals={goals}
-            filter={statusFilter}
-            onFilterChange={onFilterChange}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            totalCount={goals.length}
-          />
-        </div>
-      ),
-      kanban: (
         <div className="flexible-widget-fill console-task-stage">
           <GoalsWorkspace
-            goals={filteredGoals}
+            goals={goals}
             allGoals={goals}
             filter={statusFilter}
             onFilterChange={onFilterChange}
@@ -187,8 +183,7 @@ export function ConversationWorkspace(props: Props) {
             locateRequest={locateRequest}
             goalAccess={goalAccess}
             goalActions={goalActions}
-            defaultViewMode="kanban"
-            embedKanbanOnly
+            embedInPin
           />
         </div>
       ),
@@ -227,11 +222,11 @@ export function ConversationWorkspace(props: Props) {
     coachReplyEvent,
     coachStream,
     conversationId,
+    conversationMode,
     projectId,
     defaultExecutorId,
     editMode,
     executors,
-    filteredGoals,
     goalAccess,
     goalActions,
     goals,
@@ -244,6 +239,7 @@ export function ConversationWorkspace(props: Props) {
     onNewGoal,
     onOpenDetail,
     onRefreshed,
+    upsertGoals,
     onSelect,
     onSelectAllVisible,
     onToggleSelect,
@@ -293,6 +289,12 @@ export function ConversationWorkspace(props: Props) {
           pinnedCount={pinnedCount}
           onTogglePin={togglePin}
           onRegisterTemplate={registerSlotFromTemplate}
+          onEnableRoundtable={() => {
+            void enableRoundtable(conversationId).then((conv) => {
+              if (conv && !isPinned("chat")) togglePin("chat");
+            });
+          }}
+          roundtableActive={conversationMode === "roundtable"}
           onDockDragStart={onDockDragStart}
           onDockDragMove={onDockDragMove}
           onDockDragEnd={onDockDragEnd}

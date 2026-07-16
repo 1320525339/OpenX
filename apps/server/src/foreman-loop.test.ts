@@ -94,6 +94,7 @@ describe("foreman-loop", () => {
       question: {
         kind: "question",
         prompt: "A or B",
+        requestId: "req-loop-1",
         options: [
           { id: "a", label: "A" },
           { id: "b", label: "B" },
@@ -105,6 +106,7 @@ describe("foreman-loop", () => {
       kind: "directive",
       selectedOptionId: "a",
       source: "foreman_llm",
+      replyTo: "req-loop-1",
     });
     expect(resolveForemanDirectiveViaCoach).toHaveBeenCalledOnce();
   });

@@ -32,6 +32,7 @@ import {
   isProductMetaRequest,
   listLlmProviderTemplates,
   classifyCoachIntent,
+  shouldUseCoachStreaming,
   shouldUseKnowledgeSaveTool,
   DEFAULT_EXECUTION_AGENT_ID,
 } from "@openx/shared";
@@ -72,10 +73,6 @@ import {
   dismissOperatorAction,
 } from "../operator-gateway.js";
 import { prepareCoachThreadForPrompt } from "../coach-thread-service.js";
-import {
-  findAwaitingUserGoal,
-  resumeCrewAfterUserDecision,
-} from "../orchestrator.js";
 
 function loadCoachThreadContext(
   conversationId: string,
@@ -531,12 +528,16 @@ coachRoutes.post("/dispatch-permission/:messageId/respond", async (c) => {
       beforeMessageId: messageId,
     });
     const chatHistory = prepared.turns;
+    const requestedMode = permissionRow.dispatchPermission.requestedMode;
+    const coachPermissionMode =
+      input.outcome === "confirmed"
+        ? requestedMode === "unattended"
+          ? "full"
+          : requestedMode
+        : undefined;
     const ctx = await buildCoachChatContextAsync(input.conversationId, undefined, {
       message: permissionRow.dispatchPermission.requestedMode,
-      permissionMode:
-        input.outcome === "confirmed"
-          ? permissionRow.dispatchPermission.requestedMode
-          : undefined,
+      permissionMode: coachPermissionMode,
     });
     ctx.coachThreadBlock = prepared.block || undefined;
     await attachBrowserDesktopContext(ctx, input.conversationId);
@@ -605,41 +606,6 @@ coachRoutes.post("/chat", async (c) => {
       maybeAutoTitleConversation(input.conversationId, input.message);
     }
 
-    const awaitingGoal = findAwaitingUserGoal(
-      input.conversationId,
-      input.goalId,
-    );
-    if (
-      awaitingGoal &&
-      !input.forceRefine &&
-      input.skipRefine !== true &&
-      !isWorkOrderDismissMessage(input.message)
-    ) {
-      const resumed = await resumeCrewAfterUserDecision(
-        awaitingGoal.id,
-        input.message,
-      );
-      if (resumed.ok) {
-        const ack = `收到。已转告施工队按你的决策继续执行（任务单仍在进行中）。`;
-        const saved = saveCoachMessage(input.conversationId, "coach", ack, awaitingGoal.id);
-        broadcast({
-          type: "coach.message",
-          conversationId: input.conversationId,
-          message: saved,
-        });
-        return c.json({
-          message: ack,
-          intent: "message",
-          crewResumed: true,
-          goalId: awaitingGoal.id,
-        });
-      }
-      return c.json(
-        { error: resumed.error ?? "转告施工队失败，请稍后重试" },
-        400,
-      );
-    }
-
     const ctx = await buildCoachChatContextAsync(input.conversationId, input.goalId, {
       message: input.message,
       mcpIds: input.mcpIds,
@@ -660,15 +626,15 @@ coachRoutes.post("/chat", async (c) => {
     const skipRefine =
       input.skipRefine === true || isWorkOrderDismissMessage(input.message);
     /**
-     * 工头 /chat 派单分支（与 coachChatReply 对齐）：
-     * - forceRefine → 跳过 structured，直接要求 refined（「整理成任务单」）
-     * - skipRefine（用户取消工单）→ 流式续聊，禁止 refined
-     * - 产品元问题（改称呼/设置能力）→ 流式对话，禁止 refined
-     * - 其余 → 统一走 structured，由 LLM 自主三选一 clarify/refined/message
+     * 工头 /chat 派单分支（与 coachChatReply / shouldUseCoachStreaming 对齐）：
+     * - forceRefine → 跳过流式，走 structured / refined
+     * - skipRefine（用户取消工单）→ 流式续聊
+     * - shouldUseCoachStreaming（闲聊/咨询/进展/产品元问题）→ 流式
+     * - 其余（任务/返工等）→ structured，由 LLM 自主三选一 clarify/refined/message
      */
-    const preferStructured =
-      !input.forceRefine && !skipRefine && !isProductMetaRequest(input.message);
-    const willStream = !input.forceRefine && !preferStructured;
+    const willStream =
+      !input.forceRefine &&
+      (skipRefine || shouldUseCoachStreaming(input.message));
     const stream = createCoachStreamBroadcaster(input.conversationId);
     const onDelta = willStream ? stream.onDelta : undefined;
 

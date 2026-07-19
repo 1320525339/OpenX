@@ -26,7 +26,7 @@ const ConversationWorkspace = lazy(() =>
   })),
 );
 import type { IslandAction } from "@openx/shared";
-import { canMutateGoal, SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID } from "@openx/shared";
+import { canMutateGoal, SYSTEM_MAIN_CONVERSATION_ID, SYSTEM_PROJECT_ID, isProjectGoalVaultConversationId } from "@openx/shared";
 import { islandFromSimpleMessage } from "./lib/island-payload";
 import { completeIslandDisplay, getIslandDisplayToken, requestIsland } from "./lib/island-queue";
 import { AppProvider, useAppState } from "./lib/app-state";
@@ -74,6 +74,8 @@ function AppContent() {
     createConversation,
     deleteProject,
     deleteConversation,
+    clearConversationThread,
+    forgetProjectConversations,
     saveSystemWorkspace,
     goalActions,
     handleTasksBatchAction,
@@ -171,7 +173,11 @@ function AppContent() {
     : undefined;
 
   const projectConversations = state.selectedProjectId
-    ? state.conversations.filter((c) => c.projectId === state.selectedProjectId)
+    ? state.conversations.filter(
+        (c) =>
+          c.projectId === state.selectedProjectId &&
+          !isProjectGoalVaultConversationId(c.id),
+      )
     : [];
 
   useEffect(() => {
@@ -233,7 +239,7 @@ function AppContent() {
   const openGoalDetail = (id: string) => dispatch({ type: "open_goal_detail", id });
   const closeGoalDetail = () => dispatch({ type: "close_goal_detail" });
 
-  const navigateToGoal = (goalId: string): boolean => {
+  const navigateToGoal = useCallback((goalId: string): boolean => {
     const goal = state.goals.find((g) => g.id === goalId);
     if (!goal) return false;
     const conv = state.conversations.find((c) => c.id === goal.conversationId);
@@ -246,9 +252,9 @@ function AppContent() {
     });
     completeIslandDisplay({ token: getIslandDisplayToken() ?? undefined });
     return true;
-  };
+  }, [state.goals, state.conversations, dispatch]);
 
-  const handleIslandAction = async (
+  const handleIslandAction = useCallback(async (
     action: IslandAction,
     feedback?: string,
   ): Promise<boolean> => {
@@ -263,6 +269,7 @@ function AppContent() {
         const ok = await goalActions.onApprove(action.goalId);
         if (ok) completeIslandDisplay({ token });
         // 失败不 ack；返回 true 阻止 BroadcastTicker 走 dismiss→onDismiss 二次 ack
+        // onApprove 已通过 notifyIsland 抢占展示错误 toast
         return true;
       }
       case "rework": {
@@ -292,7 +299,11 @@ function AppContent() {
           return true;
         }
     }
-  };
+  }, [goalActions, navigateToGoal]);
+
+  const handleIslandDismiss = useCallback((token?: number) => {
+    completeIslandDisplay({ token });
+  }, []);
 
   const handleAddProjectFromDashboard = async () => {
     const picked = await pickWorkspaceDirectory();
@@ -311,10 +322,51 @@ function AppContent() {
   const handleDeleteConversation = (conversationId: string) => {
     const conv = state.conversations.find((c) => c.id === conversationId);
     const title = conv?.title ?? "该对话";
-    if (!window.confirm(`确定删除对话「${title}」？\n将同时删除关联任务，且不可恢复。`)) {
+    if (
+      !window.confirm(
+        `确定删除对话「${title}」？\n将保留已创建的任务（迁入任务保管箱），仅删除对话内容与会话，且不可恢复。`,
+      )
+    ) {
       return;
     }
     void deleteConversation(conversationId);
+  };
+
+  const handleClearConversation = (conversationId: string) => {
+    const conv = state.conversations.find((c) => c.id === conversationId);
+    const title = conv?.title ?? "该对话";
+    if (
+      !window.confirm(
+        `确定清空对话「${title}」？\n将清除聊天记录与进行中的生成，保留会话与任务。`,
+      )
+    ) {
+      return;
+    }
+    void clearConversationThread(conversationId);
+  };
+
+  const handleClearConsoleConversation = () => {
+    if (
+      !window.confirm(
+        "确定清空调度台对话？\n将清除聊天记录与进行中的生成，保留任务。",
+      )
+    ) {
+      return;
+    }
+    void clearConversationThread(SYSTEM_MAIN_CONVERSATION_ID);
+  };
+
+  const handleForgetProjectConversations = (projectId: string) => {
+    const project = state.projects.find((p) => p.id === projectId);
+    const name = project?.name ?? "该项目";
+    if (
+      !window.confirm(
+        `确定清空项目「${name}」下全部对话？\n将删除会话壳并保留任务与知识，且不可恢复。`,
+      )
+    ) {
+      return;
+    }
+    void forgetProjectConversations(projectId);
   };
 
   const openNewGoal = () => {
@@ -349,7 +401,7 @@ function AppContent() {
           "new-goal-no-conversation",
           state.view === "console"
             ? "调度台会话未就绪，请稍后重试"
-            : "请先在侧栏选择一个对话，再创建新目标",
+            : "请先在侧栏选择一个对话，再创建新任务",
         ),
       );
       return;
@@ -430,6 +482,8 @@ function AppContent() {
         }
         onDeleteProject={handleDeleteProject}
         onDeleteConversation={handleDeleteConversation}
+        onClearConversation={handleClearConversation}
+        onClearConsoleConversation={handleClearConsoleConversation}
         onSettings={() => {
           dispatch({ type: "set_view", view: "settings" });
           if (!settingsReady) void refreshMeta();
@@ -541,6 +595,10 @@ function AppContent() {
                     })
                   }
                   onDeleteConversation={handleDeleteConversation}
+                  onClearConversation={handleClearConversation}
+                  onForgetProjectConversations={() =>
+                    handleForgetProjectConversations(selectedProject.id)
+                  }
                   onBatchAction={handleTasksBatchAction}
                   goalActions={goalActions}
                 />
@@ -766,7 +824,7 @@ function AppContent() {
       <BroadcastTicker
         payload={state.islandPayload}
         displayToken={state.islandDisplayToken}
-        onDismiss={(token) => completeIslandDisplay({ token })}
+        onDismiss={handleIslandDismiss}
         onAction={handleIslandAction}
       />
 
@@ -777,7 +835,7 @@ function AppContent() {
           executors={state.executors}
           defaultExecutorId={settings.defaultExecutorId}
           connectOnly={state.view === "console"}
-          modalTitle={state.view === "console" ? "发布系统任务" : "新目标"}
+          modalTitle={state.view === "console" ? "发布系统任务" : "新任务"}
           onClose={() => dispatch({ type: "set_show_new_goal", show: false })}
           onCreated={(g) => {
             upsertGoals([g]);

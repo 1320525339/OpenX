@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LlmContextSettingsSchema } from "./llm-context-config.js";
-import { ConversationModeSchema } from "./roundtable.js";
+import { ConversationModeSchema, RoundtableSeatInputSchema } from "./roundtable.js";
 
 export const ProjectSchema = z.object({
   id: z.string(),
@@ -40,6 +40,7 @@ export const CreateConversationSchema = z.object({
   title: z.string().optional(),
   mode: ConversationModeSchema.optional(),
   participantProfileIds: z.array(z.string().min(1)).optional(),
+  participantSeats: z.array(RoundtableSeatInputSchema).optional(),
 });
 export type CreateConversationInput = z.infer<typeof CreateConversationSchema>;
 

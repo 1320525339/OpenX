@@ -17,12 +17,10 @@ import {
   getConversationById,
   insertConversation,
   updateConversation,
-  deleteConversation,
 } from "../db.js";
 import { normalizeWorkspaceRootForStorage, resolveWorkspaceRoot } from "../workspace-path.js";
 import { ensureWorkspaceSkillsLink } from "../workspace-skills-link.js";
 import {
-  isSystemConversationId,
   isSystemProjectId,
 } from "../system-workspace.js";
 import { distillProjectMemory } from "../dream-job.js";
@@ -36,10 +34,23 @@ import {
   auditProjectReadiness,
   readinessBadgeLabel,
 } from "../project-readiness.js";
+import {
+  ConversationForgetError,
+  forgetConversation,
+  forgetProjectConversations,
+  type ForgetLevel,
+} from "../conversation-forget.js";
+import type { Context } from "hono";
 
 export const projectsRoutes = new Hono();
 
 registerProjectKnowledgeRoutes(projectsRoutes);
+
+function forgetErrorResponse(c: Context, err: ConversationForgetError) {
+  if (err.status === 404) return c.json({ error: err.message }, 404);
+  if (err.status === 403) return c.json({ error: err.message }, 403);
+  return c.json({ error: err.message }, 400);
+}
 
 function defaultProjectName(workspaceDir: string): string {
   const normalized = normalizeWorkspaceRootForStorage(workspaceDir);
@@ -111,6 +122,19 @@ projectsRoutes.delete("/:id", (c) => {
   return c.json({ ok: true });
 });
 
+projectsRoutes.post("/:id/forget-conversations", (c) => {
+  const id = c.req.param("id");
+  try {
+    const report = forgetProjectConversations(id);
+    return c.json({ ok: true, report });
+  } catch (err) {
+    if (err instanceof ConversationForgetError) {
+      return forgetErrorResponse(c, err);
+    }
+    throw err;
+  }
+});
+
 projectsRoutes.get("/:id/memory", (c) => {
   const project = getProjectById(c.req.param("id"));
   if (!project) return c.json({ error: "Not found" }, 404);
@@ -146,10 +170,10 @@ projectsRoutes.post("/:id/conversations", async (c) => {
   });
   if (mode === "roundtable") {
     const { seedRoundtableParticipants } = await import("../db/roundtable-repo.js");
-    seedRoundtableParticipants(
-      conversation.id,
-      input.participantProfileIds ?? [],
-    );
+    seedRoundtableParticipants(conversation.id, {
+      profileIds: input.participantProfileIds,
+      seats: input.participantSeats,
+    });
   }
   ensureRuntimeMemoryInitialized(resolveWorkspaceRoot(project.workspaceDir), project.id);
   return c.json({ conversation }, 201);
@@ -186,10 +210,34 @@ conversationsRoutes.patch("/:id", async (c) => {
 
 conversationsRoutes.delete("/:id", (c) => {
   const id = c.req.param("id");
-  if (isSystemConversationId(id)) {
-    return c.json({ error: "系统会话不可删除" }, 403);
+  try {
+    const report = forgetConversation(id, "delete_conversation");
+    return c.json({ ok: true, report });
+  } catch (err) {
+    if (err instanceof ConversationForgetError) {
+      return forgetErrorResponse(c, err);
+    }
+    throw err;
   }
-  const ok = deleteConversation(id);
-  if (!ok) return c.json({ error: "Not found" }, 404);
-  return c.json({ ok: true });
+});
+
+conversationsRoutes.post("/:id/forget", async (c) => {
+  const id = c.req.param("id");
+  const body = (await c.req.json().catch(() => ({}))) as { level?: string };
+  const level = body.level as ForgetLevel | undefined;
+  if (level !== "clear_thread" && level !== "delete_conversation") {
+    return c.json(
+      { error: 'level 须为 "clear_thread" 或 "delete_conversation"' },
+      400,
+    );
+  }
+  try {
+    const report = forgetConversation(id, level);
+    return c.json({ ok: true, report });
+  } catch (err) {
+    if (err instanceof ConversationForgetError) {
+      return forgetErrorResponse(c, err);
+    }
+    throw err;
+  }
 });

@@ -135,7 +135,7 @@ export function buildCoachChatContext(
     mcpIds?: string[];
     clientTimezone?: string;
     clientLocale?: string;
-    permissionMode?: "read_only" | "ask_write" | "full";
+    permissionMode?: import("@openx/shared").DispatchPermissionMode;
   },
   overrides?: {
     projectMemory?: string;
@@ -261,7 +261,7 @@ export async function buildCoachChatContextAsync(
     clientTimezone?: string;
     clientLocale?: string;
     knowledgeSelection?: KnowledgeContextSelection;
-    permissionMode?: "read_only" | "ask_write" | "full";
+    permissionMode?: import("@openx/shared").DispatchPermissionMode;
   },
 ): Promise<CoachChatContext> {
   const settings = loadSettings();

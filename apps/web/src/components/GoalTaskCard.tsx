@@ -1,13 +1,12 @@
 import type { Goal } from "@openx/shared";
 import {
   goalDisplayHint,
-  goalDisplayLabel,
-  goalDisplayOutcome,
   CONNECT_ANY_EXECUTOR_ID,
   EXECUTOR_AUTO,
 } from "@openx/shared";
 import { connectClaimStatus, executorDisplayLabel } from "../lib/executors";
 import { buildGoalContext, formatDispatchSummary, truncate } from "../lib/goal-detail";
+import { GoalProgressBar, GoalStatusPill } from "./GoalCardPrimitives";
 import { GoalTaskExpandBody, goalResultTeaser } from "./GoalTaskExpandBody";
 import { GoalTaskActions, goalHasTaskActions, type GoalTaskActionHandlers } from "./GoalTaskActions";
 import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
@@ -60,7 +59,6 @@ export function GoalTaskCard({
   const resultTeaser = goalResultTeaser(g);
   const showCollapsedActions =
     !editMode && !expanded && goalHasTaskActions(g, handlers) && !pinVariant;
-  const hint = goalDisplayHint(g);
 
   if (pinVariant && !editMode) {
     return (
@@ -83,20 +81,16 @@ export function GoalTaskCard({
           </div>
           <div className="goal-card-pin-side">
             <span className="executor-tag">{executorLabel(g.executorId)}</span>
-            <span
-              className={`status-pill outcome-${goalDisplayOutcome(g)}${g.status === "awaiting_review" ? " awaiting_review" : ""}`}
-            >
-              {hint ?? goalDisplayLabel(g)}
-            </span>
+            <GoalStatusPill goal={g} preferHint />
           </div>
         </div>
 
-        <div className="goal-card-pin-progress">
-          <div className="progress-bar">
-            <span style={{ width: `${g.progress}%` }} />
-          </div>
-          <span className="goal-card-pin-progress-label">{g.progress}%</span>
-        </div>
+        <GoalProgressBar
+          progress={g.progress}
+          className="goal-card-pin-progress"
+          showLabel
+          labelClassName="goal-card-pin-progress-label"
+        />
 
         {g.acceptance?.trim() ? (
           <p className="goal-card-pin-acceptance">{truncate(g.acceptance.trim(), 96)}</p>
@@ -168,11 +162,7 @@ export function GoalTaskCard({
               </span>
             ) : null}
             {!editable ? <span className="goal-card-readonly-tag">只读</span> : null}
-            <span
-              className={`status-pill outcome-${goalDisplayOutcome(g)}${g.status === "awaiting_review" ? " awaiting_review" : ""}`}
-            >
-              {goalDisplayLabel(g)}
-            </span>
+            <GoalStatusPill goal={g} />
             {goalDisplayHint(g) ? (
               <span className="status-hint">{goalDisplayHint(g)}</span>
             ) : null}
@@ -194,9 +184,7 @@ export function GoalTaskCard({
             ) : null}
           </div>
           {!editMode && !expanded && g.status === "running" ? (
-            <div className="progress-bar">
-              <span style={{ width: `${g.progress}%` }} />
-            </div>
+            <GoalProgressBar progress={g.progress} />
           ) : null}
           {!editMode && !expanded && resultTeaser ? (
             <p className="goal-card-result-teaser">{truncate(resultTeaser, 140)}</p>

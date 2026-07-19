@@ -44,17 +44,47 @@ export MIMO_API_KEY="tp-abc"
   });
 
   it("sanitizes settings for API responses", () => {
+    const sanitized = sanitizeSettingsForApi(
+      {
+        providers: {
+          deepseek: {
+            name: "DeepSeek",
+            api: { type: "openai-compatible" as const, baseUrl: "https://api.deepseek.com/v1" },
+            auth: { apiKey: "sk-secret", env: "DEEPSEEK_API_KEY" },
+            models: { chat: {} },
+          },
+        },
+      },
+      { hasSecret: (k) => k === "DEEPSEEK_API_KEY" },
+    );
+    expect(sanitized.providers?.deepseek.auth?.apiKey).toBeUndefined();
+    expect(sanitized.providers?.deepseek.auth?.env).toBe("DEEPSEEK_API_KEY");
+    expect(sanitized.providers?.deepseek.auth?.apiKeyConfigured).toBe(true);
+  });
+
+  it("marks apiKeyConfigured false when secret missing", () => {
     const sanitized = sanitizeSettingsForApi({
       providers: {
         deepseek: {
           name: "DeepSeek",
           api: { type: "openai-compatible" as const, baseUrl: "https://api.deepseek.com/v1" },
-          auth: { apiKey: "sk-secret", env: "DEEPSEEK_API_KEY" },
+          auth: { env: "DEEPSEEK_API_KEY" },
           models: { chat: {} },
         },
       },
     });
-    expect(sanitized.providers?.deepseek.auth?.apiKey).toBeUndefined();
-    expect(sanitized.providers?.deepseek.auth?.env).toBe("DEEPSEEK_API_KEY");
+    expect(sanitized.providers?.deepseek.auth?.apiKeyConfigured).toBe(false);
+  });
+
+  it("strips apiKeyConfigured when writing for disk", () => {
+    const sanitized = sanitizeProviderForDisk("deepseek", {
+      name: "DeepSeek",
+      api: { type: "openai-compatible", baseUrl: "https://api.deepseek.com/v1" },
+      auth: { env: "DEEPSEEK_API_KEY", apiKeyConfigured: true },
+      models: { chat: {} },
+      source: { template: "deepseek" },
+    });
+    expect(sanitized.auth?.apiKeyConfigured).toBeUndefined();
+    expect(sanitized.auth?.env).toBe("DEEPSEEK_API_KEY");
   });
 });

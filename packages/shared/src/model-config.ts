@@ -39,6 +39,8 @@ export type ProviderApi = z.infer<typeof ProviderApiSchema>;
 export const ProviderAuthSchema = z.object({
   apiKey: z.string().optional(),
   env: z.string().optional(),
+  /** API 响应用：是否已配置密钥（不含明文；落盘前会剥离） */
+  apiKeyConfigured: z.boolean().optional(),
 });
 export type ProviderAuth = z.infer<typeof ProviderAuthSchema>;
 
@@ -437,6 +439,32 @@ export function listLlmProviderTemplates() {
   return Object.values(LLM_PROVIDERS);
 }
 
+/** Coach/审查员角色不可用的渠道模板（如 Anthropic 原生 Messages） */
+export function getCoachIncompatibleWarning(
+  settings: ModelSettingsSlice,
+  role: "coach" | "pi" | "reviewer",
+  ref?: string,
+): string | undefined {
+  if (role === "pi") return undefined;
+  const upgraded = upgradeToModelConfig(settings);
+  const resolvedRef =
+    ref ??
+    (role === "reviewer"
+      ? resolveReviewerModelRef(upgraded.model)
+      : upgraded.model?.coach ?? DEFAULT_MODEL_REF);
+  const parsed = parseModelRef(resolvedRef);
+  if (!parsed) return undefined;
+  const provider = resolveProviderConfig(upgraded, parsed.slug);
+  if (!provider) return undefined;
+  const templateId = provider.source?.template?.trim();
+  if (!templateId) return undefined;
+  const def = getLlmProvider(templateId);
+  if (def.coachCompatible === false) {
+    return def.coachWarning ?? `渠道模板「${templateId}」不兼容 Coach/审查员（OpenAI Chat）。`;
+  }
+  return undefined;
+}
+
 export type ModelRuntimeStatus = {
   ref: string;
   ready: boolean;
@@ -444,6 +472,8 @@ export type ModelRuntimeStatus = {
   baseUrl?: string;
   slug?: string;
   error?: string;
+  /** 兼容性告警（不阻止 ready，但调用方应展示） */
+  warning?: string;
 };
 
 export function getModelRuntimeStatus(
@@ -459,11 +489,14 @@ export function getModelRuntimeStatus(
         ? resolveReviewerModelRef(upgraded.model)
         : upgraded.model?.pi ?? DEFAULT_MODEL_REF;
   const creds = resolveModelCredentials(upgraded, ref, env);
+  const warning = getCoachIncompatibleWarning(upgraded, role, ref);
   return {
     ref,
-    ready: !!creds,
+    ready: !!creds && !warning,
     model: creds?.model,
     baseUrl: creds?.baseUrl,
     slug: creds?.slug,
+    warning,
+    error: warning,
   };
 }

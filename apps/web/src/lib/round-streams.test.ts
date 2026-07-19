@@ -122,19 +122,17 @@ describe("round-streams reducer helpers", () => {
     expect(streams[1].status).toBe("completed");
   });
 
-  it("orphan delta 可建立幽灵流", () => {
-    const streams = applyChatReplyDelta(
+  it("orphan completed 也能落库流文本", () => {
+    const streams = applyChatReplyCompleted(
       {},
       {
-        messageId: 9,
+        messageId: 3,
         conversationId: "c1",
-        roundId: "r1",
-        speakerId: "a",
-        streamId: "s9",
-        delta: "幽灵",
+        streamId: "s3",
+        text: "迟到完成",
       },
     );
-    expect(streams[9].text).toBe("幽灵");
-    expect(streams[9].status).toBe("streaming");
+    expect(streams[3].status).toBe("completed");
+    expect(streams[3].text).toBe("迟到完成");
   });
 });

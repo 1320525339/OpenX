@@ -41,9 +41,11 @@ import {
   CrewExchangeDirectionSchema,
   legacyRoleToSpeakerType,
   speakerTypeToLegacyRole,
+  projectGoalVaultConversationId,
+  isProjectGoalVaultConversationId,
 } from "@openx/shared";
 import { getDb } from "./db/connection.js";
-import { purgeRoundtableForConversation } from "./db/roundtable-repo.js";
+import { purgeRoundtableForConversation, purgeRoundtableRuntimeForConversation } from "./db/roundtable-repo.js";
 import {
   allocateWorkOrderNo,
   listGoalsPage,
@@ -1113,31 +1115,99 @@ export function touchConversation(id: string): void {
     .run(now, id);
 }
 
-/** 清理对话附属数据与行（假定 Goal 已处理或在此强制清理） */
-function purgeConversationRecords(id: string): boolean {
-  const database = getDb();
-  const run = database.transaction(() => {
-    const goalIds = database
-      .prepare("SELECT id FROM goals WHERE conversation_id = ?")
-      .all(id) as { id: string }[];
-    if (goalIds.length > 0) {
-      deleteGoals(
-        goalIds.map((g) => g.id),
-        { force: true },
-      );
-    }
-    database.prepare("DELETE FROM coach_messages WHERE conversation_id = ?").run(id);
-    database
-      .prepare("DELETE FROM coach_thread_checkpoints WHERE conversation_id = ?")
-      .run(id);
-    database.prepare("DELETE FROM crew_messages WHERE conversation_id = ?").run(id);
-    purgeRoundtableForConversation(id);
-    const result = database
-      .prepare("DELETE FROM conversations WHERE id = ?")
-      .run(id);
-    return result.changes > 0;
+export type ClearConversationThreadResult = {
+  messagesDeleted: number;
+  checkpointsDeleted: number;
+  crewDeleted: number;
+};
+
+export {
+  projectGoalVaultConversationId,
+  isProjectGoalVaultConversationId,
+};
+
+/** 确保项目下存在「任务保管箱」会话（仅作 goals 挂靠，无聊天语义） */
+export function ensureProjectGoalVaultConversation(projectId: string): Conversation {
+  const id = projectGoalVaultConversationId(projectId);
+  const existing = getConversationById(id);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  return insertConversation({
+    id,
+    projectId,
+    title: "任务保管箱",
+    mode: "foreman",
+    createdAt: now,
+    updatedAt: now,
   });
-  return run();
+}
+
+/**
+ * 清空会话聊天语境：消息 / checkpoint / crew / 圆桌运行态。
+ * 保留会话行与席位；不碰 goals。
+ */
+export function clearConversationThread(id: string): ClearConversationThreadResult {
+  const database = getDb();
+  return database.transaction(() => {
+    const messagesDeleted = Number(
+      database.prepare("DELETE FROM coach_messages WHERE conversation_id = ?").run(id)
+        .changes ?? 0,
+    );
+    const checkpointsDeleted = Number(
+      database
+        .prepare("DELETE FROM coach_thread_checkpoints WHERE conversation_id = ?")
+        .run(id).changes ?? 0,
+    );
+    const crewDeleted = Number(
+      database.prepare("DELETE FROM crew_messages WHERE conversation_id = ?").run(id)
+        .changes ?? 0,
+    );
+    purgeRoundtableRuntimeForConversation(id);
+    touchConversation(id);
+    return { messagesDeleted, checkpointsDeleted, crewDeleted };
+  })();
+}
+
+/**
+ * 将会话下 goals 迁到项目任务保管箱（不删除任务）。
+ * 若目标会话本身就是保管箱则跳过。
+ */
+export function reassignGoalsToProjectVault(conversationId: string): number {
+  const conv = getConversationById(conversationId);
+  if (!conv) return 0;
+  if (isProjectGoalVaultConversationId(conversationId)) return 0;
+  const vault = ensureProjectGoalVaultConversation(conv.projectId);
+  if (vault.id === conversationId) return 0;
+  const result = getDb()
+    .prepare("UPDATE goals SET conversation_id = ? WHERE conversation_id = ?")
+    .run(vault.id, conversationId);
+  return Number(result.changes ?? 0);
+}
+
+/** @deprecated 计划语义「脱离」：实现为迁入任务保管箱，避免 conversation_id NULL 导致任务不可见 */
+export function detachGoalsFromConversation(conversationId: string): number {
+  return reassignGoalsToProjectVault(conversationId);
+}
+
+/** 删除会话行与圆桌席位（调用前应已 clear + 迁走 goals） */
+export function deleteConversationShell(id: string): boolean {
+  const database = getDb();
+  return database.transaction(() => {
+    purgeRoundtableForConversation(id);
+    const result = database.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+    return result.changes > 0;
+  })();
+}
+
+/**
+ * 完整删除会话壳（兼容 deleteProject）：清线程 + 迁走/已无 goals + 删行。
+ * 不再强制 deleteGoals；项目删除路径会先删项目下全部 goals。
+ */
+function purgeConversationRecords(id: string): boolean {
+  if (!getConversationById(id)) return false;
+  clearConversationThread(id);
+  reassignGoalsToProjectVault(id);
+  return deleteConversationShell(id);
 }
 
 export function deleteConversation(id: string): boolean {

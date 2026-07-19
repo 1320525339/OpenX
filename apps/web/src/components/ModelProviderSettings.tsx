@@ -347,6 +347,11 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
                 <strong>{config.name}</strong>
                 <span className="provider-list-slug">{slug}</span>
                 <p className="settings-hint settings-hint-tight">{config.api.baseUrl}</p>
+                <p className="settings-hint settings-hint-tight">
+                  {config.auth?.apiKeyConfigured || config.auth?.apiKey
+                    ? "密钥：已配置（改 Key 后立即生效，无需重启）"
+                    : "密钥：未配置"}
+                </p>
               </div>
               <div className="provider-list-actions">
                 <button type="button" className="btn compact" onClick={() => startEdit(slug)}>
@@ -455,8 +460,18 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
                 },
               })
             }
+            placeholder={
+              editor.mode === "edit" && editor.config.auth?.apiKeyConfigured
+                ? "已配置，留空则保留原密钥"
+                : "粘贴 API Key"
+            }
             autoComplete="off"
           />
+          {editor.mode === "edit" && editor.config.auth?.apiKeyConfigured && !editor.config.auth?.apiKey && (
+            <p className="settings-hint settings-hint-tight">
+              当前已保存密钥；仅在需要更换时填写新 Key，保存后立即生效。
+            </p>
+          )}
 
           <label className="field-label">模型列表</label>
           <div className="provider-model-toolbar">
@@ -554,7 +569,7 @@ export function ModelProviderSettings({ settings, onChange, onReload }: Props) {
         </div>
       )}
 
-      {error && <p className="settings-hint warn">{error}</p>}
+      {error && <p className="settings-hint error">{error}</p>}
     </section>
   );
 }

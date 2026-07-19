@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import type { Conversation, Goal, Project } from "@openx/shared";
-import { SYSTEM_PROJECT_ID, isSystemConversationId } from "@openx/shared";
+import { SYSTEM_PROJECT_ID, isSystemConversationId, isProjectGoalVaultConversationId } from "@openx/shared";
 import { pickWorkspaceDirectory } from "../lib/workspace";
 import { WorkspacePicker } from "./WorkspacePicker";
+import { RowClearButton } from "./RowClearButton";
 import { RowDeleteButton } from "./RowDeleteButton";
 
 export type AppView = "home" | "console" | "project" | "conversation" | "settings";
@@ -25,6 +26,8 @@ type Props = {
   onNewRoundtable?: (projectId: string) => void;
   onDeleteProject?: (projectId: string) => void;
   onDeleteConversation?: (conversationId: string) => void;
+  onClearConversation?: (conversationId: string) => void;
+  onClearConsoleConversation?: () => void;
   onSettings: () => void;
   onNewGoal: () => void;
   inboxBadgeCount?: number;
@@ -71,6 +74,8 @@ export function SideNav({
   onNewRoundtable,
   onDeleteProject,
   onDeleteConversation,
+  onClearConversation,
+  onClearConsoleConversation,
   onSettings,
   onNewGoal,
   inboxBadgeCount = 0,
@@ -87,6 +92,7 @@ export function SideNav({
   const convByProject = useMemo(() => {
     const map = new Map<string, Conversation[]>();
     for (const c of conversations) {
+      if (isProjectGoalVaultConversationId(c.id)) continue;
       const list = map.get(c.projectId) ?? [];
       list.push(c);
       map.set(c.projectId, list);
@@ -233,10 +239,23 @@ export function SideNav({
                               <span className="sidebar-badge">{cBadge}</span>
                             ) : null}
                           </button>
-                          {onDeleteConversation && !isSystemConversationId(conv.id) ? (
+                          {onClearConversation &&
+                          !isProjectGoalVaultConversationId(conv.id) ? (
+                            <RowClearButton
+                              label={`清空对话 ${conv.title}`}
+                              title="清空对话内容（保留会话与任务）"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onClearConversation(conv.id);
+                              }}
+                            />
+                          ) : null}
+                          {onDeleteConversation &&
+                          !isSystemConversationId(conv.id) &&
+                          !isProjectGoalVaultConversationId(conv.id) ? (
                             <RowDeleteButton
                               label={`删除对话 ${conv.title}`}
-                              title="删除对话及关联任务"
+                              title="删除会话；已创建任务保留并迁入任务保管箱"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onDeleteConversation(conv.id);
@@ -271,33 +290,33 @@ export function SideNav({
         </button>
       </div>
 
-      <div className="sidebar-footer">
-        {active === "console" ? (
-          <>
-            <span className="sidebar-footer-label">系统工作目录</span>
-            {onSystemWorkspaceSave ? (
-              <WorkspacePicker
-                variant="sidebar"
-                compact
-                value={systemWorkspaceRoot}
-                resolvedPath={systemWorkspaceResolved}
-                onSave={onSystemWorkspaceSave}
-              />
-            ) : null}
-            <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
-              ＋ 发布任务
+      {active === "console" ? (
+        <div className="sidebar-footer">
+          <span className="sidebar-footer-label">系统工作目录</span>
+          {onSystemWorkspaceSave ? (
+            <WorkspacePicker
+              variant="sidebar"
+              compact
+              value={systemWorkspaceRoot}
+              resolvedPath={systemWorkspaceResolved}
+              onSave={onSystemWorkspaceSave}
+            />
+          ) : null}
+          <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
+            ＋ 发布任务
+          </button>
+          {onClearConsoleConversation ? (
+            <button
+              type="button"
+              className="btn sidebar-new"
+              onClick={onClearConsoleConversation}
+              title="清空调度台聊天记录（保留任务）"
+            >
+              清空调度台对话
             </button>
-          </>
-        ) : active === "conversation" ? (
-          <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
-            ＋ 新目标
-          </button>
-        ) : (
-          <button type="button" className="btn primary sidebar-new" onClick={onNewGoal}>
-            ＋ 新目标
-          </button>
-        )}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
     </nav>
   );
 }

@@ -10,8 +10,8 @@ import {
   mergeSettingsForSave,
   mergeSettingsPatch,
   isDefaultZenModelSection,
-  resolveOpenxHome,
 } from "@openx/shared";
+import { resolveOpenxHome } from "@openx/shared/openx-home";
 import { resolveProvidersForLoad } from "../providers-store.js";
 
 const configPath =

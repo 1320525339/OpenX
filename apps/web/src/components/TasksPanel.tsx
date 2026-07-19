@@ -18,13 +18,7 @@ import {
 import { GoalTaskCard } from "./GoalTaskCard";
 import type { GoalTaskActionHandlers } from "./GoalTaskActions";
 import { VirtualList, type VirtualListHandle } from "./VirtualList";
-const FILTERS: { key: string; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "incomplete", label: "未完成" },
-  { key: "failed", label: "失败" },
-  { key: "done", label: "已完成" },
-  { key: "rework", label: "返工中" },
-];
+import { GOAL_STATUS_FILTERS } from "../lib/workflow-ui";
 
 type Props = {
   goals: Goal[];
@@ -259,7 +253,7 @@ export function TasksPanel({
     displayGoals.length > 0 &&
     displayGoals.filter(canEditGoal).every((g) => selectedIds.has(g.id));
 
-  const activeFilters = embedInPin ? PIN_DESK_FILTERS : FILTERS;
+  const activeFilters = embedInPin ? PIN_DESK_FILTERS : GOAL_STATUS_FILTERS;
 
   const runBatch = async (action: BatchGoalsAction) => {
     if (selectedIds.size === 0 || batchBusy) return;
@@ -402,7 +396,7 @@ export function TasksPanel({
               {filter === "all" || embedInPin
                 ? embedInPin
                   ? "当前筛选下暂无任务。"
-                  : "还没有目标。说出你想推进的事，OpenX 会帮你整理。"
+                  : "还没有任务。说出你想推进的事，OpenX 会帮你整理。"
                 : "这里暂时没有目标。"}
             </p>
           )}
@@ -499,7 +493,7 @@ export function TasksPanel({
         ) : hideFooterNewGoal ? null : (
           <div className="panel-footer tasks-panel-footer">
             <button type="button" className="btn-text tasks-new-goal" onClick={onNewGoal}>
-              ＋ 新目标
+              ＋ 新任务
             </button>
           </div>
         )}

@@ -77,6 +77,11 @@ export function BroadcastTicker({ payload, displayToken, onDismiss, onAction }: 
     }
   }, []);
 
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
   const dismiss = useCallback(() => {
     clearTimers();
     const token = displayTokenRef.current ?? undefined;
@@ -86,9 +91,14 @@ export function BroadcastTicker({ payload, displayToken, onDismiss, onAction }: 
       setExpanded(false);
       expandedRef.current = false;
       setFeedback("");
-      onDismiss(token);
+      onDismissRef.current(token);
     }, 320);
-  }, [clearTimers, onDismiss]);
+  }, [clearTimers]);
+
+  const dismissRef = useRef(dismiss);
+  useEffect(() => {
+    dismissRef.current = dismiss;
+  }, [dismiss]);
 
   const scheduleDismiss = useCallback(
     (ms: number) => {
@@ -98,14 +108,29 @@ export function BroadcastTicker({ payload, displayToken, onDismiss, onAction }: 
         window.clearTimeout(dismissTimer.current);
       }
       dismissTimer.current = window.setTimeout(() => {
-        if (!hoveredRef.current && !expandedRef.current) dismiss();
+        if (!hoveredRef.current && !expandedRef.current) dismissRef.current();
       }, ms);
     },
-    [dismiss],
+    [],
   );
 
+  const scheduleDismissRef = useRef(scheduleDismiss);
   useEffect(() => {
-    if (!payload) {
+    scheduleDismissRef.current = scheduleDismiss;
+  }, [scheduleDismiss]);
+
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
+  const payloadKey = payload ? (islandDedupeKey(payload) ?? payload.id) : null;
+
+  // 同卡内容刷新（不重置进场/自动关闭）
+  useEffect(() => {
+    if (payload) setVisiblePayload(payload);
+  }, [payload]);
+
+  useEffect(() => {
+    const current = payloadRef.current;
+    if (!payloadKey || !current) {
       displayKeyRef.current = null;
       setVisiblePayload(null);
       clearTimers();
@@ -114,26 +139,28 @@ export function BroadcastTicker({ payload, displayToken, onDismiss, onAction }: 
       };
     }
 
-    const nextKey = islandDedupeKey(payload) ?? payload.id;
-    const sameCard = displayKeyRef.current === nextKey;
+    if (displayKeyRef.current === payloadKey) {
+      // key 未变：勿清定时器；若仍卡在 entering，补到 visible
+      setPhase((p) => (p === "entering" ? "visible" : p));
+      return;
+    }
 
-    setVisiblePayload(payload);
-    if (sameCard) return;
-
-    displayKeyRef.current = nextKey;
+    displayKeyRef.current = payloadKey;
     clearTimers();
-    const nextExpanded = Boolean(payload.expanded);
+    const nextExpanded = Boolean(current.expanded);
     setExpanded(nextExpanded);
     expandedRef.current = nextExpanded;
     setFeedback("");
+    setVisiblePayload(current);
     setPhase("entering");
     const enterTimer = window.setTimeout(() => setPhase("visible"), 20);
-    scheduleDismiss(payload.autoDismissMs ?? DEFAULT_AUTO_DISMISS_MS);
+    scheduleDismissRef.current(current.autoDismissMs ?? DEFAULT_AUTO_DISMISS_MS);
     return () => {
       window.clearTimeout(enterTimer);
       clearTimers();
     };
-  }, [payload, clearTimers, scheduleDismiss]);
+    // 仅随卡片 key 切换进场/退场；payload 引用或 onDismiss 变化不得清掉 auto-dismiss
+  }, [payloadKey, clearTimers]);
 
   const toggleExpand = (e?: MouseEvent) => {
     e?.stopPropagation();

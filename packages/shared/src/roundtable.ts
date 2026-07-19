@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { KnowledgeContextSelectionSchema } from "./knowledge.js";
+import { DispatchPermissionModeSchema } from "./dispatch-context.js";
 import {
   DEFAULT_MODEL_REF,
   ModelRefSchema,
@@ -160,7 +161,7 @@ export const ChatRoundComposerContextSchema = z.object({
   skillIds: z.array(z.string()).optional(),
   mcpIds: z.array(z.string()).optional(),
   knowledge: KnowledgeContextSelectionSchema.optional(),
-  permissionMode: z.enum(["read_only", "ask_write", "full"]).optional(),
+  permissionMode: DispatchPermissionModeSchema.optional(),
 });
 export type ChatRoundComposerContext = z.infer<typeof ChatRoundComposerContextSchema>;
 
@@ -193,7 +194,7 @@ export const CreateChatRoundSchema = z.object({
   skillIds: z.array(z.string()).optional(),
   mcpIds: z.array(z.string()).optional(),
   knowledge: KnowledgeContextSelectionSchema.optional(),
-  permissionMode: z.enum(["read_only", "ask_write", "full"]).optional(),
+  permissionMode: DispatchPermissionModeSchema.optional(),
 });
 export type CreateChatRoundInput = z.infer<typeof CreateChatRoundSchema>;
 

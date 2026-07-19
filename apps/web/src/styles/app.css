@@ -265,15 +265,15 @@
 }
 
 .sidebar-item:hover {
-  background: rgba(0, 113, 227, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--text);
 }
 
 .sidebar-item.active {
-  background: rgba(0, 113, 227, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
   font-weight: var(--font-semibold);
-  box-shadow: inset 0 0 0 1px rgba(0, 113, 227, 0.14);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .sidebar-icon {
@@ -380,8 +380,8 @@
 }
 
 .workspace-picker-path:hover:not(:disabled) {
-  border-color: rgba(0, 113, 227, 0.32);
-  background: rgba(0, 113, 227, 0.06);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .workspace-picker-path:disabled {
@@ -456,16 +456,16 @@
 }
 
 .coach-status-badge.llm {
-  border-color: rgba(0, 113, 227, 0.22);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent);
-  background: rgba(0, 113, 227, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .dynamic-island-portal {
   position: fixed;
   top: 0.65rem;
   left: 50%;
-  z-index: 13000;
+  z-index: var(--z-island, 13000);
   transform: translateX(-50%);
   pointer-events: none;
   display: flex;
@@ -855,7 +855,7 @@
 
 .chat-task-card .delivery-chip.file {
   border-color: var(--border);
-  background: rgba(0, 113, 227, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--text);
 }
 

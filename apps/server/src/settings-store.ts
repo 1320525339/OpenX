@@ -21,6 +21,7 @@ import { atomicWriteJson } from "./atomic-json.js";
 import {
   needsProvidersFileMigration,
   readProvidersFromDisk,
+  readProvidersRevisionFromDisk,
   resolveProvidersForLoad,
   writeProvidersToDisk,
 } from "./providers-store.js";
@@ -28,6 +29,8 @@ import {
   readPersistCommitMarker,
   writePersistCommitMarker,
 } from "./persist-commit.js";
+import { syncOpenxDotEnv } from "./openx-dotenv.js";
+import { getSecretStore } from "./secrets-store.js";
 
 let migrationsChecked = false;
 
@@ -75,12 +78,32 @@ function withBuiltinMcpServers(settings: Settings): Settings {
   }
 }
 
+function warnDeprecatedSettingsFields(settings: Settings): void {
+  if (process.env.OPENX_DEPRECATION_WARN === "0") return;
+  if (settings.coach) {
+    console.warn(
+      "[settings] 废弃字段 coach 仍存在：已自动迁移到 model + providers，下次 major 将移除读兼容",
+    );
+  }
+  if (settings.workspaceRoot && settings.workspaceRoot !== "." && !settings.systemWorkspaceRoot?.trim()) {
+    console.warn(
+      "[settings] 废弃字段 workspaceRoot：请改用 systemWorkspaceRoot（下次 major 将仅保留 systemWorkspaceRoot）",
+    );
+  }
+}
+
 function normalizeSettingsInMemory(settings: Settings): Settings {
-  const providers =
-    Object.keys(settings.providers ?? {}).length > 0
-      ? settings.providers!
-      : resolveProvidersForLoad();
+  let providers = settings.providers ?? {};
+  if (Object.keys(providers).length === 0) {
+    if (settings.coach) {
+      // 保留空池，交给 upgradeToModelConfig 从扁平 coach 生成
+      providers = {};
+    } else {
+      providers = resolveProvidersForLoad();
+    }
+  }
   const upgraded = upgradeToModelConfig({ ...settings, providers });
+  warnDeprecatedSettingsFields(settings);
   const base = { ...upgraded, defaultExecutorId: settings.defaultExecutorId ?? "pi" };
   return withBuiltinMcpServers(
     withNormalizedSystemWorkspace(withNormalizedWorkspaceRoot(base)),
@@ -102,21 +125,52 @@ function readSettingsFromDisk(): Settings | null {
 
   const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
   const legacyProviders = readLegacyProviders(raw);
+  const legacyCoach =
+    raw.coach && typeof raw.coach === "object"
+      ? (raw.coach as Settings["coach"])
+      : undefined;
   const { providers: _legacy, coach: _coach, ...coreRaw } = raw;
   const parsed = SettingsSchema.parse({
     ...DEFAULT_SETTINGS,
     ...coreRaw,
     providers: {},
+    ...(legacyCoach ? { coach: legacyCoach } : {}),
   });
-  const providers = resolveProvidersForLoad(legacyProviders);
-  return { ...parsed, providers };
+
+  const fromFile = readProvidersFromDisk();
+  let providers: ProvidersMap;
+  if (Object.keys(fromFile).length > 0) {
+    providers = fromFile;
+  } else if (legacyProviders && Object.keys(legacyProviders).length > 0) {
+    providers = legacyProviders;
+  } else if (legacyCoach) {
+    // 留给 upgradeToModelConfig 从扁平 coach 生成渠道，勿填默认 zen
+    providers = {};
+  } else {
+    providers = resolveProvidersForLoad();
+  }
+
+  return {
+    ...parsed,
+    providers,
+    ...(legacyCoach ? { coach: legacyCoach } : {}),
+  };
 }
 
 function needsPersistMigration(before: Settings, after: Settings): boolean {
   if (before.workspaceRoot !== after.workspaceRoot) return true;
   if (before.systemWorkspaceRoot !== after.systemWorkspaceRoot) return true;
   if (JSON.stringify(before.mcpServers) !== JSON.stringify(after.mcpServers)) return true;
-  return needsProvidersFileMigration(before.providers);
+  if (needsProvidersFileMigration(before.providers)) return true;
+  // 从扁平 coach 升级出了渠道 → 需要落盘 providers.json
+  if (
+    before.coach &&
+    Object.keys(before.providers ?? {}).length === 0 &&
+    Object.keys(after.providers ?? {}).length > 0
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function assertRevision(current: Settings, baseRevision?: number): void {
@@ -143,29 +197,49 @@ export function runSettingsMigrations(): Settings {
   // 跨文件对账：config 有 revision 但 providers 缺失时补写
   const marker = readPersistCommitMarker();
   const providersOnDisk = readProvidersFromDisk();
+  const providersRevision = readProvidersRevisionFromDisk();
+  const configRevision = normalized.revision ?? 0;
   if (
     Object.keys(providersOnDisk).length === 0 &&
     Object.keys(normalized.providers ?? {}).length > 0
   ) {
-    writeProvidersToDisk(normalized.providers ?? {});
-    writePersistCommitMarker(normalized.revision ?? 0);
-  } else if (marker && marker.revision !== (normalized.revision ?? 0)) {
+    writeProvidersToDisk(normalized.providers ?? {}, configRevision);
+    writePersistCommitMarker(configRevision);
+  } else if (
+    marker && marker.revision !== configRevision
+  ) {
     console.warn(
-      `[settings] persist-commit 与 config revision 不一致 (marker=${marker.revision}, config=${normalized.revision ?? 0})，以 config 为准并对账 providers`,
+      `[settings] persist-commit 与 config revision 不一致 (marker=${marker.revision}, config=${configRevision})，以 config 为准并对账 providers`,
     );
-    writeProvidersToDisk(normalized.providers ?? {});
-    writePersistCommitMarker(normalized.revision ?? 0);
+    writeProvidersToDisk(normalized.providers ?? {}, configRevision);
+    writePersistCommitMarker(configRevision);
+  } else if (
+    providersRevision !== null &&
+    providersRevision !== configRevision &&
+    Object.keys(normalized.providers ?? {}).length > 0
+  ) {
+    console.warn(
+      `[settings] providers.json revision=${providersRevision} 与 config revision=${configRevision} 不一致，以 config 为准重写`,
+    );
+    writeProvidersToDisk(normalized.providers ?? {}, configRevision);
+    writePersistCommitMarker(configRevision);
   }
   syncSystemWorkspaceLayout(normalized);
   return normalized;
 }
 
-/** API 响应用：脱敏 providers 中的明文 apiKey */
+/** API 响应用：脱敏 providers 中的明文 apiKey，并标注是否已配置密钥 */
 export function settingsForApi(settings: Settings): Settings {
-  return sanitizeSettingsForApi(settings);
+  const store = getSecretStore();
+  return sanitizeSettingsForApi(settings, {
+    hasSecret: (envKey) => Boolean(store.get(envKey)?.trim()),
+  });
 }
 
 export function loadSettings(): Settings {
+  // 每次读配置前把 ~/.openx/.env 刷进 process.env，保证设置页改 Key 后无需重启即可生效
+  syncOpenxDotEnv();
+
   if (!migrationsChecked) {
     return runSettingsMigrations();
   }
@@ -212,7 +286,7 @@ export function saveSettings(settings: Settings, opts?: { baseRevision?: number 
   }
   const withRevision = bumpRevision({ ...normalized, revision: current.revision ?? 0 });
 
-  writeProvidersToDisk(withRevision.providers ?? {});
+  writeProvidersToDisk(withRevision.providers ?? {}, withRevision.revision ?? 0);
   const core = stripProvidersForCoreConfigSave(withRevision) as Settings;
   atomicWriteJson(getConfigPath(), core);
   writePersistCommitMarker(withRevision.revision ?? 0);

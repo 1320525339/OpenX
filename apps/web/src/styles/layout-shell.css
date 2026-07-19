@@ -147,7 +147,7 @@ body.split-dragging .pane-divider::after {
 
 .split-workspace-swap:hover {
   color: var(--accent);
-  border-color: rgba(0, 113, 227, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .split-workspace-swap:focus-visible {
@@ -259,7 +259,7 @@ body.split-dragging.split-dragging-rows * {
 
 .split-pane-stack-swap:hover {
   color: var(--accent);
-  border-color: rgba(0, 113, 227, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .split-pane-stack-swap:focus-visible {

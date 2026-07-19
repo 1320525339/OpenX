@@ -786,3 +786,99 @@ html[data-theme="geek"] .flexible-widget-resize:hover::after,
 html[data-theme="geek"] .pin-desktop-resizing .flexible-widget-resize::after {
   background: var(--geek-line-active);
 }
+
+/* ── geek：AI 圆桌 ── */
+
+html[data-theme="geek"] .roundtable-chip {
+  border-radius: 0;
+  border-color: var(--geek-line);
+  background: var(--surface-inset);
+}
+
+html[data-theme="geek"] .roundtable-chip:hover:not(:disabled) {
+  border-color: var(--geek-line-hover);
+  background: var(--geek-tint-08);
+}
+
+html[data-theme="geek"] .roundtable-chip.is-selected {
+  border-color: var(--geek-line-active);
+  background: var(--geek-tint-12);
+}
+
+html[data-theme="geek"] .roundtable-seat-editor {
+  border-radius: 0;
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .roundtable-seat-editor-fields select,
+html[data-theme="geek"] .roundtable-seat-btn {
+  border-radius: 0;
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .roundtable-seat-btn.is-primary {
+  border-color: var(--geek-line-active);
+  background: var(--geek-tint-12);
+}
+
+html[data-theme="geek"] .roundtable-bubble {
+  border-radius: 0;
+  border-color: var(--geek-line);
+  background: var(--surface-inset);
+}
+
+html[data-theme="geek"] .roundtable-bubble.speaker-user {
+  background: var(--geek-tint-12);
+  border-color: var(--geek-line-active);
+}
+
+html[data-theme="geek"] .roundtable-peer-request,
+html[data-theme="geek"] .roundtable-synthesis {
+  border-radius: 0;
+  border-color: var(--geek-line-active);
+  background: var(--geek-tint-08);
+}
+
+html[data-theme="geek"] .roundtable-mention-pop {
+  border-radius: 0;
+  border-color: var(--geek-line);
+  background: var(--surface-elevated);
+}
+
+html[data-theme="geek"] .roundtable-stop-all {
+  border-radius: 0;
+}
+
+html[data-theme="geek"] .pin-dock-roundtable-btn.pinned {
+  outline-color: var(--geek-line-active);
+}
+
+/* ── geek：Miloco 工具 ── */
+
+html[data-theme="geek"] .miloco-metric {
+  border-radius: 0;
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .miloco-metric.ok {
+  border-color: var(--geek-green);
+  background: var(--geek-tint-06);
+}
+
+html[data-theme="geek"] .miloco-metric.fail {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+html[data-theme="geek"] .miloco-pill {
+  border-radius: 0;
+  border: 1px solid var(--geek-line);
+}
+
+html[data-theme="geek"] .miloco-event-row {
+  border-color: var(--geek-line);
+}
+
+html[data-theme="geek"] .miloco-event-lane {
+  color: var(--geek-green);
+}

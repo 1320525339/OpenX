@@ -1,18 +1,58 @@
 /**
  * Pi 子进程入口：由 pi-isolated-run fork 启动，避免阻塞主进程事件循环。
  * 支持 run / resume（park 后续跑，session 留在本进程）。
+ * 工头回调（onCrewQuestion / onCrewTurnReview）经 IPC 转发到主进程处理。
  */
 import { piExecutor } from "@openx/executor-pi";
 import type { ExecutorContext } from "@openx/executor-core";
+import type {
+  CrewDirective,
+  CrewQuestion,
+  ForemanTurnDecision,
+  ForemanTurnReviewInput,
+} from "@openx/shared";
+import { randomUUID } from "node:crypto";
 
 type CtxPayload = Omit<ExecutorContext, "callbacks">;
 
 type InMsg =
   | { type: "run"; payload: CtxPayload }
-  | { type: "resume"; payload: CtxPayload };
+  | { type: "resume"; payload: CtxPayload }
+  | { type: "crewQuestionReply"; ipcRequestId: string; directive: CrewDirective }
+  | {
+      type: "crewTurnReviewReply";
+      ipcRequestId: string;
+      decision: ForemanTurnDecision;
+    }
+  | { type: "crewCallbackError"; ipcRequestId: string; message: string };
+
+type PendingReply =
+  | { kind: "crewQuestion"; resolve: (v: CrewDirective) => void; reject: (e: Error) => void }
+  | {
+      kind: "crewTurnReview";
+      resolve: (v: ForemanTurnDecision) => void;
+      reject: (e: Error) => void;
+    };
+
+const pendingReplies = new Map<string, PendingReply>();
 
 function send(payload: unknown) {
   if (process.send) process.send(payload);
+}
+
+function awaitParentReply<T>(
+  ipcRequestId: string,
+  kind: PendingReply["kind"],
+  sendMsg: unknown,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    pendingReplies.set(ipcRequestId, {
+      kind,
+      resolve: resolve as (v: never) => void,
+      reject,
+    } as PendingReply);
+    send(sendMsg);
+  });
 }
 
 function buildCallbacks(): ExecutorContext["callbacks"] {
@@ -36,7 +76,25 @@ function buildCallbacks(): ExecutorContext["callbacks"] {
       send({ type: "park", checkpointSummary });
     },
     onCrewSession: async (crewSessionId) => {
-      send({ type: "log", level: "info", message: `[pi-child] crewSession=${crewSessionId}` });
+      send({ type: "crewSession", crewSessionId });
+    },
+    onCrewQuestion: async (question: CrewQuestion): Promise<CrewDirective> => {
+      const ipcRequestId = randomUUID();
+      return awaitParentReply<CrewDirective>(ipcRequestId, "crewQuestion", {
+        type: "crewQuestion",
+        ipcRequestId,
+        question,
+      });
+    },
+    onCrewTurnReview: async (
+      turn: ForemanTurnReviewInput,
+    ): Promise<ForemanTurnDecision> => {
+      const ipcRequestId = randomUUID();
+      return awaitParentReply<ForemanTurnDecision>(ipcRequestId, "crewTurnReview", {
+        type: "crewTurnReview",
+        ipcRequestId,
+        turn,
+      });
     },
   };
 }
@@ -48,7 +106,42 @@ function toContext(payload: CtxPayload): ExecutorContext {
   };
 }
 
+function resolvePending(msg: InMsg): void {
+  if (msg.type === "crewQuestionReply") {
+    const pending = pendingReplies.get(msg.ipcRequestId);
+    pendingReplies.delete(msg.ipcRequestId);
+    if (pending?.kind === "crewQuestion") {
+      pending.resolve(msg.directive);
+    }
+    return;
+  }
+  if (msg.type === "crewTurnReviewReply") {
+    const pending = pendingReplies.get(msg.ipcRequestId);
+    pendingReplies.delete(msg.ipcRequestId);
+    if (pending?.kind === "crewTurnReview") {
+      pending.resolve(msg.decision);
+    }
+    return;
+  }
+  if (msg.type === "crewCallbackError") {
+    const pending = pendingReplies.get(msg.ipcRequestId);
+    pendingReplies.delete(msg.ipcRequestId);
+    if (pending) {
+      pending.reject(new Error(msg.message));
+    }
+  }
+}
+
 process.on("message", (msg: InMsg) => {
+  if (
+    msg.type === "crewQuestionReply" ||
+    msg.type === "crewTurnReviewReply" ||
+    msg.type === "crewCallbackError"
+  ) {
+    resolvePending(msg);
+    return;
+  }
+
   if (msg.type === "run") {
     void (async () => {
       try {

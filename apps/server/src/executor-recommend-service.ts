@@ -10,6 +10,8 @@ import { loadSettings } from "./settings-store.js";
 import type { Settings } from "@openx/shared";
 import { mergedSkillBindings, resolveExecutorSkills } from "./skills-resolve.js";
 
+export { isClearRuleWinner };
+
 export type RecommendExecutorInput = {
   title?: string;
   acceptance?: string;
@@ -46,20 +48,19 @@ export async function recommendExecutorForGoal(
 export async function resolveGoalExecutorId(
   input: RecommendExecutorInput & { executorId?: string },
   settings: Settings,
-  executors: ExecutorRow[],
+  _executors: ExecutorRow[],
 ): Promise<{ executorId: string; recommendReason?: string }> {
   if (input.executorId != null) {
     return { executorId: input.executorId };
   }
 
   const requested = settings.defaultExecutorId;
-  if (requested !== EXECUTOR_AUTO) {
-    return { executorId: requested };
-  }
-
-  const rec = await recommendExecutorForGoal(input, executors, settings);
-  if (rec) {
-    return { executorId: rec.executorId, recommendReason: rec.reason };
+  // 保持 auto：实际选型推迟到派发时 materializeAutoExecutor（规则硬胜出或 Pi LLM）
+  if (requested === EXECUTOR_AUTO) {
+    return {
+      executorId: EXECUTOR_AUTO,
+      recommendReason: "默认自动选型，将在派发时按规则/Pi 确定执行器",
+    };
   }
   return { executorId: requested };
 }
@@ -79,5 +80,3 @@ export function buildExecutorSkillsMap(settings: Settings = loadSettings()): Rec
 
   return out;
 }
-
-export { isClearRuleWinner };

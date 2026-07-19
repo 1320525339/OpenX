@@ -3,11 +3,10 @@
  * 默认 FileCredentialStore（~/.openx/.env，原子写 + 0o600）。
  * 可通过 OPENX_SECRETS_BACKEND=os 尝试 OS 凭据库；不可用时回退文件。
  */
-import { existsSync, readFileSync } from "node:fs";
-import { mergeDotEnvContent, parseDotEnv } from "@openx/shared";
+import { mergeDotEnvContent } from "@openx/shared";
 import { getDotEnvPath } from "./paths.js";
 import { atomicWriteText, SENSITIVE_FILE_MODE } from "./atomic-json.js";
-import { upsertOpenxDotEnv } from "./openx-dotenv.js";
+import { readOpenxDotEnvVars, upsertOpenxDotEnv } from "./openx-dotenv.js";
 
 export type SecretStore = {
   readonly backend: "file" | "os" | "memory";
@@ -19,10 +18,10 @@ class FileSecretStore implements SecretStore {
   readonly backend = "file" as const;
 
   get(key: string): string | undefined {
-    if (process.env[key]?.trim()) return process.env[key];
-    const path = getDotEnvPath();
-    if (!existsSync(path)) return undefined;
-    return parseDotEnv(readFileSync(path, "utf8"))[key];
+    // ~/.openx/.env 优先（mtime 缓存）：避免系统环境变量中的旧 Key 遮蔽设置页写入的新密钥
+    const fromFile = readOpenxDotEnvVars()[key]?.trim();
+    if (fromFile) return fromFile;
+    return process.env[key]?.trim() || undefined;
   }
 
   setMany(entries: Record<string, string>): string[] {

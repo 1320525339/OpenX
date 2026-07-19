@@ -6,13 +6,14 @@ import type {
   Goal,
   Project,
 } from "@openx/shared";
-import { goalMatchesDisplayFilter, isSystemConversationId } from "@openx/shared";
+import { goalMatchesDisplayFilter, isSystemConversationId, isProjectGoalVaultConversationId } from "@openx/shared";
 
 import { api } from "../api";
 
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { KnowledgeSpacePanel } from "./KnowledgeSpacePanel";
 import { ProjectBriefTemplatePanel } from "./ProjectBriefTemplatePanel";
+import { RowClearButton } from "./RowClearButton";
 import { RowDeleteButton } from "./RowDeleteButton";
 
 
@@ -45,6 +46,10 @@ type Props = {
 
   onDeleteConversation?: (conversationId: string) => void;
 
+  onClearConversation?: (conversationId: string) => void;
+
+  onForgetProjectConversations?: () => void;
+
   onBatchAction: (action: BatchGoalsAction, ids: string[]) => Promise<void>;
 
   goalActions: GoalActions;
@@ -75,6 +80,10 @@ export function ProjectPage({
 
   onDeleteConversation,
 
+  onClearConversation,
+
+  onForgetProjectConversations,
+
   onBatchAction,
 
   goalActions,
@@ -96,14 +105,21 @@ export function ProjectPage({
     const map: Record<string, string> = {};
 
     for (const conv of conversations) {
-
+      if (isProjectGoalVaultConversationId(conv.id)) {
+        map[conv.id] = "已保留任务";
+        continue;
+      }
       map[conv.id] = conv.title;
-
     }
 
     return map;
 
   }, [conversations]);
+
+  const visibleConversations = useMemo(
+    () => conversations.filter((c) => !isProjectGoalVaultConversationId(c.id)),
+    [conversations],
+  );
 
 
 
@@ -273,9 +289,24 @@ export function ProjectPage({
 
             ) : null}
 
+            {onForgetProjectConversations ? (
+
+              <button
+                type="button"
+                className="btn compact"
+                onClick={onForgetProjectConversations}
+                title="清空本项目全部对话（保留任务与知识）"
+              >
+
+                清空本项目全部对话
+
+              </button>
+
+            ) : null}
+
           </div>
 
-          {conversations.length === 0 ? (
+          {visibleConversations.length === 0 ? (
 
             <p className="dashboard-muted">还没有对话，创建一个开始推进</p>
 
@@ -283,7 +314,7 @@ export function ProjectPage({
 
             <ul className="dashboard-conv-list">
 
-              {conversations.map((conv) => {
+              {visibleConversations.map((conv) => {
 
                 const convGoals = goals.filter((g) => g.conversationId === conv.id);
 
@@ -307,10 +338,24 @@ export function ProjectPage({
                         {active > 0 ? ` · ${active} 活跃` : ""}
                       </span>
                     </button>
-                    {onDeleteConversation && !isSystemConversationId(conv.id) ? (
+                    {onClearConversation &&
+                    !isSystemConversationId(conv.id) &&
+                    !isProjectGoalVaultConversationId(conv.id) ? (
+                      <RowClearButton
+                        label={`清空对话 ${conv.title}`}
+                        title="清空对话内容（保留会话与任务）"
+                        onClick={(e: MouseEvent) => {
+                          e.stopPropagation();
+                          onClearConversation(conv.id);
+                        }}
+                      />
+                    ) : null}
+                    {onDeleteConversation &&
+                    !isSystemConversationId(conv.id) &&
+                    !isProjectGoalVaultConversationId(conv.id) ? (
                       <RowDeleteButton
                         label={`删除对话 ${conv.title}`}
-                        title="删除对话及关联任务"
+                        title="删除会话；已创建任务保留并迁入任务保管箱"
                         onClick={(e: MouseEvent) => {
                           e.stopPropagation();
                           onDeleteConversation(conv.id);

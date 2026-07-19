@@ -92,6 +92,16 @@ html[data-theme="light"] {
   /* 与 legacy --surface-2 引用对齐 */
   --surface-2: var(--surface-inset);
 
+  /* 新功能语义别名（圆桌 / Miloco / 知识面板） */
+  --panel-bg: var(--surface-inset);
+  --surface-muted: var(--surface-inset);
+  --border-subtle: var(--border);
+  --danger: var(--red);
+  --success: var(--green);
+  --warning: var(--amber);
+  --warn: var(--amber);
+  --status-error: var(--red);
+
   /* 工头↔施工队对话卡片 */
   --crew-exchange-bg: var(--surface-inset);
   --crew-exchange-label: var(--text-dim);
@@ -189,6 +199,16 @@ html[data-theme="dark"] {
   --clarify-preview-surface: rgba(129, 140, 248, 0.06);
 
   --surface-2: var(--surface-inset);
+
+  /* 新功能语义别名（圆桌 / Miloco / 知识面板） */
+  --panel-bg: var(--surface-inset);
+  --surface-muted: var(--surface-inset);
+  --border-subtle: var(--border);
+  --danger: var(--red);
+  --success: var(--green);
+  --warning: var(--amber);
+  --warn: var(--amber);
+  --status-error: var(--red);
 
   --crew-exchange-bg: var(--panel-inset);
   --crew-exchange-label: var(--text-dim);
@@ -325,6 +345,16 @@ html[data-theme="geek"] {
   --clarify-preview-surface: #121212;
 
   --surface-2: var(--surface-inset);
+
+  /* 新功能语义别名（圆桌 / Miloco / 知识面板） */
+  --panel-bg: var(--surface-inset);
+  --surface-muted: var(--surface-inset);
+  --border-subtle: var(--border);
+  --danger: var(--red);
+  --success: var(--green);
+  --warning: var(--amber);
+  --warn: var(--amber);
+  --status-error: var(--red);
 
   --crew-exchange-bg: var(--panel-inset);
   --crew-exchange-label: var(--text-dim);

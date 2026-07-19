@@ -84,7 +84,7 @@
 
 .split-workspace-swap:hover {
   color: var(--accent);
-  border-color: rgba(0, 113, 227, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .split-workspace-swap:focus-visible {
@@ -252,8 +252,8 @@ body.split-dragging.split-dragging-rows * {
 }
 
 .workspace-pane .goal-card.selected {
-  background: rgba(0, 113, 227, 0.04);
-  border-bottom-color: rgba(0, 113, 227, 0.2);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--accent) 20%, transparent);
   box-shadow: none;
 }
 

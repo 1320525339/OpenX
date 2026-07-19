@@ -7,7 +7,16 @@ export function normalizeClaudeAnthropicBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
-/** Coach / Pi / Codex 代理使用的 OpenAI 兼容根地址 */
+/** Coach / Pi / Codex 代理使用的 OpenAI 兼容根地址。
+ *
+ * DeepSeek 特例（官方文档 https://api-docs.deepseek.com）：
+ * - Chat Completions 根路径为 `https://api.deepseek.com`（**不带** `/v1`），
+ *   SDK 再拼 `/chat/completions`。
+ * - 若用户或模板误写 `https://api.deepseek.com/v1`，本函数会剥掉末尾 `/v1`。
+ * - Anthropic 兼容路径 `/anthropic` 亦会先剥掉，再交给 Messages 解析。
+ *
+ * 其他渠道：缺 `/v1` 时自动补上（Gemini 已含版本段则原样返回）。
+ */
 export function normalizeOpenAiCompatibleBaseUrl(
   baseUrl: string,
   template?: string,

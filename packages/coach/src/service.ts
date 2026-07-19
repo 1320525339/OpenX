@@ -87,6 +87,7 @@ export type CoachRuntime = {
   slug?: string;
   baseUrl?: string;
   error?: string;
+  warning?: string;
 };
 
 export function getCoachRuntime(
@@ -101,6 +102,8 @@ export function getCoachRuntime(
     ready: status.ready,
     slug: status.slug,
     baseUrl: status.baseUrl,
+    error: status.error,
+    warning: status.warning,
   };
 }
 
@@ -116,6 +119,8 @@ export function getPiRuntime(
     ready: status.ready,
     slug: status.slug,
     baseUrl: status.baseUrl,
+    error: status.error,
+    warning: status.warning,
   };
 }
 
@@ -160,21 +165,26 @@ export async function refineGoal(
         llmContext,
       );
       return {
-        refined:
-          finalizeRefinedGoal(refined, input.userDraft, {
+        refined: {
+          ...(finalizeRefinedGoal(refined, input.userDraft, {
             llmContextSettings: llmContext,
-          }) ?? refined,
+          }) ?? refined),
+          source: "llm" as const,
+        },
       };
     } catch (err) {
       const hint = formatCoachLlmError(err);
       if (hint && isCoachQuotaError(err)) {
         console.warn("[coach] LLM refine quota:", hint);
         return {
-          refined: finalizeRefinedGoal(
-            refineGoalRules(input, defaultConstraints),
-            input.userDraft,
-            { llmContextSettings: llmContext },
-          )!,
+          refined: {
+            ...finalizeRefinedGoal(
+              refineGoalRules(input, defaultConstraints),
+              input.userDraft,
+              { llmContextSettings: llmContext },
+            )!,
+            source: "rules" as const,
+          },
           llmError: hint,
           quotaExceeded: true,
         };
@@ -182,11 +192,14 @@ export async function refineGoal(
       console.warn("[coach] LLM refine failed:", err);
       const parseFailed = isCoachParseError(err);
       return {
-        refined: finalizeRefinedGoal(
-          refineGoalRules(input, defaultConstraints),
-          input.userDraft,
-          { llmContextSettings: llmContext },
-        )!,
+        refined: {
+          ...finalizeRefinedGoal(
+            refineGoalRules(input, defaultConstraints),
+            input.userDraft,
+            { llmContextSettings: llmContext },
+          )!,
+          source: "rules" as const,
+        },
         llmError:
           hint ??
           (parseFailed
@@ -198,11 +211,14 @@ export async function refineGoal(
     }
   }
   return {
-    refined: finalizeRefinedGoal(
-      refineGoalRules(input, defaultConstraints),
-      input.userDraft,
-      { llmContextSettings: llmContext },
-    )!,
+    refined: {
+      ...finalizeRefinedGoal(
+        refineGoalRules(input, defaultConstraints),
+        input.userDraft,
+        { llmContextSettings: llmContext },
+      )!,
+      source: "rules" as const,
+    },
     llmError: "模型未配置：请在设置中添加渠道并选择模型，已使用规则模板",
   };
 }
@@ -239,6 +255,8 @@ export type CoachChatReplyOptions = {
   toolContinuation?: boolean;
   /** 澄清结果已回传，继续并产出 refined */
   clarifyContinuation?: boolean;
+  /** 外部中止（会话遗忘 / 新一轮覆盖） */
+  abortSignal?: AbortSignal;
 };
 
 export async function coachChatReply(
@@ -258,6 +276,8 @@ export async function coachChatReply(
   llmError?: string;
   quotaExceeded?: boolean;
   streamed?: boolean;
+  /** llm = 模型产出；rules = 规则模板兜底 */
+  source?: "llm" | "rules";
 }> {
   const intentHint = classifyCoachIntent(message);
   const force = options?.forceRefine === true;
@@ -276,6 +296,7 @@ export async function coachChatReply(
   if (resolveLlmCredentials(upgraded, "coach", env)) {
     try {
       let structuredReply: AgentChatResponse | undefined;
+      let structuredFailed = false;
       if (tryStructuredLlm) {
         try {
           structuredReply = await coachAgentReplyLlm(
@@ -287,8 +308,9 @@ export async function coachChatReply(
             { promptMode: "structured" },
           );
         } catch (structErr) {
+          structuredFailed = true;
           console.warn("[coach] structured clarify/refine failed:", structErr);
-          // 明确任务：跳过 structured，走下方 agent / rules refined 兜底
+          // 单次调用策略：structured 失败不再二次调 agent，改走规则兜底
         }
       }
 
@@ -300,6 +322,7 @@ export async function coachChatReply(
           options.onDelta,
           env,
           chatHistory,
+          { abortSignal: options.abortSignal },
         );
         return {
           message:
@@ -307,6 +330,22 @@ export async function coachChatReply(
             coachChatReplyRules(message, { ...context, defaultConstraints }),
           intent: dismiss ? "consult" : intentHint,
           streamed: true,
+        };
+      }
+
+      if (structuredFailed && !force && !options?.toolContinuation && !options?.clarifyContinuation) {
+        const refined = rulesRefinedFallbackForMessage(
+          message,
+          context,
+          defaultConstraints,
+          force,
+        );
+        return {
+          message: coachChatReplyRules(message, context),
+          refined,
+          intent: intentHint,
+          llmError: "结构化输出失败，已改用规则模板（避免二次调用）",
+          source: "rules" as const,
         };
       }
 
@@ -451,7 +490,7 @@ export async function coachContinueAfterClarifyTool(
   settings: ModelSettingsSlice,
   chatHistory: CoachChatTurn[] = [],
   env?: LlmEnv,
-  options?: Pick<CoachChatReplyOptions, "onDelta">,
+  options?: Pick<CoachChatReplyOptions, "onDelta" | "abortSignal">,
 ): Promise<{
   message: string;
   refined?: RefinedGoal;
@@ -480,6 +519,7 @@ export async function coachContinueAfterClarifyTool(
     chatHistory,
     {
       onDelta: options?.onDelta,
+      abortSignal: options?.abortSignal,
       skipRefine: toolResult.outcome === "dismissed",
       clarifyContinuation: toolResult.outcome === "answered",
     },
@@ -506,7 +546,7 @@ export async function coachContinueAfterWorkOrderTool(
   settings: ModelSettingsSlice,
   chatHistory: CoachChatTurn[] = [],
   env?: LlmEnv,
-  options?: Pick<CoachChatReplyOptions, "onDelta">,
+  options?: Pick<CoachChatReplyOptions, "onDelta" | "abortSignal">,
 ): Promise<{
   message: string;
   llmError?: string;
@@ -528,7 +568,10 @@ export async function coachContinueAfterWorkOrderTool(
         options.onDelta,
         env,
         chatHistory,
-        { promptMode: "tool_continuation" },
+        {
+          promptMode: "tool_continuation",
+          abortSignal: options.abortSignal,
+        },
       );
       return {
         message:
@@ -571,7 +614,7 @@ export async function coachContinueAfterOperatorTool(
   settings: ModelSettingsSlice,
   chatHistory: CoachChatTurn[] = [],
   env?: LlmEnv,
-  options?: Pick<CoachChatReplyOptions, "onDelta"> & {
+  options?: Pick<CoachChatReplyOptions, "onDelta" | "abortSignal"> & {
     operatorGateway?: OperatorToolGateway;
   },
 ): Promise<{
@@ -628,6 +671,7 @@ export async function coachContinueAfterOperatorTool(
     chatHistory,
     {
       onDelta: options?.onDelta,
+      abortSignal: options?.abortSignal,
       skipRefine: true,
       toolContinuation: true,
     },
@@ -651,7 +695,7 @@ export async function coachContinueAfterDispatchPermissionTool(
   settings: ModelSettingsSlice,
   chatHistory: CoachChatTurn[] = [],
   env?: LlmEnv,
-  options?: Pick<CoachChatReplyOptions, "onDelta">,
+  options?: Pick<CoachChatReplyOptions, "onDelta" | "abortSignal">,
 ): Promise<{
   message: string;
   llmError?: string;
@@ -674,6 +718,7 @@ export async function coachContinueAfterDispatchPermissionTool(
     chatHistory,
     {
       onDelta: options?.onDelta,
+      abortSignal: options?.abortSignal,
       skipRefine: true,
       toolContinuation: true,
     },

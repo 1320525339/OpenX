@@ -54,7 +54,7 @@ describe("buildChatUserPrompt", () => {
       jsonMode: "structured",
     });
     expect(prompt).toContain("propose_clarification");
-    expect(prompt).toContain("勿同时输出 clarify 与 refined");
+    expect(prompt).toContain("勿同时输出 clarify、dispatchPermission 与 refined");
     expect(prompt).toContain("登录按钮没反应");
   });
 });

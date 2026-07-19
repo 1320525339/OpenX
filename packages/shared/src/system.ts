@@ -23,3 +23,14 @@ export function isSystemConversationId(id: string): boolean {
 export function isConnectAnyExecutorId(id: string): boolean {
   return id === CONNECT_ANY_EXECUTOR_ID;
 }
+
+/** 项目任务保管箱会话前缀（删除对话后 goals 挂靠于此） */
+export const PROJECT_GOAL_VAULT_PREFIX = "openx-goal-vault:";
+
+export function projectGoalVaultConversationId(projectId: string): string {
+  return `${PROJECT_GOAL_VAULT_PREFIX}${projectId}`;
+}
+
+export function isProjectGoalVaultConversationId(id: string): boolean {
+  return id.startsWith(PROJECT_GOAL_VAULT_PREFIX);
+}

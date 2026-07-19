@@ -424,7 +424,7 @@ export function ToolsMilocoTab({ onOpenGoal }: Props) {
               ))}
             </ul>
           ) : (
-            <p className="settings-hint">尚无诊断缓存，请点击重新诊断。</p>
+            <p className="settings-hint">暂无诊断缓存，请点击重新诊断。</p>
           )}
         </section>
       ) : null}

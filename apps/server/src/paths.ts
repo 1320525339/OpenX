@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { DEFAULT_OPENX_DIR, resolveOpenxHome } from "@openx/shared";
+import { DEFAULT_OPENX_DIR, resolveOpenxHome } from "@openx/shared/openx-home";
 
 /** 默认本机目录；测试/多实例请设 OPENX_HOME（运行时请优先 getOpenxHome） */
 export const OPENX_DIR = DEFAULT_OPENX_DIR;

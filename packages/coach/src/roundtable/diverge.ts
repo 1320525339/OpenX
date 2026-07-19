@@ -20,7 +20,7 @@ export type RoundtableComposerContextBlock = {
   enabledSkills?: Array<{ id: string; name: string; desc: string }>;
   enabledMcps?: Array<{ id: string; name: string }>;
   knowledgeSummary?: string;
-  permissionMode?: "read_only" | "ask_write" | "full";
+  permissionMode?: "read_only" | "ask_write" | "full" | "unattended";
 };
 
 export type ParticipantReplyInput = {
@@ -51,6 +51,7 @@ const PERMISSION_MODE_LABEL: Record<
   read_only: "只读",
   ask_write: "写前确认",
   full: "完整权限",
+  unattended: "无人值守",
 };
 
 /** 纯函数：把 Composer Context 格式化为提示词块（可单测） */

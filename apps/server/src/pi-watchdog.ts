@@ -6,6 +6,7 @@ import { endGoalRun } from "./run-service.js";
 import { broadcast } from "./sse.js";
 import { narrate } from "./narration.js";
 import { loadSettings } from "./settings-store.js";
+import { tryWithGoalLock } from "./goal-lock.js";
 import { DEFAULT_PI_MAX_TOOL_CALLS } from "@openx/shared";
 
 const WATCHDOG_INTERVAL_MS = 30_000;
@@ -21,16 +22,22 @@ function countPiToolLogs(goalId: string): number {
 }
 
 function failStuckPiGoal(goalId: string, reason: string): void {
-  const goal = getGoalById(goalId);
-  if (!goal || goal.status !== "running" || goal.executorId !== "pi") return;
+  void tryWithGoalLock(goalId, () => {
+    const goal = getGoalById(goalId);
+    if (!goal || goal.status !== "running" || goal.executorId !== "pi") return;
 
-  cancelPiChild(goalId);
-  getExecutor("pi")?.cancel?.(goalId);
-  endGoalRun(goalId, "failed", reason);
-  const log = appendLog(goalId, "error", reason);
-  broadcast({ type: "log.append", goalId, ...log });
-  markGoalFailed(goalId, reason);
-  narrate(`「${goal.title}」Pi 执行异常：${reason}`);
+    cancelPiChild(goalId);
+    getExecutor("pi")?.cancel?.(goalId);
+    endGoalRun(goalId, "failed", reason);
+    const log = appendLog(goalId, "error", reason);
+    broadcast({ type: "log.append", goalId, ...log });
+    markGoalFailed(goalId, reason);
+    narrate(`「${goal.title}」Pi 执行异常：${reason}`);
+  }).then((result) => {
+    if (result === null) {
+      // steer/dispatch 占用锁时跳过本轮，下一轮 watchdog 再检查
+    }
+  });
 }
 
 function checkPiGoals(): void {

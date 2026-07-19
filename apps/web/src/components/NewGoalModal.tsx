@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Goal } from "@openx/shared";
 import type { DispatchPermissionMode } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
@@ -24,11 +24,12 @@ export function NewGoalModal({
   executors,
   defaultExecutorId,
   connectOnly = false,
-  modalTitle = "新目标",
+  modalTitle = "新任务",
   onClose,
   onCreated,
 }: Props) {
   const scopedExecutors = connectOnly ? filterConnectExecutors(executors) : executors;
+  const titleId = useId();
   const [userDraft, setUserDraft] = useState("");
   const [title, setTitle] = useState("");
   const [acceptance, setAcceptance] = useState("");
@@ -54,6 +55,17 @@ export function NewGoalModal({
         : defaultExecutorChoice(scopedExecutors, defaultExecutorId),
     );
   }, [executors, defaultExecutorId, connectOnly, scopedExecutors]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (loading) return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [loading, onClose]);
 
   const refine = async () => {
     if (!userDraft.trim()) return;
@@ -102,21 +114,30 @@ export function NewGoalModal({
     }
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="mech-panel modal-panel" onClick={(e) => e.stopPropagation()}>
-        <h2 className="modal-title">{modalTitle}</h2>
+  const requestClose = () => {
+    if (loading) return;
+    onClose();
+  };
 
-        {error && (
-          <p className="approve-confirm" style={{ marginBottom: "0.5rem", borderColor: "var(--red)", color: "var(--red)" }}>
-            {error}
-          </p>
-        )}
+  return (
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onClick={requestClose}
+    >
+      <div className="mech-panel modal-panel" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title" id={titleId}>
+          {modalTitle}
+        </h2>
+
+        {error ? <p className="form-error">{error}</p> : null}
 
         {step === "draft" && (
           <>
             <div className="form-field">
-              <label className="form-label">目标草稿</label>
+              <label className="form-label">任务草稿</label>
               <textarea
                 className="mech-textarea"
                 value={userDraft}
@@ -132,7 +153,7 @@ export function NewGoalModal({
               includeAuto={!connectOnly}
             />
             <div className="modal-actions">
-              <button type="button" className="btn" onClick={onClose}>
+              <button type="button" className="btn secondary" disabled={loading} onClick={requestClose}>
                 取消
               </button>
               <button
@@ -149,11 +170,7 @@ export function NewGoalModal({
 
         {step === "review" && (
           <>
-            {refineWarn && (
-              <p className="approve-confirm" style={{ marginBottom: "0.5rem" }}>
-                ⚠ {refineWarn}
-              </p>
-            )}
+            {refineWarn ? <p className="form-warn">⚠ {refineWarn}</p> : null}
             <ExecutorPicker
               value={executorId}
               onChange={setExecutorId}
@@ -219,7 +236,7 @@ export function NewGoalModal({
               </label>
             </div>
             <div className="modal-actions">
-              <button type="button" className="btn" disabled={loading} onClick={() => setStep("draft")}>
+              <button type="button" className="btn secondary" disabled={loading} onClick={() => setStep("draft")}>
                 返回
               </button>
               {!autoExecute && (

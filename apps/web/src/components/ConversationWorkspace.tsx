@@ -9,14 +9,10 @@ import { extWidgetId } from "../lib/oxsp-catalog";
 import type { ExecutorInfo } from "../api";
 import type { BatchGoalsAction, GoalAccessActor } from "@openx/shared";
 import { ChatPanel } from "./ChatPanel";
-import { RoundtableChatPanel } from "./roundtable/RoundtableChatPanel";
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { PreviewRail } from "./PreviewRail";
-import { HyperPinDesktop } from "./smart-cabin/HyperPinDesktop";
-import { PinDesktopCanvas } from "./smart-cabin/PinDesktopCanvas";
-import { PinDesktopPager } from "./smart-cabin/PinDesktopPager";
 import { OxspSlotRenderer } from "./smart-cabin/OxspSlotRenderer";
-import { PinDock } from "./smart-cabin/PinDock";
+import { PinWorkspaceShell } from "./smart-cabin/PinWorkspaceShell";
 type GoalActions = {
   onApprove: (id: string) => Promise<boolean>;
   onRework: (id: string, reason?: string) => Promise<boolean>;
@@ -132,6 +128,7 @@ export function ConversationWorkspace(props: Props) {
   const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
     const chatPanelProps = {
       conversationId,
+      conversationMode,
       projectId,
       goals,
       selectedGoal,
@@ -154,11 +151,7 @@ export function ConversationWorkspace(props: Props) {
     const builtinWidgets: Partial<Record<PinWidgetId, ReactNode>> = {
       chat: (
         <div className="flexible-widget-fill workspace-pane workspace-pane-assistant">
-          {conversationMode === "roundtable" ? (
-            <RoundtableChatPanel conversationId={conversationId} />
-          ) : (
-            <ChatPanel {...chatPanelProps} />
-          )}
+          <ChatPanel {...chatPanelProps} />
         </div>
       ),
       tasks: (
@@ -252,56 +245,37 @@ export function ConversationWorkspace(props: Props) {
   ]);
 
   return (
-    <HyperPinDesktop
+    <PinWorkspaceShell
       className="main-view cursor-workspace conversation-smart-cabin hyper-pin-desktop"
-      canvas={
-        <PinDesktopPager
-          pageIndex={activePage}
-          pageCount={pageCount}
-          onPageChange={setPage}
-        >
-          <PinDesktopCanvas
-            layout={layout}
-            widgets={pinWidgets}
-            getSlotLabel={getSlotLabel}
-            onUnpin={unpin}
-            onApplyDrop={applyDrop}
-            onSeamCommit={commitSeamResize}
-            dockDragWidget={dockDrag?.widget ?? null}
-            dockDragOverCol={dockDrag?.overCol ?? null}
-            dockDragOverZone={dockDrag?.overZone ?? null}
-            onGridRectChange={onGridRectChange}
-            onBindCellRect={(getter) => {
-              getCellRectRef.current = getter;
-            }}
-            onPinWidgetAtCol={addDockCardAtCol}
-            onAddTemplateAtCol={addSlotFromTemplate}
-            isDockWidgetPinned={isPinned}
-            pageIndex={activePage}
-            pageCount={pageCount}
-          />
-        </PinDesktopPager>
-      }
-      dock={
-        <PinDock
-          extItems={extDockItems}
-          isPinned={isPinned}
-          pinnedCount={pinnedCount}
-          onTogglePin={togglePin}
-          onRegisterTemplate={registerSlotFromTemplate}
-          onEnableRoundtable={() => {
-            void enableRoundtable(conversationId).then((conv) => {
-              if (conv && !isPinned("chat")) togglePin("chat");
-            });
-          }}
-          roundtableActive={conversationMode === "roundtable"}
-          onDockDragStart={onDockDragStart}
-          onDockDragMove={onDockDragMove}
-          onDockDragEnd={onDockDragEnd}
-          onDockDragCancel={onDockDragCancel}
-          onRemoveTab={unpin}
-        />
-      }
+      layout={layout}
+      widgets={pinWidgets}
+      activePage={activePage}
+      pageCount={pageCount}
+      setPage={setPage}
+      getSlotLabel={getSlotLabel}
+      unpin={unpin}
+      applyDrop={applyDrop}
+      commitSeamResize={commitSeamResize}
+      dockDrag={dockDrag}
+      onGridRectChange={onGridRectChange}
+      getCellRectRef={getCellRectRef}
+      addDockCardAtCol={addDockCardAtCol}
+      addSlotFromTemplate={addSlotFromTemplate}
+      isPinned={isPinned}
+      pinnedCount={pinnedCount}
+      togglePin={togglePin}
+      registerSlotFromTemplate={registerSlotFromTemplate}
+      extDockItems={extDockItems}
+      onDockDragStart={onDockDragStart}
+      onDockDragMove={onDockDragMove}
+      onDockDragEnd={onDockDragEnd}
+      onDockDragCancel={onDockDragCancel}
+      onEnableRoundtable={() => {
+        void enableRoundtable(conversationId).then((result) => {
+          if (result && !isPinned("chat")) togglePin("chat");
+        });
+      }}
+      roundtableActive={conversationMode === "roundtable"}
     />
   );
 }

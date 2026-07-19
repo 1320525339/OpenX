@@ -318,20 +318,37 @@ describe("roundtable API (mocked LLM)", () => {
       );
     });
 
-    // retry 改为快速成功
+    // retry 改为快速成功（会在线程末尾新建气泡，不改旧 cancelled 消息）
     defaultFastReply();
     const retry = await post(`/api/roundtable/replies/${streamingId}/retry`);
     expect(retry.status).toBe(200);
 
+    let retryMessageId = 0;
     await waitFor(() => {
       const msg = listCoachMessages(TEST_CONVERSATION_ID).find(
-        (m) => m.kind === "text" && m.id === streamingId,
+        (m) =>
+          m.kind === "text" &&
+          m.roundId === round.id &&
+          m.speakerType !== "user" &&
+          m.id !== streamingId &&
+          m.generationStatus === "completed" &&
+          m.text.trim().length > 0,
       );
-      return msg?.kind === "text" && msg.generationStatus === "completed";
-    });
+      if (msg && msg.kind === "text") {
+        retryMessageId = msg.id;
+        return true;
+      }
+      return false;
+    }, { timeoutMs: 10_000 });
 
-    const finalMsg = listCoachMessages(TEST_CONVERSATION_ID).find(
+    const cancelledMsg = listCoachMessages(TEST_CONVERSATION_ID).find(
       (m) => m.kind === "text" && m.id === streamingId,
+    );
+    expect(cancelledMsg?.kind === "text" && cancelledMsg.generationStatus).toBe(
+      "cancelled",
+    );
+    const finalMsg = listCoachMessages(TEST_CONVERSATION_ID).find(
+      (m) => m.kind === "text" && m.id === retryMessageId,
     ) as Extract<CoachMessageRecord, { kind: "text" }>;
     expect(finalMsg.text.length).toBeGreaterThan(0);
   });

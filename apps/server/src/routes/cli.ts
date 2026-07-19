@@ -5,7 +5,7 @@ import {
   CliProfileSchema,
   UpdateAcpCliConfigSchema,
 } from "@openx/shared";
-import { loadSettings, saveSettings } from "../settings-store.js";
+import { loadSettings, saveSettings, settingsForApi } from "../settings-store.js";
 import { removeConnectionByExecutorId } from "../connect-store.js";
 import {
   bootstrapConnectProfile,
@@ -116,7 +116,7 @@ cliRoutes.put("/acp-config/:executorId", async (c) => {
       body.modelRef,
     );
     saveSettings(next);
-    return c.json({ config: snapshot, settings: next });
+    return c.json({ config: snapshot, settings: settingsForApi(next) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ error: message }, 400);
@@ -167,7 +167,7 @@ cliRoutes.post("/profiles", async (c) => {
     }
   }
 
-  return c.json({ profile, settings: next, bootstrap }, 201);
+  return c.json({ profile, settings: settingsForApi(next), bootstrap }, 201);
 });
 
 cliRoutes.delete("/profiles/:executorId", async (c) => {
@@ -182,7 +182,7 @@ cliRoutes.delete("/profiles/:executorId", async (c) => {
     cliProfiles: settings.cliProfiles.filter((p) => p.executorId !== executorId),
   };
   saveSettings(next);
-  return c.json({ ok: true, settings: next });
+  return c.json({ ok: true, settings: settingsForApi(next) });
 });
 
 cliRoutes.get("/profiles/:executorId/bootstrap", (c) => {

@@ -42,6 +42,13 @@ export type LlmProviderDef = {
   apiKeyDefault?: string;
   envVar?: string;
   popular: boolean;
+  /**
+   * 是否可被 Coach / Reviewer（OpenAI 兼容 SDK）直接调用。
+   * Anthropic 原生 Messages 端点为 false，仅适合 ACP Claude。
+   */
+  coachCompatible?: boolean;
+  /** 设置页 / runtime 展示的中文提示 */
+  coachWarning?: string;
 };
 
 /** 内置渠道模板（catalog），不落盘直到用户保存 */
@@ -79,6 +86,9 @@ export const LLM_PROVIDER_TEMPLATES: Record<LlmProviderId, LlmProviderDef> = {
     apiKeyPlaceholder: "sk-ant-...",
     envVar: "ANTHROPIC_API_KEY",
     popular: true,
+    coachCompatible: false,
+    coachWarning:
+      "Anthropic 原生端点不兼容 Coach/审查员（OpenAI Chat）。请改用 OpenAI 兼容渠道，或仅通过 ACP Claude（acp:claude）使用本渠道。",
   },
   google: {
     id: "google",
@@ -127,7 +137,7 @@ export const LLM_PROVIDER_TEMPLATES: Record<LlmProviderId, LlmProviderDef> = {
   },
 };
 
-/** @deprecated 使用 LLM_PROVIDER_TEMPLATES */
+/** @deprecated 使用 LLM_PROVIDER_TEMPLATES；下次 major 将移除本别名 */
 export const LLM_PROVIDERS = LLM_PROVIDER_TEMPLATES;
 
 export const POPULAR_LLM_PROVIDER_IDS: LlmProviderId[] = (

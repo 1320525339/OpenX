@@ -4,16 +4,9 @@ import { isPausedGoal } from "@openx/shared";
 import type { AppView } from "./SideNav";
 import { goalNeedsUserAttention } from "../lib/goal-attention";
 import { goalStatusText } from "../lib/goal-detail";
+import { GOAL_STATUS_FILTER_LABELS } from "../lib/workflow-ui";
 import { WorkOrderIdBadge } from "./WorkOrderIdBadge";
 import { SidebarToggle } from "./SidebarToggle";
-
-const FILTER_LABELS: Record<string, string> = {
-  all: "全部",
-  incomplete: "未完成",
-  failed: "失败",
-  done: "已完成",
-  rework: "返工中",
-};
 
 type Props = {
   view: AppView;
@@ -81,8 +74,8 @@ export function TopBar({
   } else if (view === "conversation" && selectedConversation) {
     primary = selectedConversation.title;
     secondary = selectedProject
-      ? `${selectedProject.name} · ${FILTER_LABELS[statusFilter] ?? statusFilter} ${filteredCount}`
-      : `${FILTER_LABELS[statusFilter] ?? statusFilter} ${filteredCount}`;
+      ? `${selectedProject.name} · ${GOAL_STATUS_FILTER_LABELS[statusFilter] ?? statusFilter} ${filteredCount}`
+      : `${GOAL_STATUS_FILTER_LABELS[statusFilter] ?? statusFilter} ${filteredCount}`;
     if (stats.running > 0 || stats.review > 0) {
       secondary += ` · ${stats.running} 进行中 · ${stats.review} 待确认`;
     }
@@ -140,7 +133,7 @@ export function TopBar({
 
         {!detailGoal && view === "conversation" && onNewGoal ? (
           <button type="button" className="btn compact primary" onClick={onNewGoal}>
-            ＋ 新目标
+            ＋ 新任务
           </button>
         ) : null}
       </div>

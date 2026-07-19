@@ -29,6 +29,9 @@ import { startKnowledgeIndexStartupCheck } from "./knowledge-index-startup.js";
 import { shutdownZvecKnowledgeIndex } from "./zvec-knowledge-index.js";
 import { registerEventWebhookHandler } from "./event-webhook.js";
 import { validateRuntimeBind } from "./runtime-mode.js";
+import { getOrCreateApiToken, getApiTokenPath } from "./api-token.js";
+import { registerLlmUsageSink } from "@openx/coach";
+import { insertTokenUsageEvent } from "./db.js";
 import {
   registerIntegrationPlugin,
   startEnabledIntegrations,
@@ -50,6 +53,24 @@ if (!bind.ok) {
   process.exit(1);
 }
 const { host, port, mode } = bind.config;
+
+// desktop-local / remote 均确保有可用 API token 文件
+try {
+  const token = getOrCreateApiToken();
+  if (mode === "desktop-local") {
+    console.log(`[openx] API token 已就绪（${getApiTokenPath()}，长度 ${token.length}）`);
+  }
+} catch (err) {
+  console.warn("[openx] 初始化 API token 失败:", err);
+}
+
+registerLlmUsageSink((event) => {
+  insertTokenUsageEvent({
+    model: event.model ? `${event.role ?? "coach"}:${event.model}` : event.role,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+  });
+});
 
 console.log(`OpenX server http://${host}:${port} (${mode})`);
 

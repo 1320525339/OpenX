@@ -74,6 +74,20 @@ export function listPendingOperatorActions(conversationId?: string): PendingOper
   return all.filter((a) => !a.conversationId || a.conversationId === conversationId);
 }
 
+/** 遗忘会话时丢弃该会话下仍 pending 的 Operator 动作 */
+export function dismissPendingOperatorActionsForConversation(
+  conversationId: string,
+): number {
+  let n = 0;
+  for (const [id, action] of pendingActions) {
+    if (action.status !== "pending") continue;
+    if (action.conversationId !== conversationId) continue;
+    pendingActions.set(id, { ...action, status: "dismissed" });
+    n += 1;
+  }
+  return n;
+}
+
 export function getPendingOperatorAction(id: string): PendingOperatorAction | undefined {
   return pendingActions.get(id);
 }

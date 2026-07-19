@@ -163,6 +163,37 @@ describe("island-queue", () => {
     expect(isIslandSeen("2")).toBe(false);
   });
 
+  it("error toast 抢占当前 durable 展示且不 ack", () => {
+    const shown: string[] = [];
+    const dismissed: number[] = [];
+    bindIslandQueueHandlers({
+      show: (p) => shown.push(p.id),
+      dismiss: () => dismissed.push(1),
+    });
+    requestIsland({
+      ...payload("await-1"),
+      kind: "goal.awaiting_review",
+      goalId: "g1",
+      autoDismissMs: 0,
+    });
+    expect(shown).toEqual(["await-1"]);
+    expect(getIslandShowingId()).toBe("await-1");
+
+    requestIsland({
+      ...payload("err-1"),
+      severity: "error",
+      title: "确认失败",
+      message: "Failed to fetch",
+    });
+    expect(dismissed.length).toBeGreaterThanOrEqual(1);
+    expect(getIslandShowingId()).toBe("err-1");
+    expect(shown).toContain("err-1");
+    expect(isIslandSeen("await-1")).toBe(false);
+
+    completeIslandDisplay({ token: getIslandDisplayToken()! });
+    expect(getIslandShowingId()).toBe("await-1");
+  });
+
   it("同 dedupe 更新不更换 displayToken", () => {
     const tokens: number[] = [];
     bindIslandQueueHandlers({

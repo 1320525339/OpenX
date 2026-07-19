@@ -56,6 +56,18 @@ export function pruneSseEvents(
   ).run(excess);
 }
 
+/** 删除 payload 中带指定 conversationId 的 SSE，避免遗忘后 catchup 回放幽灵事件 */
+export function purgeSseEventsForConversation(conversationId: string): number {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `DELETE FROM sse_events
+       WHERE json_extract(payload_json, '$.conversationId') = ?`,
+    )
+    .run(conversationId);
+  return Number(result.changes ?? 0);
+}
+
 export function getSseEventById(id: number): StoredSseEvent | undefined {
   const row = getDb()
     .prepare(

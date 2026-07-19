@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./openx-home": {
+      "types": "./dist/openx-home.d.ts",
+      "import": "./dist/openx-home.js"
+    },
     "./skills-path": {
       "types": "./dist/skills-path.d.ts",
       "import": "./dist/skills-path.js"
@@ -28,6 +32,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "typescript": "^5.8.2",
     "vitest": "^3.0.8"
   }

@@ -3,14 +3,14 @@ import { getCoachRuntime } from "@openx/coach";
 import { listProjects, listConversations } from "../db.js";
 import { listAgentCatalog } from "../agents-service.js";
 import { ensureSystemMainConversation } from "../system-workspace.js";
-import { loadSettings } from "../settings-store.js";
+import { loadSettings, settingsForApi } from "../settings-store.js";
 import { withWorkspaceResolved } from "../workspace-path.js";
 
 export const bootstrapRoutes = new Hono();
 
 /** 应用启动快照：设置、项目树、系统调度台、Persona 目录（不触发 detectExecutors） */
 bootstrapRoutes.get("/", (c) => {
-  const settings = withWorkspaceResolved(loadSettings());
+  const settings = settingsForApi(withWorkspaceResolved(loadSettings()));
   const { project, conversation } = ensureSystemMainConversation();
   const runtime = getCoachRuntime(settings);
 
@@ -26,6 +26,7 @@ bootstrapRoutes.get("/", (c) => {
       model: runtime.model,
       baseUrl: runtime.baseUrl,
       error: runtime.error,
+      warning: runtime.warning,
     },
   });
 });

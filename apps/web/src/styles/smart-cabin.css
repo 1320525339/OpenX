@@ -269,7 +269,7 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
 }
 
 .task-index-item.selected {
-  border-color: var(--accent, #2563eb);
+  border-color: var(--accent);
   background: var(--surface-hover, rgba(127, 127, 127, 0.08));
 }
 
@@ -345,9 +345,9 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
 }
 
 .foreman-dock-btn.active {
-  color: var(--accent, #0071e3);
-  background: rgba(0, 113, 227, 0.08);
-  box-shadow: inset 0 -2px 0 var(--accent, #0071e3);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .foreman-dock-btn.active .foreman-dock-icon {
@@ -375,7 +375,7 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
   min-width: 1rem;
   padding: 0 0.2rem;
   border-radius: 999px;
-  background: var(--accent, #2563eb);
+  background: var(--accent);
   color: #fff;
   font-size: 0.58rem;
   line-height: 1.25;
@@ -575,7 +575,7 @@ body.split-dragging .smart-cabin-desktop .pane-divider::after {
 .flexible-canvas-split .pane-divider:hover::after,
 .flexible-canvas-split .pane-divider:focus-visible::after,
 body.split-dragging .flexible-canvas-split .pane-divider::after {
-  background: var(--accent, #0071e3);
+  background: var(--accent);
   opacity: 1;
 }
 
@@ -673,7 +673,7 @@ body.split-dragging .flexible-canvas-split .pane-divider::after {
 .flexible-widget-resize:hover::after,
 .pin-desktop-resizing .flexible-widget-resize::after {
   opacity: 1;
-  background: var(--accent, #0071e3);
+  background: var(--accent);
 }
 
 .flexible-widget-wide {
@@ -687,9 +687,9 @@ body.split-dragging .flexible-canvas-split .pane-divider::after {
 }
 
 .flexible-widget-wide.active {
-  color: var(--accent, #2563eb);
-  border-color: rgba(37, 99, 235, 0.35);
-  background: rgba(37, 99, 235, 0.06);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .flexible-widget-span {
@@ -721,8 +721,8 @@ body.split-dragging .flexible-canvas-split .pane-divider::after {
 }
 
 .flexible-widget-pin.pinned {
-  color: var(--accent, #2563eb);
-  border-color: rgba(37, 99, 235, 0.35);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .flexible-widget-body {

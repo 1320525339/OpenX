@@ -73,6 +73,7 @@ import {
   dismissOperatorAction,
 } from "../operator-gateway.js";
 import { prepareCoachThreadForPrompt } from "../coach-thread-service.js";
+import { healOrphanStreamingMessages } from "../roundtable-service.js";
 
 function loadCoachThreadContext(
   conversationId: string,
@@ -86,8 +87,18 @@ function loadCoachThreadContext(
 
 export const coachRoutes = new Hono();
 
+/** @deprecated 请改用 GET /api/model/templates 或 /api/coach/templates */
 coachRoutes.get("/providers", (c) => {
-  return c.json({ providers: listLlmProviderTemplates() });
+  return c.json({
+    providers: listLlmProviderTemplates(),
+    templates: listLlmProviderTemplates(),
+    deprecated: true,
+    message: "请改用 GET /api/coach/templates 或 /api/model/templates",
+  });
+});
+
+coachRoutes.get("/templates", (c) => {
+  return c.json({ templates: listLlmProviderTemplates() });
 });
 
 coachRoutes.get("/status", (c) => {
@@ -95,6 +106,7 @@ coachRoutes.get("/status", (c) => {
   const runtime = getCoachRuntime(settings);
   return c.json({
     ...runtime,
+    slug: runtime.slug,
     providerId: runtime.slug,
     baseUrl: runtime.baseUrl,
   });
@@ -106,13 +118,16 @@ coachRoutes.post("/test", async (c) => {
   if (!runtime.ready) {
     return c.json({
       ok: false,
-      error: "渠道未就绪：请配置 API Key 或选择 OpenCode Zen",
+      error: runtime.error ?? "渠道未就绪：请配置 API Key 或选择 OpenCode Zen",
+      warning: runtime.warning,
+      slug: runtime.slug,
       providerId: runtime.slug,
     });
   }
   const result = await testCoachConnection(settings);
   return c.json({
     ...result,
+    slug: runtime.slug,
     providerId: runtime.slug,
     model: runtime.model,
     baseUrl: runtime.baseUrl,
@@ -141,6 +156,8 @@ coachRoutes.get("/messages", (c) => {
   if (!getConversationById(conversationId)) {
     return c.json({ error: "Conversation not found" }, 404);
   }
+  // 读取前治愈孤儿 streaming，避免刷新后仍显示半截「回复中」压在新对话上方
+  healOrphanStreamingMessages(conversationId);
   const messages = listCoachMessages(conversationId);
   return c.json({ messages });
 });
@@ -215,7 +232,7 @@ coachRoutes.post("/refined/:messageId/respond", async (c) => {
         settings,
         chatHistory,
         undefined,
-        { onDelta: stream.onDelta },
+        { onDelta: stream.onDelta, abortSignal: stream.signal },
       );
       message = reply.message;
       llmError = reply.llmError;
@@ -224,6 +241,10 @@ coachRoutes.post("/refined/:messageId/respond", async (c) => {
     } catch (err) {
       stream.abort();
       throw err;
+    }
+
+    if (!stream.isLive()) {
+      return c.json({ aborted: true, conversationId: input.conversationId });
     }
 
     const toolResult = saveCoachToolResultMessage(
@@ -312,7 +333,7 @@ coachRoutes.post("/clarify/:messageId/respond", async (c) => {
         settings,
         chatHistory,
         undefined,
-        { onDelta: stream.onDelta },
+        { onDelta: stream.onDelta, abortSignal: stream.signal },
       );
       message = reply.message;
       refined = reply.refined;
@@ -322,6 +343,10 @@ coachRoutes.post("/clarify/:messageId/respond", async (c) => {
     } catch (err) {
       stream.abort();
       throw err;
+    }
+
+    if (!stream.isLive()) {
+      return c.json({ aborted: true, conversationId: input.conversationId });
     }
 
     const toolResult = saveCoachToolResultMessage(
@@ -448,7 +473,7 @@ coachRoutes.post("/operator-action/:messageId/respond", async (c) => {
         settings,
         chatHistory,
         undefined,
-        { onDelta: stream.onDelta, operatorGateway: gateway },
+        { onDelta: stream.onDelta, abortSignal: stream.signal, operatorGateway: gateway },
       );
       message = reply.message;
       llmError = reply.llmError;
@@ -457,6 +482,10 @@ coachRoutes.post("/operator-action/:messageId/respond", async (c) => {
     } catch (err) {
       stream.abort();
       throw err;
+    }
+
+    if (!stream.isLive()) {
+      return c.json({ aborted: true, conversationId: input.conversationId });
     }
 
     const toolResult = saveCoachToolResultMessage(
@@ -553,7 +582,7 @@ coachRoutes.post("/dispatch-permission/:messageId/respond", async (c) => {
         settings,
         chatHistory,
         undefined,
-        { onDelta: stream.onDelta },
+        { onDelta: stream.onDelta, abortSignal: stream.signal },
       );
       message = reply.message;
       llmError = reply.llmError;
@@ -562,6 +591,10 @@ coachRoutes.post("/dispatch-permission/:messageId/respond", async (c) => {
     } catch (err) {
       stream.abort();
       throw err;
+    }
+
+    if (!stream.isLive()) {
+      return c.json({ aborted: true, conversationId: input.conversationId });
     }
 
     const toolResult = saveCoachToolResultMessage(
@@ -754,7 +787,7 @@ coachRoutes.post("/chat", async (c) => {
           settings.defaultConstraints,
           undefined,
           chatHistory,
-          { onDelta, forceRefine: input.forceRefine, skipRefine },
+          { onDelta, forceRefine: input.forceRefine, skipRefine, abortSignal: stream.signal },
         );
         message = reply.message;
         rawRefined =
@@ -774,6 +807,10 @@ coachRoutes.post("/chat", async (c) => {
     } catch (err) {
       if (willStream) stream.abort();
       throw err;
+    }
+
+    if (!stream.isLive()) {
+      return c.json({ aborted: true, conversationId: input.conversationId });
     }
 
     let refined = rawRefined;

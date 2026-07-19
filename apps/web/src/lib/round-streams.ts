@@ -69,32 +69,64 @@ export function applyChatReplyDelta(
 
 export function applyChatReplyCompleted(
   streams: RoundStreamsMap,
-  event: { messageId: number; text?: string },
+  event: {
+    messageId: number;
+    conversationId?: string;
+    roundId?: string;
+    speakerId?: string;
+    streamId?: string;
+    text?: string;
+  },
 ): RoundStreamsMap {
   const prev = streams[event.messageId];
-  if (!prev) return streams;
+  const base: RoundReplyStreamState = prev ?? {
+    conversationId: event.conversationId ?? "",
+    roundId: event.roundId ?? "",
+    messageId: event.messageId,
+    speakerId: event.speakerId ?? "",
+    streamId: event.streamId ?? "",
+    text: "",
+    status: "streaming",
+  };
   return {
     ...streams,
     [event.messageId]: {
-      ...prev,
-      text: event.text || prev.text,
+      ...base,
+      text: event.text || base.text,
       status: "completed",
+      streamId: event.streamId || base.streamId,
     },
   };
 }
 
 export function applyChatReplyFailed(
   streams: RoundStreamsMap,
-  event: { messageId: number; error?: string },
+  event: {
+    messageId: number;
+    conversationId?: string;
+    roundId?: string;
+    speakerId?: string;
+    streamId?: string;
+    error?: string;
+  },
 ): RoundStreamsMap {
   const prev = streams[event.messageId];
-  if (!prev) return streams;
+  const base: RoundReplyStreamState = prev ?? {
+    conversationId: event.conversationId ?? "",
+    roundId: event.roundId ?? "",
+    messageId: event.messageId,
+    speakerId: event.speakerId ?? "",
+    streamId: event.streamId ?? "",
+    text: "",
+    status: "streaming",
+  };
   return {
     ...streams,
     [event.messageId]: {
-      ...prev,
+      ...base,
       status: "failed",
       error: event.error,
+      streamId: event.streamId || base.streamId,
     },
   };
 }

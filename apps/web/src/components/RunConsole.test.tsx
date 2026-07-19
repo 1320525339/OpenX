@@ -7,6 +7,21 @@ vi.mock("../lib/chat-markdown", () => ({
   ChatMarkdown: ({ text }: { text: string }) => <div data-testid="markdown">{text}</div>,
 }));
 
+vi.mock("./ToolDiffView", () => ({
+  ToolDiffView: ({
+    fileDiff,
+  }: {
+    fileDiff: { path: string; added: number; removed: number; diff: string };
+  }) => (
+    <div data-testid="tool-diff">
+      <span>{fileDiff.path}</span>
+      <span>+{fileDiff.added}</span>
+      <span>−{fileDiff.removed}</span>
+      <pre>{fileDiff.diff}</pre>
+    </div>
+  ),
+}));
+
 const ts = "2026-06-08T00:00:00.000Z";
 
 function baseRun(overrides: Partial<GoalRunState> = {}): GoalRunState {
@@ -128,6 +143,8 @@ describe("RunConsole", () => {
       />,
     );
     await waitFor(() => {
+      expect(screen.getByText("+1 -1")).toBeInTheDocument();
+      expect(screen.getByTestId("tool-diff")).toBeInTheDocument();
       expect(screen.getAllByText("src/a.ts").length).toBeGreaterThan(0);
       expect(screen.getAllByText("+1").length).toBeGreaterThan(0);
       expect(screen.getAllByText("−1").length).toBeGreaterThan(0);

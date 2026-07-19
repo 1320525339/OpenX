@@ -6,6 +6,14 @@
   --sidebar-w: 9.25rem;
   --log-strip-h: 1.85rem;
 
+  /* 浮层层级：面板内 < Pin 浮层 < 模态 < 灵动岛 / 桌面启动 */
+  --z-panel: 5;
+  --z-pin-overlay: 2000;
+  --z-pin-menu: 2200;
+  --z-modal: 12000;
+  --z-desktop-boot: 10000;
+  --z-island: 13000;
+
   --font-sans:
     "SF Pro Text",
     "PingFang SC",
@@ -235,6 +243,18 @@ select option {
   border-color: var(--primary-hover);
 }
 
+.btn.secondary {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border-strong);
+}
+
+.btn.secondary:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
 .btn.danger {
   background: var(--btn-danger-bg);
   color: var(--red);
@@ -291,6 +311,49 @@ select option {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn:focus-visible,
+.btn-text:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.btn-text {
+  padding: 0.2rem 0.35rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--type-meta);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.btn-text:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--hover-bg);
+}
+
+.btn-text:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-error {
+  margin: 0 0 0.65rem;
+  color: var(--status-error, var(--red));
+  font-size: var(--type-meta);
+  line-height: var(--leading-normal);
+}
+
+.form-warn {
+  margin: 0 0 0.65rem;
+  color: var(--amber);
+  font-size: var(--type-meta);
+  line-height: var(--leading-normal);
 }
 
 .status-pill {

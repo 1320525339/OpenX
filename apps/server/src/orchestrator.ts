@@ -69,6 +69,7 @@ import { bootstrapConnectProfile } from "./cli-bootstrap.js";
 import { getServerBaseUrl } from "./server-base-url.js";
 import { shouldRunPiInWorker, runPiInWorker, cancelPiChild, hasParkedPiChild, resumePiChild } from "./pi-isolated-run.js";
 import { loadSettings } from "./settings-store.js";
+import { withGoalLock, tryWithGoalLock, clearGoalLocks, isGoalLocked } from "./goal-lock.js";
 import { resolveWorkspaceRoot } from "./workspace-path.js";
 import { loadKnowledgeContextForExecutor } from "./knowledge-store.js";
 import { resolveSystemWorkspaceRoot } from "./system-workspace-path.js";
@@ -105,6 +106,7 @@ export function resetOrchestrator(): void {
   registered = false;
   resetExecutorRegistry();
   dispatchLocks.clear();
+  clearGoalLocks();
 }
 
 export function ensureExecutors() {
@@ -411,13 +413,13 @@ function buildExecutorContext(goalId: string, isRework?: boolean): ExecutorConte
         appendLog(
           goalId,
           "warn",
-          `沙箱已配置但尚未执行隔离（type=${sand.type}，allowedPaths=${sand.allowedPaths.length}）；当前仍在宿主机 cwd 执行`,
+          `沙箱配置仅为声明式占位（type=${sand.type}，allowedPaths=${sand.allowedPaths.length}）：OpenX 当前不会启动容器/沙箱进程，执行仍在宿主机 cwd=${workspaceRoot}。请勿将「已启用沙箱」理解为安全隔离。`,
         );
       } else {
         appendLog(
           goalId,
           "warn",
-          `沙箱已配置但尚未执行隔离（type=${sand.type}）；当前仍在宿主机 cwd 执行`,
+          `沙箱配置仅为声明式占位（type=${sand.type}）：OpenX 当前不会启动容器/沙箱进程，执行仍在宿主机 cwd=${workspaceRoot}。请勿将「已启用沙箱」理解为安全隔离。`,
         );
       }
       return {
@@ -461,35 +463,45 @@ export function tryDispatchDependents(completedGoalId: string): void {
 }
 
 export async function steerReworkGoal(goalId: string): Promise<boolean> {
-  ensureExecutors();
-  const goal = getGoalById(goalId);
-  if (!goal) return false;
-  if (goal.executorId === EXECUTOR_AUTO) return false;
+  return (
+    (await tryWithGoalLock(goalId, async () => {
+      ensureExecutors();
+      const goal = getGoalById(goalId);
+      if (!goal) return false;
+      if (goal.executorId === EXECUTOR_AUTO) return false;
 
-  const adapter = resolveExecutor(goal.executorId);
-  if (!adapter?.steerRework) return false;
+      const adapter = resolveExecutor(goal.executorId);
+      if (!adapter?.steerRework) return false;
 
-  try {
-    if (isRunActive(goalId)) {
-      appendLog(goalId, "warn", "返工 steer 跳过：已有活跃 run");
-      return false;
-    }
-    flushMergeBuffer(goalId);
-    startGoalRun(goalId, goal.executorId);
-    const ctx = buildExecutorContext(goalId, true);
-    if (goal.executorId === "pi" && hasParkedPiChild(goalId)) {
-      return await resumePiChild(ctx);
-    }
-    return await adapter.steerRework(ctx);
-  } catch (err) {
-    endGoalRun(goalId, "failed", err instanceof Error ? err.message : String(err));
-    appendLog(
-      goalId,
-      "error",
-      `返工 steer 失败：${err instanceof Error ? err.message : String(err)}`,
-    );
-    return false;
-  }
+      try {
+        if (isRunActive(goalId)) {
+          appendLog(goalId, "warn", "返工 steer 跳过：已有活跃 run");
+          return false;
+        }
+        flushMergeBuffer(goalId);
+        startGoalRun(goalId, goal.executorId);
+        const ctx = buildExecutorContext(goalId, true);
+        let ok: boolean;
+        if (goal.executorId === "pi" && hasParkedPiChild(goalId)) {
+          ok = await resumePiChild(ctx);
+        } else {
+          ok = await adapter.steerRework(ctx);
+        }
+        if (!ok) {
+          endGoalRun(goalId, "failed", "施工队 session 不可用，请重新派发");
+        }
+        return ok;
+      } catch (err) {
+        endGoalRun(goalId, "failed", err instanceof Error ? err.message : String(err));
+        appendLog(
+          goalId,
+          "error",
+          `返工 steer 失败：${err instanceof Error ? err.message : String(err)}`,
+        );
+        return false;
+      }
+    })) ?? false
+  );
 }
 
 /** 显式续跑：将开发商决策注入已暂停（paused）的施工队 session */
@@ -735,125 +747,128 @@ async function ensureConnectExecutorOnline(
 }
 
 export async function dispatchGoal(goalId: string): Promise<void> {
-  if (dispatchLocks.has(goalId) || isRunActive(goalId)) {
+  if (dispatchLocks.has(goalId) || isRunActive(goalId) || isGoalLocked(goalId)) {
     appendLog(goalId, "warn", "派发跳过：该目标已有活跃执行");
     return;
   }
 
   dispatchLocks.add(goalId);
   try {
-    ensureExecutors();
-    const goal = getGoalById(goalId);
-    if (!goal) throw new Error("Goal not found");
+    await withGoalLock(goalId, async () => {
+      ensureExecutors();
+      const goal = getGoalById(goalId);
+      if (!goal) throw new Error("Goal not found");
 
-    if (!areDependenciesMet(goal)) {
+      if (!areDependenciesMet(goal)) {
+        appendLog(
+          goalId,
+          "info",
+          `等待依赖完成：${goal.dependsOn.join(", ")}`,
+        );
+        return;
+      }
+
+      if (goal.executorId === EXECUTOR_AUTO) {
+        await materializeAutoExecutor(goalId);
+      }
+
+      const resolved = getGoalById(goalId);
+      if (!resolved) throw new Error("Goal not found");
+
+      if (resolved.status === "paused") {
+        appendLog(
+          goalId,
+          "warn",
+          "派发跳过：任务已暂停等待开发商决策；请显式续跑（回复并继续或 /resume）",
+        );
+        return;
+      }
+
+      if (resolved.status !== "running") {
+        appendLog(goalId, "warn", `派发跳过：目标状态为 ${resolved.status}`);
+        return;
+      }
+
+      if (resolved.crewStatus === "awaiting_user") {
+        appendLog(
+          goalId,
+          "warn",
+          "派发跳过：工头已暂停施工队，等待开发商决策；请显式续跑（回复并继续或 /resume）",
+        );
+        return;
+      }
+
+      const connectReady = await ensureConnectExecutorOnline(
+        goalId,
+        resolved.executorId,
+      );
+      if (
+        !connectReady &&
+        isConnectExecutorId(resolved.executorId) &&
+        !isConnectAnyExecutorId(resolved.executorId)
+      ) {
+        const failMsg = `Connect 执行器 ${resolved.executorId} 未上线（未配置 profile、自举失败或 ${BOOTSTRAP_WAIT_MS / 1000}s 内超时）`;
+        appendLog(goalId, "error", failMsg);
+        markGoalFailed(goalId, failMsg);
+        endGoalRun(goalId, "failed", failMsg);
+        return;
+      }
+
+      const adapter = resolveExecutor(resolved.executorId);
+      if (!adapter) {
+        throw new Error(`Unknown executor: ${resolved.executorId}`);
+      }
+
+      clearGoalCancelledForConnect(goalId);
+      const settings = loadSettings();
+      const workspaceRoot = resolveWorkspaceForGoal(resolved);
+      if (resolved.executorId.startsWith("acp:")) {
+        const synced = syncWorkspaceMcpJson(
+          workspaceRoot,
+          settings.mcpServers?.find((s) => s.id === OPENX_MCP_ID),
+        );
+        if (synced.written) {
+          appendLog(goalId, "info", `已同步工作区 MCP 配置：${synced.path}`);
+        }
+      }
+      const ctx = buildExecutorContext(goalId, resolved.effectStatus === "rework");
+      // 先登记 run，再释放外层 dispatchLocks（finally），避免登记前的并发窗口
+      const runId = startGoalRun(goalId, resolved.executorId);
+      const receipt = insertDispatchReceipt({
+        goalId,
+        runId,
+        executorId: resolved.executorId,
+        dispatchContext: resolved.dispatchContext,
+        workspaceRoot: ctx.workspaceRoot,
+      });
       appendLog(
         goalId,
         "info",
-        `等待依赖完成：${goal.dependsOn.join(", ")}`,
+        `派单凭证 receipt=${receipt.receiptId} run=${runId} executor=${resolved.executorId}`,
       );
-      return;
-    }
-
-    if (goal.executorId === EXECUTOR_AUTO) {
-      await materializeAutoExecutor(goalId);
-    }
-
-    const resolved = getGoalById(goalId);
-    if (!resolved) throw new Error("Goal not found");
-
-    if (resolved.status === "paused") {
-      appendLog(
-        goalId,
-        "warn",
-        "派发跳过：任务已暂停等待开发商决策；请显式续跑（回复并继续或 /resume）",
-      );
-      return;
-    }
-
-    if (resolved.status !== "running") {
-      appendLog(goalId, "warn", `派发跳过：目标状态为 ${resolved.status}`);
-      return;
-    }
-
-    if (resolved.crewStatus === "awaiting_user") {
-      appendLog(
-        goalId,
-        "warn",
-        "派发跳过：工头已暂停施工队，等待开发商决策；请显式续跑（回复并继续或 /resume）",
-      );
-      return;
-    }
-
-    const connectReady = await ensureConnectExecutorOnline(
-      goalId,
-      resolved.executorId,
-    );
-    if (
-      !connectReady &&
-      isConnectExecutorId(resolved.executorId) &&
-      !isConnectAnyExecutorId(resolved.executorId)
-    ) {
-      const failMsg = `Connect 执行器 ${resolved.executorId} 未上线（未配置 profile、自举失败或 ${BOOTSTRAP_WAIT_MS / 1000}s 内超时）`;
-      appendLog(goalId, "error", failMsg);
-      markGoalFailed(goalId, failMsg);
-      endGoalRun(goalId, "failed", failMsg);
-      return;
-    }
-
-    const adapter = resolveExecutor(resolved.executorId);
-    if (!adapter) {
-      throw new Error(`Unknown executor: ${resolved.executorId}`);
-    }
-
-    clearGoalCancelledForConnect(goalId);
-    const settings = loadSettings();
-    const workspaceRoot = resolveWorkspaceForGoal(resolved);
-    if (resolved.executorId.startsWith("acp:")) {
-      const synced = syncWorkspaceMcpJson(
-        workspaceRoot,
-        settings.mcpServers?.find((s) => s.id === OPENX_MCP_ID),
-      );
-      if (synced.written) {
-        appendLog(goalId, "info", `已同步工作区 MCP 配置：${synced.path}`);
+      const goalWithReceipt = getGoalById(goalId);
+      if (goalWithReceipt) {
+        broadcast({
+          type: "goal.updated",
+          goal: goalWithReceipt,
+          receiptId: receipt.receiptId,
+          activeRunId: runId,
+        });
       }
-    }
-    const ctx = buildExecutorContext(goalId, resolved.effectStatus === "rework");
-    const runId = startGoalRun(goalId, resolved.executorId);
-    const receipt = insertDispatchReceipt({
-      goalId,
-      runId,
-      executorId: resolved.executorId,
-      dispatchContext: resolved.dispatchContext,
-      workspaceRoot: ctx.workspaceRoot,
-    });
-    appendLog(
-      goalId,
-      "info",
-      `派单凭证 receipt=${receipt.receiptId} run=${runId} executor=${resolved.executorId}`,
-    );
-    const goalWithReceipt = getGoalById(goalId);
-    if (goalWithReceipt) {
-      broadcast({
-        type: "goal.updated",
-        goal: goalWithReceipt,
-        receiptId: receipt.receiptId,
-        activeRunId: runId,
+
+      const runExec = () => {
+        if (resolved.executorId === "pi" && shouldRunPiInWorker()) {
+          return runPiInWorker(ctx);
+        }
+        return adapter.run(ctx);
+      };
+
+      void runExec().catch(async (err: Error) => {
+        endGoalRun(goalId, "failed", err.message);
+        const g = getGoalById(goalId);
+        if (!g || g.status !== "running") return;
+        markGoalFailed(goalId, err.message);
       });
-    }
-
-    const runExec = () => {
-      if (resolved.executorId === "pi" && shouldRunPiInWorker()) {
-        return runPiInWorker(ctx);
-      }
-      return adapter.run(ctx);
-    };
-
-    void runExec().catch(async (err: Error) => {
-      endGoalRun(goalId, "failed", err.message);
-      const g = getGoalById(goalId);
-      if (!g || g.status !== "running") return;
-      markGoalFailed(goalId, err.message);
     });
   } finally {
     dispatchLocks.delete(goalId);

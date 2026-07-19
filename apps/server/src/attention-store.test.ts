@@ -66,4 +66,20 @@ describe("attention records", () => {
     const body = (await res.json()) as { state: string };
     expect(body.state).toBe("acknowledged");
   });
+
+  it("ack 后 GET attentions 不再重开", async () => {
+    const goal = makeGoal({ id: "g-attn-4" });
+    insertGoal(goal);
+    pushIsland(islandForAwaitingReview(goal));
+    const key = "goal.awaiting_review:g-attn-4";
+    const ack = await app.request(`/api/island/attentions/${encodeURIComponent(key)}/ack`, {
+      method: "POST",
+    });
+    expect(ack.status).toBe(200);
+
+    const res = await app.request("/api/island/attentions?state=open");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { attentions: Array<{ key: string; state: string }> };
+    expect(body.attentions.some((a) => a.key === key)).toBe(false);
+  });
 });

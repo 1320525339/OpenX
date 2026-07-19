@@ -2,11 +2,12 @@
  * 在子进程中运行 Pi，避免 session.prompt() 阻塞主进程事件循环。
  * 设置 OPENX_PI_WORKER=1 启用（默认关闭；Mock 测试仍走主进程）。
  * park 后子进程保活，由 resumePiChild 续跑。
+ * 工头回调（crewQuestion / crewTurnReview）经 IPC 转发到主进程 callbacks。
  */
 import { fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import type { GoalDeliverable } from "@openx/shared";
+import type { GoalDeliverable, CrewDirective, ForemanTurnDecision } from "@openx/shared";
 import type { ExecutorContext } from "@openx/executor-core";
 
 declare global {
@@ -24,7 +25,10 @@ type ChildOutMsg =
   | { type: "complete"; summary: string; deliverables?: GoalDeliverable[] }
   | { type: "fail"; message: string }
   | { type: "park"; checkpointSummary: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "crewSession"; crewSessionId: string }
+  | { type: "crewQuestion"; ipcRequestId: string; question: unknown }
+  | { type: "crewTurnReview"; ipcRequestId: string; turn: unknown };
 
 function childScriptPath(): string {
   if (process.pkg) {
@@ -52,6 +56,7 @@ function serializeCtxPayload(ctx: ExecutorContext) {
     llmContext: ctx.llmContext,
     projectKnowledge: ctx.projectKnowledge,
     crewContinuationPrompt: ctx.crewContinuationPrompt,
+    resumeTranscript: ctx.resumeTranscript,
   };
 }
 
@@ -77,6 +82,57 @@ export function cancelPiChild(goalId: string): void {
 
 export function shouldRunPiInWorker(): boolean {
   return process.env.OPENX_PI_WORKER === "1" && process.env.OPENX_MOCK_PI !== "1";
+}
+
+function replyCrewError(child: ChildProcess, ipcRequestId: string, message: string): void {
+  if (!child.connected) return;
+  child.send({ type: "crewCallbackError", ipcRequestId, message });
+}
+
+async function handleCrewQuestionIpc(
+  child: ChildProcess,
+  ctx: ExecutorContext,
+  ipcRequestId: string,
+  question: unknown,
+): Promise<void> {
+  if (!ctx.callbacks.onCrewQuestion) {
+    replyCrewError(child, ipcRequestId, "主进程未注册 onCrewQuestion");
+    return;
+  }
+  try {
+    const directive: CrewDirective = await ctx.callbacks.onCrewQuestion(question as never);
+    if (!child.connected) return;
+    child.send({ type: "crewQuestionReply", ipcRequestId, directive });
+  } catch (err) {
+    replyCrewError(
+      child,
+      ipcRequestId,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+async function handleCrewTurnReviewIpc(
+  child: ChildProcess,
+  ctx: ExecutorContext,
+  ipcRequestId: string,
+  turn: unknown,
+): Promise<void> {
+  if (!ctx.callbacks.onCrewTurnReview) {
+    replyCrewError(child, ipcRequestId, "主进程未注册 onCrewTurnReview");
+    return;
+  }
+  try {
+    const decision: ForemanTurnDecision = await ctx.callbacks.onCrewTurnReview(turn as never);
+    if (!child.connected) return;
+    child.send({ type: "crewTurnReviewReply", ipcRequestId, decision });
+  } catch (err) {
+    replyCrewError(
+      child,
+      ipcRequestId,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 function attachChildHandlers(
@@ -124,6 +180,17 @@ function attachChildHandlers(
             if (ctx.callbacks.onRunEvent) {
               await ctx.callbacks.onRunEvent(raw.event as never);
             }
+            break;
+          case "crewSession":
+            if (ctx.callbacks.onCrewSession) {
+              await ctx.callbacks.onCrewSession(raw.crewSessionId);
+            }
+            break;
+          case "crewQuestion":
+            await handleCrewQuestionIpc(child, ctx, raw.ipcRequestId, raw.question);
+            break;
+          case "crewTurnReview":
+            await handleCrewTurnReviewIpc(child, ctx, raw.ipcRequestId, raw.turn);
             break;
           case "park":
             activeChildren.delete(goalId);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CoachClarifyPayloadSchema } from "./coach-clarify.js";
 import { CoachDispatchPermissionPayloadSchema } from "./coach-dispatch-permission.js";
+import { DispatchPermissionModeSchema } from "./dispatch-context.js";
 import { ExecutorIdSchema } from "./executor.js";
 import { GoalPrioritySchema } from "./goal.js";
 import type { OperatorTier } from "./operator-tier.js";
@@ -118,8 +119,8 @@ export type CoachChatContext = {
   knowledgeSelectionSummary?: string;
   /** 已 Pin 的浏览器拓展槽 DOM/网络快照（工头可见） */
   browserDesktopContext?: string;
-  /** 对话栏当前派单权限（read_only / ask_write / full） */
-  dispatchPermissionMode?: "read_only" | "ask_write" | "full";
+  /** 对话栏当前派单权限（read_only / ask_write / full / unattended） */
+  dispatchPermissionMode?: "read_only" | "ask_write" | "full" | "unattended";
 };
 
 /** Coach 一次派单可拆分的子任务 */
@@ -153,6 +154,8 @@ export const RefinedGoalSchema = z.object({
   skillIds: z.array(z.string()).optional(),
   /** 与主目标一并创建，或挂到已有 North Star 下的下一批子任务 */
   subGoals: z.array(RefinedSubGoalSchema).optional(),
+  /** llm = 模型产出；rules = 规则模板兜底（调用方应提示用户） */
+  source: z.enum(["llm", "rules"]).optional(),
 });
 export type RefinedGoal = z.infer<typeof RefinedGoalSchema>;
 
@@ -176,7 +179,7 @@ export const CoachChatInputSchema = z.object({
   /** 本次对话启用的知识库范围；默认 all */
   knowledge: KnowledgeContextSelectionSchema.optional(),
   /** 对话栏派单权限（创建工单时写入 dispatchContext） */
-  permissionMode: z.enum(["read_only", "ask_write", "full"]).optional(),
+  permissionMode: DispatchPermissionModeSchema.optional(),
 });
 export type CoachChatInput = z.infer<typeof CoachChatInputSchema>;
 

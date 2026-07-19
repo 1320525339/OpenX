@@ -90,7 +90,7 @@ export function MilocoEventsPanel({ onOpenGoal, pollMs = 0, limit = 50 }: Props)
         </select>
       </div>
       {events.length === 0 ? (
-        <p className="settings-hint">尚无感知或自动化事件。接入完成后，事件将显示在此。</p>
+        <p className="settings-hint">暂无感知或自动化事件。接入完成后，事件将显示在此。</p>
       ) : (
         <ul className="miloco-events-timeline">
           {events.map((e) => {

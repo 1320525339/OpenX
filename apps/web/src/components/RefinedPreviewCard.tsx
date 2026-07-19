@@ -254,7 +254,7 @@ export function RefinedPreviewCard({
           disabled={creating}
           onClick={onCreate}
         >
-          {creating ? "创建中…" : autoExecute ? "创建并执行" : "创建目标"}
+          {creating ? "创建中…" : autoExecute ? "创建并执行" : "创建任务"}
         </button>
       )}
 

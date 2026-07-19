@@ -32,7 +32,7 @@
 }
 
 .miloco-check-list li.fail {
-  color: var(--danger, #c62828);
+  color: var(--danger);
 }
 
 .miloco-check-list li.ok {
@@ -59,10 +59,12 @@
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
   background: var(--surface-muted);
+  color: var(--text-dim);
 }
 
 .miloco-pill.ok {
-  background: color-mix(in srgb, var(--success, #2e7d32) 20%, transparent);
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success);
 }
 
 .miloco-cam-table {
@@ -80,6 +82,7 @@
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 
 .miloco-cam-did,
@@ -90,11 +93,11 @@
 }
 
 .miloco-cam-status.miloco-cam-ready {
-  color: var(--success, #2e7d32);
+  color: var(--success);
 }
 
 .miloco-cam-status.miloco-cam-warn {
-  color: var(--warn, #ed6c02);
+  color: var(--warn);
 }
 
 .miloco-cam-status.miloco-cam-off {
@@ -115,15 +118,15 @@
 }
 
 .miloco-goal-status.ok {
-  color: var(--success, #2a7a4b);
+  color: var(--success);
 }
 
 .miloco-goal-status.fail {
-  color: var(--danger, #b33);
+  color: var(--danger);
 }
 
 .miloco-goal-status.warn {
-  color: var(--warning, #b8860b);
+  color: var(--warning);
 }
 
 .miloco-hero {
@@ -151,21 +154,22 @@
 .miloco-metric {
   text-align: left;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--surface);
   padding: 0.65rem 0.75rem;
   border-radius: 6px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  color: var(--text);
 }
 
 .miloco-metric.ok {
-  border-color: color-mix(in srgb, var(--success, #2a7a4b) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
 }
 
 .miloco-metric.fail {
-  border-color: color-mix(in srgb, var(--danger, #b33) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
 }
 
 .miloco-metric strong {
@@ -477,9 +481,9 @@
 }
 
 .tools-skill-badge.subtle {
-  background: rgba(0, 113, 227, 0.06);
-  border-color: rgba(0, 113, 227, 0.16);
-  color: #0071e3;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
 }
 
 .tools-skill-row.missing {
@@ -487,7 +491,7 @@
   border-style: dashed;
 }
 .settings-hint.error {
-  color: #c9342b;
+  color: var(--status-error, var(--red));
 }
 
 .tools-skill-summary {
@@ -559,7 +563,7 @@
 
 .tools-exec-recommend {
   margin-top: 0.35rem;
-  color: #0071e3;
+  color: var(--accent);
 }
 
 .tools-skill-row {
@@ -906,7 +910,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: var(--z-modal, 12000);
   padding: 1rem;
   backdrop-filter: blur(12px);
 }

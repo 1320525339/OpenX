@@ -3,6 +3,7 @@ import {
   extractApiTokenFromRequest,
   resolveRuntimeMode,
 } from "./runtime-mode.js";
+import { getOrCreateApiToken } from "./api-token.js";
 
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:5173",
@@ -31,21 +32,51 @@ function refererAllowed(referer: string): boolean {
 
 /**
  * remote 模式：/api/*（health 除外）必须携带 OPENX_API_TOKEN。
- * desktop-local：不强制 token，仍走 CSRF 守卫。
+ * desktop-local：浏览器（合法 Origin）走 CSRF；无 Origin 的非浏览器客户端须带 api.token。
  */
 export async function apiAccessGuard(c: Context, next: Next) {
   const mode = resolveRuntimeMode();
+  const path = new URL(c.req.url).pathname;
+  if (path === "/api/health") {
+    await next();
+    return;
+  }
+
   if (mode === "remote") {
-    const path = new URL(c.req.url).pathname;
-    if (path !== "/api/health") {
-      const expected =
-        process.env.OPENX_API_TOKEN?.trim() ||
-        process.env.OPENX_REMOTE_API_TOKEN?.trim();
+    const expected =
+      process.env.OPENX_API_TOKEN?.trim() ||
+      process.env.OPENX_REMOTE_API_TOKEN?.trim();
+    const provided = extractApiTokenFromRequest({
+      get: (name) => c.req.header(name),
+    });
+    if (!expected || !provided || provided !== expected) {
+      return c.json({ error: "Unauthorized: remote 模式需要 API token" }, 401);
+    }
+  } else {
+    // desktop-local：默认仅生成 api.token；设 OPENX_ENFORCE_DESKTOP_API_TOKEN=1 后，
+    // 无 Origin 的写请求须带 token（浏览器合法 Origin 仍走 CSRF，不破坏 Web UI）。
+    const enforce =
+      process.env.OPENX_ENFORCE_DESKTOP_API_TOKEN === "1" ||
+      process.env.OPENX_ENFORCE_DESKTOP_API_TOKEN === "true";
+    const origin = c.req.header("origin");
+    if (
+      enforce &&
+      !origin &&
+      STATE_CHANGING.has(c.req.method) &&
+      !path.startsWith("/internal/")
+    ) {
+      const expected = getOrCreateApiToken();
       const provided = extractApiTokenFromRequest({
         get: (name) => c.req.header(name),
       });
-      if (!expected || !provided || provided !== expected) {
-        return c.json({ error: "Unauthorized: remote 模式需要 API token" }, 401);
+      if (!provided || provided !== expected) {
+        return c.json(
+          {
+            error:
+              "Unauthorized: desktop-local 非浏览器请求需要 API token（见 ~/.openx/api.token 或 OPENX_API_TOKEN）",
+          },
+          401,
+        );
       }
     }
   }

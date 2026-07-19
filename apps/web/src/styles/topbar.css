@@ -82,8 +82,13 @@
   white-space: nowrap;
 }
 
+.topbar-alert.reconnecting {
+  color: var(--amber);
+  opacity: 0.92;
+}
+
 .topbar-alert.disconnected {
-  color: var(--red);
+  color: var(--status-error, var(--red));
 }
 
 .topbar-urgent {

@@ -63,7 +63,16 @@
 }
 
 .settings-hint-warn {
-  color: var(--warn, #c27800);
+  color: var(--amber);
+}
+
+.settings-hint.warn {
+  color: var(--amber);
+}
+
+.settings-hint.error,
+.settings-hint.form-error {
+  color: var(--status-error, var(--red));
 }
 
 .settings-operator-tiers {
@@ -224,10 +233,6 @@
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-bottom: 0.85rem;
-}
-
-.settings-hint.warn {
-  color: var(--amber);
 }
 
 .brief-template-list {

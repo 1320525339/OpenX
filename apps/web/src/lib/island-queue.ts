@@ -267,13 +267,15 @@ export async function syncAttentionsFromServer(
     const { attentions } = await api.listAttentions("open");
     openAttentionCount = attentions.length;
     onCount?.(openAttentionCount);
+    // 服务端 open 列表已是权威；勿 force，避免覆盖本地「知道了」seen/dedupe
+    // （若 ack 失败导致仍 open，未 seen 的仍会正常展示）
     for (const record of attentions) {
       if (record.state !== "open") continue;
       const payload = attentionToPayload(record);
       if (!payload) continue;
       const wasCatchup = catchupMode;
       catchupMode = false;
-      requestIsland(payload, { force: true });
+      requestIsland(payload);
       catchupMode = wasCatchup;
     }
     if (!catchupMode) drainIslandQueue();
@@ -284,7 +286,7 @@ export async function syncAttentionsFromServer(
 
 export function requestIsland(
   payload: DynamicIslandPayload,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; preempt?: boolean },
 ): void {
   const normalized = withIslandDismissAction(payload);
   const dedupe = islandDedupeKey(normalized);
@@ -308,6 +310,44 @@ export function requestIsland(
     if (currentDisplayToken != null) {
       updateHandler(normalized, currentDisplayToken);
     }
+    return;
+  }
+
+  // 错误/警告 toast：打断当前展示（不 ack），durable 当前卡重新入队，确保失败反馈立刻可见
+  const shouldPreempt =
+    opts?.preempt === true ||
+    (opts?.preempt !== false &&
+      !isDurableIslandKind(normalized.kind) &&
+      (normalized.severity === "error" || normalized.severity === "warning") &&
+      showingId != null);
+
+  if (shouldPreempt && currentPayload) {
+    const paused = currentPayload;
+    showingId = null;
+    currentPayload = null;
+    currentDisplayToken = null;
+    dismissHandler();
+
+    const data = loadStore();
+    data.queue = data.queue.filter((item) => item.id !== normalized.id);
+    if (dedupe) {
+      data.queue = data.queue.filter((item) => islandDedupeKey(item) !== dedupe);
+    }
+    // 抢占卡置顶；被打断的 durable/未读卡紧随其后
+    const rest: DynamicIslandPayload[] = [];
+    if (
+      paused.id !== normalized.id &&
+      (isDurableIslandKind(paused.kind) || !isIslandSeen(paused.id))
+    ) {
+      rest.push(withIslandDismissAction(paused));
+    }
+    for (const item of data.queue) {
+      if (item.id === paused.id) continue;
+      rest.push(item);
+    }
+    data.queue = [normalized, ...rest].slice(0, MAX_QUEUE);
+    saveStore(data);
+    drainIslandQueue();
     return;
   }
 

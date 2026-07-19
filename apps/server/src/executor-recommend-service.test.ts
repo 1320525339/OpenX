@@ -76,7 +76,7 @@ describe("resolveGoalExecutorId", () => {
     });
   });
 
-  it("recommends connect agent when default executor is auto", async () => {
+  it("keeps auto until dispatch when default executor is auto", async () => {
     await withTempSkillsDir(async () => {
       const settings = {
         ...DEFAULT_SETTINGS,
@@ -102,8 +102,9 @@ describe("resolveGoalExecutorId", () => {
         executors,
       );
 
-      expect(result.executorId).toBe("my-agent");
-      expect(result.recommendReason).toBeTruthy();
+      // 创建时保持 auto，派发时由 materializeAutoExecutor 选型
+      expect(result.executorId).toBe("auto");
+      expect(result.recommendReason).toMatch(/派发时/);
     });
   });
 

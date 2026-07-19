@@ -235,8 +235,8 @@
 }
 
 .pin-extension-add-dock-btn:hover:not(:disabled) {
-  border-color: var(--accent, #0071e3);
-  background: rgba(0, 113, 227, 0.06);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .pin-extension-add-dock-btn.pinned,
@@ -256,15 +256,15 @@
   padding: 0.45rem 0.55rem;
   border: none;
   border-radius: 8px;
-  background: rgba(0, 113, 227, 0.08);
-  color: var(--accent, #0071e3);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
   font-size: 0.72rem;
   text-align: left;
   cursor: pointer;
 }
 
 .pin-extension-add-url:hover {
-  background: rgba(0, 113, 227, 0.14);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .pin-extension-add-extensions {
@@ -289,7 +289,7 @@
 
 .pin-extension-add-extensions button:hover {
   background: var(--surface-hover, rgba(127, 127, 127, 0.08));
-  border-color: rgba(0, 113, 227, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .oxsp-browser-slot {
@@ -339,7 +339,7 @@
 }
 
 .oxsp-browser-screencast-stage:focus {
-  outline: 1px solid rgba(0, 113, 227, 0.35);
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   outline-offset: -1px;
 }
 
@@ -419,8 +419,8 @@
 }
 
 .oxsp-browser-badge-foreman {
-  background: color-mix(in srgb, var(--warning, #c9a227) 20%, transparent);
-  color: var(--warning, #c9a227);
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  color: var(--warning);
 }
 
 .oxsp-browser-devtools {
@@ -509,7 +509,7 @@
 }
 
 .oxsp-browser-devtools-error {
-  color: var(--danger, #c44);
+  color: var(--danger);
 }
 
 .foreman-browser-shortcuts {
@@ -577,7 +577,7 @@
 .pin-extension-webview-open {
   flex-shrink: 0;
   font-size: 0.68rem;
-  color: var(--accent, #2563eb);
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -596,8 +596,8 @@
 }
 
 .pin-extension-webview-error {
-  color: #c2410c;
-  background: rgba(234, 88, 12, 0.08);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
 
 .pin-extension-webview-wrap .pin-extension-iframe,
@@ -630,7 +630,7 @@
 
 .pin-extension-context-menu {
   position: fixed;
-  z-index: 2200;
+  z-index: var(--z-pin-menu, 2200);
   min-width: 9.5rem;
   padding: 0.25rem;
   border: 1px solid var(--border);
@@ -657,7 +657,7 @@
 }
 
 .pin-extension-context-item.danger {
-  color: #c0392b;
+  color: var(--danger);
 }
 
 .pin-extension-bind-modal {
@@ -693,7 +693,7 @@
 .pin-extension-bind-error {
   margin: 0 0 0.5rem;
   font-size: 0.72rem;
-  color: #c0392b;
+  color: var(--danger);
 }
 
 .pin-desktop-pager-slide-from-left {
@@ -747,7 +747,7 @@
 }
 
 .pin-desktop-page-dot.active {
-  background: var(--accent, #0071e3);
+  background: var(--accent);
   width: 16px;
 }
 
@@ -823,8 +823,8 @@
   height: 100%;
   min-height: 8rem;
   border-radius: var(--hyper-window-radius, 18px);
-  border: 2px dashed rgba(0, 113, 227, 0.45);
-  background: rgba(0, 113, 227, 0.06);
+  border: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   animation: pin-placeholder-pulse 1.2s ease-in-out infinite;
 }
 
@@ -839,7 +839,7 @@
 }
 
 .pin-desktop-cell.drop-target {
-  box-shadow: inset 0 0 0 2px var(--accent, #0071e3);
+  box-shadow: inset 0 0 0 2px var(--accent);
   border-radius: var(--hyper-window-radius, 18px);
 }
 
@@ -850,8 +850,8 @@
   pointer-events: none;
   z-index: 2;
   border-radius: var(--hyper-window-radius, 18px);
-  box-shadow: inset 0 0 0 2px var(--accent, #0071e3);
-  background: rgba(0, 113, 227, 0.06);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   animation: pin-drop-slot-in 0.16s ease;
 }
 
@@ -894,8 +894,8 @@
 }
 
 .pin-desktop-drop-zone.active {
-  background: rgba(0, 113, 227, 0.1);
-  box-shadow: inset 0 0 0 2px var(--accent, #0071e3);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .pin-desktop-drop-zone-top.active {
@@ -968,7 +968,7 @@
 }
 
 .pin-desktop-cell-resizing-wide .flexible-widget {
-  box-shadow: 0 8px 32px rgba(0, 113, 227, 0.12);
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .pin-desktop-cell-ejected {
@@ -986,13 +986,13 @@
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 2000;
+  z-index: var(--z-pin-overlay, 2000);
   pointer-events: none;
   border-radius: var(--hyper-window-radius, 18px);
   transform-origin: top left;
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.18),
-    0 0 0 1px rgba(0, 113, 227, 0.12);
+    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
   will-change: transform;
 }
 
@@ -1016,8 +1016,8 @@ body.pin-desktop-body-dragging * {
 }
 
 .pin-desktop-grid .flexible-widget-pin.pinned {
-  color: var(--accent, #0071e3);
-  border-color: rgba(0, 113, 227, 0.35);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 /* ── Pin Dock 底栏 ── */
@@ -1059,7 +1059,7 @@ body.pin-desktop-body-dragging * {
   height: 1.05rem;
   border: 2px solid var(--bg, #fff);
   border-radius: 50%;
-  background: #e53935;
+  background: var(--danger);
   color: #fff;
   font-size: 0.72rem;
   font-weight: 700;
@@ -1073,7 +1073,7 @@ body.pin-desktop-body-dragging * {
 }
 
 .pin-dock-delete-badge:hover {
-  background: #c62828;
+  background: color-mix(in srgb, var(--danger) 85%, #000);
 }
 
 .pin-dock-btn.delete-mode {
@@ -1115,10 +1115,10 @@ body.pin-desktop-body-dragging * {
 }
 
 .pin-dock-btn.pinned {
-  color: var(--accent, #0071e3);
-  background: rgba(0, 113, 227, 0.08);
-  border-color: rgba(0, 113, 227, 0.25);
-  box-shadow: inset 0 -2px 0 var(--accent, #0071e3);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .pin-dock-icon {
@@ -1133,7 +1133,7 @@ body.pin-desktop-body-dragging * {
 
 .pin-dock-pin-mark {
   font-size: 0.52rem;
-  color: var(--accent, #0071e3);
+  color: var(--accent);
   line-height: 1;
 }
 
@@ -1146,7 +1146,7 @@ body.pin-desktop-body-dragging * {
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 2000;
+  z-index: var(--z-pin-overlay, 2000);
   pointer-events: none;
   display: inline-flex;
   flex-direction: column;
@@ -1155,19 +1155,19 @@ body.pin-desktop-body-dragging * {
   min-width: 3.5rem;
   padding: 0.35rem 0.55rem;
   border-radius: 10px;
-  border: 1px solid rgba(0, 113, 227, 0.35);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   background: var(--surface-raised, var(--bg));
   color: var(--text);
   box-shadow:
     0 14px 36px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(0, 113, 227, 0.08);
+    0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
   transform-origin: top left;
   will-change: transform;
 }
 
 .pin-dock-drag-ghost.pinned {
-  border-color: rgba(0, 113, 227, 0.45);
-  background: rgba(0, 113, 227, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .pin-dock-drag-ghost-icon {
@@ -1221,7 +1221,7 @@ body.pin-dock-body-dragging * {
 .pin-desktop-seam:hover::after,
 .pin-desktop-seam.active::after,
 body.pin-desktop-body-resizing .pin-desktop-seam.active::after {
-  background: var(--accent, #0071e3);
+  background: var(--accent);
 }
 
 body.pin-desktop-body-resizing {
@@ -1235,7 +1235,7 @@ body.pin-desktop-body-resizing * {
 
 .pin-desktop-grid.pin-desktop-dock-dragging .pin-desktop-cell-widget.drop-target,
 .pin-desktop-grid.pin-desktop-dock-dragging .pin-desktop-cell-extension.drop-target {
-  box-shadow: inset 0 0 0 2px var(--accent, #0071e3);
+  box-shadow: inset 0 0 0 2px var(--accent);
   border-radius: var(--hyper-window-radius, 18px);
 }
 
@@ -1255,7 +1255,7 @@ body.pin-desktop-body-resizing * {
 }
 
 .pin-dock-meta-edit {
-  color: var(--accent, #0071e3);
+  color: var(--accent);
 }
 
 .pin-dock-settings {
@@ -1283,7 +1283,7 @@ body.pin-desktop-body-resizing * {
 }
 
 .pin-dock-settings:hover {
-  color: var(--accent, #0071e3);
+  color: var(--accent);
   border-color: var(--border-strong, var(--border));
   background: var(--surface-hover, rgba(127, 127, 127, 0.08));
 }
@@ -1333,9 +1333,9 @@ body.pin-desktop-body-resizing * {
 }
 
 .pin-dock-add-btn:hover {
-  color: var(--accent, #0071e3);
-  border-color: rgba(0, 113, 227, 0.35) !important;
-  background: rgba(0, 113, 227, 0.06);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent) !important;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .pin-dock-add-icon {

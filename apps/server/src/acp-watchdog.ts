@@ -5,6 +5,7 @@ import { markGoalFailed } from "./goal-lifecycle.js";
 import { endGoalRun } from "./run-service.js";
 import { broadcast } from "./sse.js";
 import { narrate } from "./narration.js";
+import { tryWithGoalLock } from "./goal-lock.js";
 
 const WATCHDOG_INTERVAL_MS = 30_000;
 /** 进度 ≥85% 且超过此时间无状态变化 → 判定挂起 */
@@ -23,15 +24,17 @@ function countAcpToolLogs(goalId: string): number {
 }
 
 function failStuckAcpGoal(goalId: string, reason: string): void {
-  const goal = getGoalById(goalId);
-  if (!goal || goal.status !== "running" || !isAcpExecutorId(goal.executorId)) return;
+  void tryWithGoalLock(goalId, () => {
+    const goal = getGoalById(goalId);
+    if (!goal || goal.status !== "running" || !isAcpExecutorId(goal.executorId)) return;
 
-  getExecutor("acp")?.cancel?.(goalId);
-  endGoalRun(goalId, "failed", reason);
-  const log = appendLog(goalId, "error", reason);
-  broadcast({ type: "log.append", goalId, ...log });
-  markGoalFailed(goalId, reason);
-  narrate(`「${goal.title}」ACP 执行异常：${reason}`);
+    getExecutor("acp")?.cancel?.(goalId);
+    endGoalRun(goalId, "failed", reason);
+    const log = appendLog(goalId, "error", reason);
+    broadcast({ type: "log.append", goalId, ...log });
+    markGoalFailed(goalId, reason);
+    narrate(`「${goal.title}」ACP 执行异常：${reason}`);
+  });
 }
 
 function checkAcpGoals(): void {

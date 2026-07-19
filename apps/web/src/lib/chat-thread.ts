@@ -1,14 +1,18 @@
 import type {
   CoachMessageRecord,
+  GenerationMeta,
+  GenerationStatus,
   Goal,
   GoalRunState,
   RefinedGoal,
+  SpeakerType,
 } from "@openx/shared";
 import {
   createEmptyRunState,
   findDismissedClarifyRecordIds,
   findDismissedRefinedRecordIds,
   findResolvedClarifyRecordIds,
+  resolveTextSpeaker,
 } from "@openx/shared";
 
 export type ChatTextMessage = {
@@ -17,6 +21,10 @@ export type ChatTextMessage = {
   text: string;
   warn?: boolean;
   timestamp?: string;
+  speakerType?: SpeakerType;
+  speakerId?: string;
+  generationStatus?: GenerationStatus;
+  generationMeta?: GenerationMeta;
 };
 
 export type CrewExchangeDisplay = {
@@ -118,6 +126,12 @@ export function buildDisplayThreadItems(records: CoachMessageRecord[]): ChatThre
     if (record.kind === "dispatch_permission") {
       tsByKey.set(`dispatch-permission-${record.id}`, record.timestamp);
     }
+    if (record.kind === "peer_request") {
+      tsByKey.set(`peer-${record.id}`, record.timestamp);
+    }
+    if (record.kind === "round_synthesis") {
+      tsByKey.set(`synthesis-${record.id}`, record.timestamp);
+    }
   }
   return injectChatDateSeparators(base, tsByKey);
 }
@@ -169,6 +183,16 @@ export type ChatThreadItem =
       key: string;
       recordId: number;
       dispatchPermission: import("@openx/shared").CoachDispatchPermissionPayload;
+    }
+  | {
+      kind: "peer_request";
+      key: string;
+      record: Extract<CoachMessageRecord, { kind: "peer_request" }>;
+    }
+  | {
+      kind: "round_synthesis";
+      key: string;
+      record: Extract<CoachMessageRecord, { kind: "round_synthesis" }>;
     };
 
 export function coachRecordsToThreadItems(
@@ -193,6 +217,7 @@ export function coachRecordsToThreadItems(
           continue;
         }
       }
+      const { speakerType, speakerId } = resolveTextSpeaker(record);
       items.push({
         kind: "message",
         key: `msg-${record.id}`,
@@ -201,7 +226,27 @@ export function coachRecordsToThreadItems(
           role: record.role,
           text: record.text,
           timestamp: record.timestamp,
+          speakerType,
+          speakerId,
+          generationStatus: record.generationStatus,
+          generationMeta: record.generationMeta,
         },
+      });
+      continue;
+    }
+    if (record.kind === "peer_request") {
+      items.push({
+        kind: "peer_request",
+        key: `peer-${record.id}`,
+        record,
+      });
+      continue;
+    }
+    if (record.kind === "round_synthesis") {
+      items.push({
+        kind: "round_synthesis",
+        key: `synthesis-${record.id}`,
+        record,
       });
       continue;
     }

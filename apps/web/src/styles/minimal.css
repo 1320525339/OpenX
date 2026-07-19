@@ -327,7 +327,7 @@
   --island-inset: rgba(255, 255, 255, 0.06);
   --island-accent: #0a84ff;
   --island-danger: #ff453a;
-  z-index: 13000;
+  z-index: var(--z-island, 13000);
 }
 
 html[data-desktop="true"] .dynamic-island-portal {
@@ -844,12 +844,15 @@ html[data-desktop="true"] .dynamic-island-portal {
 }
 
 .app-minimal .sidebar-tree-conv-row:hover .sidebar-row-delete,
+.app-minimal .sidebar-tree-conv-row:hover .sidebar-row-clear,
 .app-minimal .sidebar-tree-row:hover .sidebar-row-delete,
-.app-minimal .dashboard-conv-item:hover .sidebar-row-delete {
+.app-minimal .dashboard-conv-item:hover .sidebar-row-delete,
+.app-minimal .dashboard-conv-item:hover .sidebar-row-clear {
   opacity: 1;
 }
 
-.app-minimal .sidebar-row-delete {
+.app-minimal .sidebar-row-delete,
+.app-minimal .sidebar-row-clear {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -866,7 +869,8 @@ html[data-desktop="true"] .dynamic-island-portal {
   transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
 
-.app-minimal .sidebar-row-delete svg {
+.app-minimal .sidebar-row-delete svg,
+.app-minimal .sidebar-row-clear svg {
   width: 0.85rem;
   height: 0.85rem;
 }
@@ -874,6 +878,11 @@ html[data-desktop="true"] .dynamic-island-portal {
 .app-minimal .sidebar-row-delete:hover {
   color: #ff6b6b;
   background: rgba(255, 107, 107, 0.1);
+}
+
+.app-minimal .sidebar-row-clear:hover {
+  color: #007aff;
+  background: rgba(0, 122, 255, 0.1);
 }
 
 .app-minimal .dashboard-conv-item {

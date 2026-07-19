@@ -13,7 +13,6 @@ export * from "./events.js";
 export * from "./settings.js";
 export * from "./settings-merge.js";
 export * from "./openx-persist.js";
-export * from "./openx-home.js";
 export * from "./coach.js";
 export * from "./coach-intent.js";
 export * from "./coach-clarify.js";

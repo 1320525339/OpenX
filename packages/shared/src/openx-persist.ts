@@ -4,6 +4,8 @@ import { ProvidersMapSchema, type ProvidersMap } from "./model-config.js";
 import { z } from "zod";
 
 export const ProvidersFileSchema = z.object({
+  /** 与 config.json revision 对齐的渠道池版本，便于跨文件对账 */
+  revision: z.number().int().nonnegative().optional(),
   providers: ProvidersMapSchema.default({}),
 });
 export type ProvidersFile = z.infer<typeof ProvidersFileSchema>;
@@ -25,6 +27,16 @@ export function isPublicProviderApiKey(config: ProviderConfig): boolean {
   return key === "public";
 }
 
+/** 去掉仅用于 API 响应的 apiKeyConfigured 标记 */
+function stripApiKeyConfiguredFlag(config: ProviderConfig): ProviderConfig {
+  if (!config.auth || config.auth.apiKeyConfigured === undefined) return config;
+  const { apiKeyConfigured: _flag, ...authRest } = config.auth;
+  return {
+    ...config,
+    auth: Object.keys(authRest).length > 0 ? authRest : undefined,
+  };
+}
+
 /**
  * 持久化前：明文 apiKey 写入 env 引用（secret 由 ~/.openx/.env 承载）。
  * 公开 Key（如 Zen）仍保留 apiKey 字段。
@@ -33,16 +45,34 @@ export function sanitizeProviderForDisk(
   slug: string,
   config: ProviderConfig,
 ): ProviderConfig {
-  const apiKey = config.auth?.apiKey?.trim();
-  if (!apiKey || isPublicProviderApiKey(config)) {
-    return config;
+  const base = stripApiKeyConfiguredFlag(config);
+  const apiKey = base.auth?.apiKey?.trim();
+  if (!apiKey || isPublicProviderApiKey(base)) {
+    return base;
   }
-  const envKey = config.auth?.env?.trim() || inferProviderEnvKey(slug, config.source?.template);
-  const { apiKey: _removed, ...authRest } = config.auth ?? {};
+  const envKey = base.auth?.env?.trim() || inferProviderEnvKey(slug, base.source?.template);
+  const { apiKey: _removed, ...authRest } = base.auth ?? {};
   return {
-    ...config,
+    ...base,
     auth: { ...authRest, env: envKey },
   };
+}
+
+/**
+ * 判断渠道是否已具备可用密钥（明文、公开 Key、或 env 指向的已存 secret）。
+ * `hasSecret` 由调用方提供（如读 ~/.openx/.env），避免 shared 依赖 Node 文件。
+ */
+export function isProviderApiKeyConfigured(
+  slug: string,
+  config: ProviderConfig,
+  hasSecret?: (envKey: string) => boolean,
+): boolean {
+  if (isPublicProviderApiKey(config)) return true;
+  if (config.auth?.apiKey?.trim()) return true;
+  if (config.auth?.apiKeyConfigured === true) return true;
+  const envKey =
+    config.auth?.env?.trim() || inferProviderEnvKey(slug, config.source?.template);
+  return Boolean(envKey && hasSecret?.(envKey));
 }
 
 export function sanitizeProvidersForDisk(providers: ProvidersMap): ProvidersMap {
@@ -53,16 +83,31 @@ export function sanitizeProvidersForDisk(providers: ProvidersMap): ProvidersMap 
   return out;
 }
 
-/** API 响应脱敏：去掉非公开 apiKey，仅保留 env 引用 */
+/** API 响应脱敏：去掉非公开 apiKey，保留 env，并可选标注 apiKeyConfigured */
 export function sanitizeSettingsForApi<T extends { providers?: ProvidersMap }>(
   settings: T,
+  options?: {
+    hasSecret?: (envKey: string) => boolean;
+  },
 ): T {
   if (!settings.providers || Object.keys(settings.providers).length === 0) {
     return settings;
   }
+  const providers: ProvidersMap = {};
+  for (const [slug, config] of Object.entries(settings.providers)) {
+    const sanitized = sanitizeProviderForDisk(slug, config);
+    const configured = isProviderApiKeyConfigured(slug, config, options?.hasSecret);
+    providers[slug] = {
+      ...sanitized,
+      auth: {
+        ...sanitized.auth,
+        apiKeyConfigured: configured,
+      },
+    };
+  }
   return {
     ...settings,
-    providers: sanitizeProvidersForDisk(settings.providers),
+    providers,
   };
 }
 
@@ -127,4 +172,11 @@ export function parseProvidersFileJson(raw: unknown): ProvidersMap {
     raw && typeof raw === "object" && !Array.isArray(raw) ? raw : { providers: raw },
   );
   return parsed.providers ?? {};
+}
+
+/** 读取 providers.json 全量（含 revision） */
+export function parseProvidersFile(raw: unknown): ProvidersFile {
+  return ProvidersFileSchema.parse(
+    raw && typeof raw === "object" && !Array.isArray(raw) ? raw : { providers: raw },
+  );
 }

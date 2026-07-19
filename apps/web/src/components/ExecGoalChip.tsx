@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { Goal, GoalRunState } from "@openx/shared";
 import { RunConsole } from "./RunConsole";
 import { CrewDialogueSummary } from "./CrewDialogueSummary";
+import { GoalProgressBar, GoalStatusPill } from "./GoalCardPrimitives";
 import { executorDisplayLabel } from "../lib/executors";
 import {
   buildGoalContext,
@@ -90,15 +91,13 @@ export function ExecGoalChip({
             <WorkOrderIdBadge orderNo={goal.orderNo} className="exec-goal-order-id" />
             {goal.title}
           </span>
-          <span className={`status-pill compact ${goal.status}`}>{statusText}</span>
+          <GoalStatusPill goal={goal} variant="status" compact />
         </span>
         <span className="exec-goal-meta">
           {goal.progress}% · {executorDisplayLabel(goal.executorId)}
         </span>
         {goal.status === "running" && (
-          <div className="progress-bar exec-goal-progress">
-            <span style={{ width: `${goal.progress}%` }} />
-          </div>
+          <GoalProgressBar progress={goal.progress} className="exec-goal-progress" />
         )}
       </button>
 

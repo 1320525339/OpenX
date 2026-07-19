@@ -135,4 +135,53 @@ describe("BroadcastTicker action lifecycle", () => {
     });
     expect(onDismiss).not.toHaveBeenCalled();
   });
+
+  it("onDismiss 引用变化不应取消 auto-dismiss", async () => {
+    const onDismiss1 = vi.fn();
+    const onDismiss2 = vi.fn();
+    const onAction = vi.fn(async () => true);
+
+    const { rerender } = render(
+      <BroadcastTicker
+        payload={basePayload({
+          expanded: false,
+          autoDismissMs: 200,
+          actions: undefined,
+          allowFeedback: false,
+          message: "短讯",
+        })}
+        displayToken={9}
+        onDismiss={onDismiss1}
+        onAction={onAction}
+      />,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(30);
+    });
+
+    // 模拟父组件重渲染导致 onDismiss 身份变化
+    rerender(
+      <BroadcastTicker
+        payload={basePayload({
+          expanded: false,
+          autoDismissMs: 200,
+          actions: undefined,
+          allowFeedback: false,
+          message: "短讯",
+        })}
+        displayToken={9}
+        onDismiss={onDismiss2}
+        onAction={onAction}
+      />,
+    );
+
+    // autoDismiss 200ms + 离场动画 320ms
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(onDismiss1).not.toHaveBeenCalled();
+    expect(onDismiss2).toHaveBeenCalledWith(9);
+  });
 });

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, type ReviewRoundEntry } from "../api";
+import { useState } from "react";
+import { useGoalReviewRounds } from "../lib/use-goal-review-rounds";
 
 type Props = {
   goalId: string;
@@ -22,30 +22,13 @@ export function ReviewTimelineCompact({
   onRework,
   onTriggerReview,
 }: Props) {
-  const [rounds, setRounds] = useState<ReviewRoundEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { rounds, loading, error, refresh } = useGoalReviewRounds(goalId);
   const [localFeedback, setLocalFeedback] = useState("");
   const feedbackValue = onFeedbackChange !== undefined ? feedback : localFeedback;
   const updateFeedback = (value: string) => {
     if (onFeedbackChange) onFeedbackChange(value);
     else setLocalFeedback(value);
   };
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { rounds: data } = await api.getGoalReviewRounds(goalId);
-      setRounds(data);
-    } catch {
-      setRounds([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [goalId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const latest = rounds[rounds.length - 1];
   const recent = rounds.slice(-2);
@@ -62,8 +45,15 @@ export function ReviewTimelineCompact({
       </div>
       {loading ? (
         <p className="review-timeline-compact-hint">加载中…</p>
+      ) : error ? (
+        <p className="review-timeline-compact-hint form-error">
+          {error}{" "}
+          <button type="button" className="btn-text" onClick={() => void refresh(true)}>
+            重试
+          </button>
+        </p>
       ) : recent.length === 0 ? (
-        <p className="review-timeline-compact-hint">尚无审查记录</p>
+        <p className="review-timeline-compact-hint">暂无审查记录</p>
       ) : (
         <ul className="review-timeline-compact-list">
           {recent.map((entry) => (

@@ -35,6 +35,8 @@ export const SseEventTypeSchema = z.enum([
   "desktop.layout_changed",
   "integration.updated",
   "integration.run.updated",
+  "conversation.cleared",
+  "conversation.deleted",
 ]);
 export type SseEventType = z.infer<typeof SseEventTypeSchema>;
 
@@ -247,6 +249,16 @@ export const SseEventSchema = z.discriminatedUnion("type", [
     title: z.string().optional(),
     lane: z.string().optional(),
     goalId: z.string().optional(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("conversation.cleared"),
+    conversationId: z.string(),
+    timestamp: z.string(),
+  }),
+  z.object({
+    type: z.literal("conversation.deleted"),
+    conversationId: z.string(),
     timestamp: z.string(),
   }),
 ]);

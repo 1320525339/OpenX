@@ -371,13 +371,19 @@ export const api = {
       { method: "PUT", body: JSON.stringify({ participants }) },
     ),
 
-  enableRoundtable: (conversationId: string, participantProfileIds?: string[]) =>
+  enableRoundtable: (
+    conversationId: string,
+    body?: {
+      participantProfileIds?: string[];
+      participantSeats?: import("@openx/shared").RoundtableSeatInput[];
+    },
+  ) =>
     request<{
       conversation: Conversation;
       participants: import("@openx/shared").ConversationParticipant[];
     }>(`/api/roundtable/conversations/${encodeURIComponent(conversationId)}/enable`, {
       method: "POST",
-      body: JSON.stringify({ participantProfileIds }),
+      body: JSON.stringify(body ?? {}),
     }),
 
   createChatRound: (
@@ -445,9 +451,28 @@ export const api = {
     ),
 
   deleteConversation: (id: string) =>
-    request<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
+    request<{ ok: boolean; report?: unknown }>(
+      `/api/conversations/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
+
+  forgetConversation: (
+    id: string,
+    level: "clear_thread" | "delete_conversation",
+  ) =>
+    request<{ ok: boolean; report?: unknown }>(
+      `/api/conversations/${encodeURIComponent(id)}/forget`,
+      {
+        method: "POST",
+        body: JSON.stringify({ level }),
+      },
+    ),
+
+  forgetProjectConversations: (projectId: string) =>
+    request<{ ok: boolean; report?: unknown }>(
+      `/api/projects/${encodeURIComponent(projectId)}/forget-conversations`,
+      { method: "POST", body: "{}" },
+    ),
 
   pickWorkspace: () =>
     request<

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { BatchGoalsAction, CliProfile, CoachMessageRecord, Conversation, Goal, GoalRunState, Project } from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import type { CoachReplyEvent, CoachStreamState } from "../lib/app-state";
+import { useAppState } from "../lib/app-state";
 import { usePinDesktop } from "../lib/use-pin-desktop";
 import { usePinDockDrag } from "../lib/use-pin-dock-drag";
 import type { PinWidgetId } from "../lib/pin-desktop";
@@ -10,11 +11,8 @@ import type { ConsoleConnection } from "../lib/console-agents";
 import { ChatPanel } from "./ChatPanel";
 import { GoalsWorkspace } from "./GoalsWorkspace";
 import { PreviewRail } from "./PreviewRail";
-import { HyperPinDesktop } from "./smart-cabin/HyperPinDesktop";
-import { PinDesktopCanvas } from "./smart-cabin/PinDesktopCanvas";
-import { PinDesktopPager } from "./smart-cabin/PinDesktopPager";
 import { OxspSlotRenderer } from "./smart-cabin/OxspSlotRenderer";
-import { PinDock } from "./smart-cabin/PinDock";
+import { PinWorkspaceShell } from "./smart-cabin/PinWorkspaceShell";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 
 type ConsoleData = {
@@ -124,6 +122,9 @@ export function ConsolePage(props: Props) {
     logs,
     onSettings,
   } = props;
+  const { state, enableRoundtable } = useAppState();
+  const conversationMode =
+    state.conversations.find((c) => c.id === conversationId)?.mode ?? "foreman";
 
   const [consoleData, setConsoleData] = useState<ConsoleData | null>(null);
   const {
@@ -195,6 +196,7 @@ export function ConsolePage(props: Props) {
   const pinWidgets = useMemo((): Partial<Record<PinWidgetId, ReactNode>> => {
     const chatPanelProps = {
       conversationId,
+      conversationMode,
       projectId: conversationProjectIds?.[conversationId],
       goals: consoleChatGoals,
       selectedGoal,
@@ -309,6 +311,7 @@ export function ConsolePage(props: Props) {
     coachStream,
     consoleChatGoals,
     conversationId,
+    conversationMode,
     conversationProjectIds,
     conversationTitles,
     defaultExecutorId,
@@ -341,51 +344,38 @@ export function ConsolePage(props: Props) {
   ]);
 
   return (
-    <HyperPinDesktop
+    <PinWorkspaceShell
       className="cursor-workspace console-smart-cabin hyper-pin-desktop"
-      canvas={
-        <PinDesktopPager
-          pageIndex={activePage}
-          pageCount={pageCount}
-          onPageChange={setPage}
-        >
-          <PinDesktopCanvas
-            layout={layout}
-            widgets={pinWidgets}
-            getSlotLabel={getSlotLabel}
-            onUnpin={unpin}
-            onApplyDrop={applyDrop}
-            onSeamCommit={commitSeamResize}
-            dockDragWidget={dockDrag?.widget ?? null}
-            dockDragOverCol={dockDrag?.overCol ?? null}
-            dockDragOverZone={dockDrag?.overZone ?? null}
-            onGridRectChange={onGridRectChange}
-            onBindCellRect={(getter) => {
-              getCellRectRef.current = getter;
-            }}
-            onPinWidgetAtCol={addDockCardAtCol}
-            onAddTemplateAtCol={addSlotFromTemplate}
-            isDockWidgetPinned={isPinned}
-            pageIndex={activePage}
-            pageCount={pageCount}
-          />
-        </PinDesktopPager>
-      }
-      dock={
-        <PinDock
-          extItems={extDockItems}
-          isPinned={isPinned}
-          pinnedCount={pinnedCount}
-          onTogglePin={togglePin}
-          onRegisterTemplate={registerSlotFromTemplate}
-          onDockDragStart={onDockDragStart}
-          onDockDragMove={onDockDragMove}
-          onDockDragEnd={onDockDragEnd}
-          onDockDragCancel={onDockDragCancel}
-          onRemoveTab={unpin}
-          onSettings={onSettings}
-        />
-      }
+      layout={layout}
+      widgets={pinWidgets}
+      activePage={activePage}
+      pageCount={pageCount}
+      setPage={setPage}
+      getSlotLabel={getSlotLabel}
+      unpin={unpin}
+      applyDrop={applyDrop}
+      commitSeamResize={commitSeamResize}
+      dockDrag={dockDrag}
+      onGridRectChange={onGridRectChange}
+      getCellRectRef={getCellRectRef}
+      addDockCardAtCol={addDockCardAtCol}
+      addSlotFromTemplate={addSlotFromTemplate}
+      isPinned={isPinned}
+      pinnedCount={pinnedCount}
+      togglePin={togglePin}
+      registerSlotFromTemplate={registerSlotFromTemplate}
+      extDockItems={extDockItems}
+      onDockDragStart={onDockDragStart}
+      onDockDragMove={onDockDragMove}
+      onDockDragEnd={onDockDragEnd}
+      onDockDragCancel={onDockDragCancel}
+      onSettings={onSettings}
+      onEnableRoundtable={() => {
+        void enableRoundtable(conversationId).then((result) => {
+          if (result && !isPinned("chat")) togglePin("chat");
+        });
+      }}
+      roundtableActive={conversationMode === "roundtable"}
     />
   );
 }

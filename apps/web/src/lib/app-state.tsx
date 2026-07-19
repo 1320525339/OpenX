@@ -24,6 +24,7 @@ import {
   goalMatchesDisplayFilter,
   SYSTEM_MAIN_CONVERSATION_ID,
   SYSTEM_PROJECT_ID,
+  projectGoalVaultConversationId,
 } from "@openx/shared";
 import type { RoundReplyStreamState } from "./round-streams";
 import {
@@ -138,6 +139,7 @@ type Action =
   | { type: "upsert_conversation"; conversation: Conversation }
   | { type: "remove_project"; projectId: string }
   | { type: "remove_conversation"; conversationId: string }
+  | { type: "clear_conversation_thread"; conversationId: string }
   | { type: "set_goals"; goals: Goal[] }
   | { type: "patch_goal"; goal: Goal }
   | { type: "remove_goal"; goalId: string }
@@ -408,13 +410,42 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         conversations: state.conversations.filter((c) => c.id !== action.conversationId),
-        goals: state.goals.filter((g) => g.conversationId !== action.conversationId),
+        // goals 保留：服务端已迁入任务保管箱，随后 refreshGoals 会更新 conversationId
+        roundStreams: clearRoundStreamsForConversation(
+          state.roundStreams,
+          action.conversationId,
+        ),
         selectedConversationId:
           state.selectedConversationId === action.conversationId
             ? null
             : state.selectedConversationId,
         view:
           state.selectedConversationId === action.conversationId ? "home" : state.view,
+      };
+    }
+    case "clear_conversation_thread": {
+      const clearedAt = new Date().toISOString();
+      return {
+        ...state,
+        roundStreams: clearRoundStreamsForConversation(
+          state.roundStreams,
+          action.conversationId,
+        ),
+        coachStream:
+          state.coachStream?.conversationId === action.conversationId
+            ? null
+            : state.coachStream,
+        coachMessageEvent: {
+          id: -Math.floor(Date.now() % 1_000_000_000),
+          conversationId: action.conversationId,
+          role: "coach",
+          text: "",
+          kind: "text",
+          timestamp: clearedAt,
+          speakerType: "foreman",
+          speakerId: "system",
+          generationStatus: "completed",
+        },
       };
     }
     case "set_goals":
@@ -598,9 +629,20 @@ type AppContextValue = {
     projectId: string,
     opts?: { mode?: "foreman" | "roundtable"; title?: string },
   ) => Promise<Conversation | null>;
-  enableRoundtable: (conversationId: string) => Promise<Conversation | null>;
+  enableRoundtable: (
+    conversationId: string,
+    body?: {
+      participantProfileIds?: string[];
+      participantSeats?: import("@openx/shared").RoundtableSeatInput[];
+    },
+  ) => Promise<{
+    conversation: Conversation;
+    participants: import("@openx/shared").ConversationParticipant[];
+  } | null>;
   deleteProject: (projectId: string) => Promise<boolean>;
   deleteConversation: (conversationId: string) => Promise<boolean>;
+  clearConversationThread: (conversationId: string) => Promise<boolean>;
+  forgetProjectConversations: (projectId: string) => Promise<boolean>;
   saveWorkspace: (path: string) => Promise<void>;
   saveSystemWorkspace: (path: string) => Promise<void>;
   goalActions: {
@@ -651,6 +693,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const restoredConvRef = useRef(false);
   /** 全量 refresh 代次；upsertGoals 时递增以丢弃飞行中的旧列表 */
   const refreshGoalsGenRef = useRef(0);
+  /** SSE 持续 reconnecting 超时后升为 disconnected */
+  const sseDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const SSE_DISCONNECT_AFTER_MS = 20_000;
 
   const refreshGoals = useCallback(async () => {
     const gen = ++refreshGoalsGenRef.current;
@@ -892,19 +937,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const enableRoundtable = useCallback(async (conversationId: string) => {
-    try {
-      const { conversation } = await api.enableRoundtable(conversationId);
-      dispatch({ type: "upsert_conversation", conversation });
-      return conversation;
-    } catch (err) {
-      notifyIsland(
-        `启用圆桌失败：${err instanceof Error ? err.message : String(err)}`,
-        { severity: "error" },
-      );
-      return null;
-    }
-  }, []);
+  const enableRoundtable = useCallback(
+    async (
+      conversationId: string,
+      body?: {
+        participantProfileIds?: string[];
+        participantSeats?: import("@openx/shared").RoundtableSeatInput[];
+      },
+    ) => {
+      try {
+        const { conversation, participants } = await api.enableRoundtable(
+          conversationId,
+          body,
+        );
+        dispatch({ type: "upsert_conversation", conversation });
+        return { conversation, participants };
+      } catch (err) {
+        notifyIsland(
+          `启用圆桌失败：${err instanceof Error ? err.message : String(err)}`,
+          { severity: "error" },
+        );
+        return null;
+      }
+    },
+    [],
+  );
 
   const deleteProject = useCallback(async (projectId: string) => {
     try {
@@ -924,6 +981,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       await api.deleteConversation(conversationId);
       dispatch({ type: "remove_conversation", conversationId });
+      await refreshGoals();
+      await refreshBootstrap();
       return true;
     } catch (err) {
       notifyIsland(
@@ -932,7 +991,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       return false;
     }
+  }, [refreshGoals, refreshBootstrap]);
+
+  const clearConversationThread = useCallback(async (conversationId: string) => {
+    try {
+      await api.forgetConversation(conversationId, "clear_thread");
+      dispatch({ type: "clear_conversation_thread", conversationId });
+      return true;
+    } catch (err) {
+      notifyIsland(
+        `清空对话失败：${err instanceof Error ? err.message : String(err)}`,
+        { severity: "error" },
+      );
+      return false;
+    }
   }, []);
+
+  const forgetProjectConversations = useCallback(async (projectId: string) => {
+    try {
+      await api.forgetProjectConversations(projectId);
+      await refreshBootstrap();
+      await refreshGoals();
+      return true;
+    } catch (err) {
+      notifyIsland(
+        `清空项目对话失败：${err instanceof Error ? err.message : String(err)}`,
+        { severity: "error" },
+      );
+      return false;
+    }
+  }, [refreshBootstrap, refreshGoals]);
 
   useEffect(() => {
     void refreshGoals();
@@ -986,7 +1074,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIslandCatchupMode(true);
     void hydrateIslandSeenFromServer();
 
-    return connectEvents({
+    const clearSseDisconnectTimer = () => {
+      if (sseDisconnectTimerRef.current) {
+        clearTimeout(sseDisconnectTimerRef.current);
+        sseDisconnectTimerRef.current = null;
+      }
+    };
+
+    const unsub = connectEvents({
       onCatchupComplete: () => {
         setIslandCatchupMode(false);
         void syncAttentionsFromServer((count) =>
@@ -1144,6 +1239,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
             conversationId: event.conversationId,
           });
         }
+        if (event.type === "conversation.cleared") {
+          dispatch({
+            type: "clear_conversation_thread",
+            conversationId: event.conversationId,
+          });
+        }
+        if (event.type === "conversation.deleted") {
+          dispatch({
+            type: "remove_conversation",
+            conversationId: event.conversationId,
+          });
+          // 同步 vault 会话进树，避免多 Tab 下 projectGoals 丢任务
+          void refreshBootstrap();
+          void refreshGoals();
+        }
         if (event.type === "coach.reply") {
           dispatch({
             type: "coach_reply",
@@ -1174,10 +1284,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "set_open_attention_count", count }),
         );
       },
-      onOpen: () => dispatch({ type: "set_sse_status", status: "connected" }),
-      onError: () => dispatch({ type: "set_sse_status", status: "reconnecting" }),
+      onOpen: () => {
+        clearSseDisconnectTimer();
+        dispatch({ type: "set_sse_status", status: "connected" });
+      },
+      onError: () => {
+        dispatch({ type: "set_sse_status", status: "reconnecting" });
+        if (!sseDisconnectTimerRef.current) {
+          sseDisconnectTimerRef.current = setTimeout(() => {
+            sseDisconnectTimerRef.current = null;
+            dispatch({ type: "set_sse_status", status: "disconnected" });
+          }, SSE_DISCONNECT_AFTER_MS);
+        }
+      },
     });
-  }, [refreshGoals, refreshProjects, reconcileActiveRuns]);
+
+    return () => {
+      clearSseDisconnectTimer();
+      unsub();
+    };
+  }, [refreshGoals, refreshProjects, reconcileActiveRuns, refreshBootstrap]);
 
   useEffect(() => {
     const goalIds = new Set<string>();
@@ -1355,11 +1481,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const projectGoals = useMemo(() => {
     if (!state.selectedProjectId) return conversationGoals;
+    const projectId = state.selectedProjectId;
     const convIds = new Set(
       state.conversations
-        .filter((c) => c.projectId === state.selectedProjectId)
+        .filter((c) => c.projectId === projectId)
         .map((c) => c.id),
     );
+    // 保管箱可能被 UI 隐藏，但仍要显示迁入的任务
+    convIds.add(projectGoalVaultConversationId(projectId));
     let scoped = state.goals.filter((g) => convIds.has(g.conversationId));
     if (state.executorScope !== "all") {
       scoped = scoped.filter((g) => g.executorId === state.executorScope);
@@ -1423,6 +1552,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enableRoundtable,
     deleteProject,
     deleteConversation,
+    clearConversationThread,
+    forgetProjectConversations,
     saveWorkspace,
     saveSystemWorkspace,
     goalActions,

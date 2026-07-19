@@ -59,6 +59,7 @@ import type { LlmContextSettings } from "@openx/shared";
 import { isDiscourseTopicMessage } from "@openx/shared";
 
 import { formatCoachLlmError, isCoachParseError, isCoachTimeoutError } from "./llm-errors.js";
+import { extractUsageFromResult, recordLlmUsage } from "./llm-usage.js";
 
 const JSON_ONLY_SUFFIX =
   "\n\n请以 JSON 对象回复，不要输出 markdown 代码块或推理过程。";
@@ -73,7 +74,12 @@ const COACH_LLM_TIMEOUT_MS = Number.parseInt(
 
 function coachLlmAbortSignal(): { signal: AbortSignal; cancel: () => void } {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), COACH_LLM_TIMEOUT_MS);
+  const timer = setTimeout(() => {
+    // 用自定义 reason，避免纯 AbortError 被误判为用户取消
+    const timeoutErr = new Error("模型响应超时");
+    timeoutErr.name = "TimeoutError";
+    controller.abort(timeoutErr);
+  }, COACH_LLM_TIMEOUT_MS);
   if (typeof timer === "object" && "unref" in timer) {
     timer.unref();
   }
@@ -81,6 +87,15 @@ function coachLlmAbortSignal(): { signal: AbortSignal; cancel: () => void } {
     signal: controller.signal,
     cancel: () => clearTimeout(timer),
   };
+}
+
+function noteUsage(
+  result: { usage?: Parameters<typeof extractUsageFromResult>[0]["usage"] },
+  model?: string,
+): void {
+  const usage = extractUsageFromResult(result);
+  if (!usage) return;
+  recordLlmUsage({ role: "coach", model, ...usage });
 }
 
 /** 工头/审查员共用的结构化 JSON 调用（含解析失败重试） */
@@ -92,7 +107,7 @@ export async function generateStructuredObject<T>(options: {
 }): Promise<T> {
   const { signal, cancel } = coachLlmAbortSignal();
   try {
-    const { object } = await generateObject({
+    const result = await generateObject({
       model: options.model,
       schema: options.schema,
       system: options.system,
@@ -100,13 +115,18 @@ export async function generateStructuredObject<T>(options: {
       temperature: 0,
       abortSignal: signal,
     });
-    return object as T;
+    noteUsage(result);
+    return result.object as T;
   } catch (err) {
     if (isCoachTimeoutError(err)) throw err;
+    // AbortSignal.reason 为 TimeoutError 时，部分运行时只抛 AbortError
+    if (signal.aborted && signal.reason instanceof Error && isCoachTimeoutError(signal.reason)) {
+      throw signal.reason;
+    }
     if (!isCoachParseError(err)) throw err;
     const retry = coachLlmAbortSignal();
     try {
-      const { object } = await generateObject({
+      const result = await generateObject({
         model: options.model,
         schema: options.schema,
         system: `${options.system}\n\n你必须只输出 JSON，content 字段不能为空。`,
@@ -115,7 +135,8 @@ export async function generateStructuredObject<T>(options: {
         maxRetries: 0,
         abortSignal: retry.signal,
       });
-      return object as T;
+      noteUsage(result);
+      return result.object as T;
     } finally {
       retry.cancel();
     }
@@ -132,20 +153,26 @@ export async function generateCoachText(options: {
   temperature?: number;
   /** 空响应最大重试次数（不含首次），默认 2 */
   emptyRetry?: number;
+  abortSignal?: AbortSignal;
 }): Promise<string> {
   const maxRetry = Math.max(0, options.emptyRetry ?? 2);
   const { signal, cancel } = coachLlmAbortSignal();
+  const abortSignal =
+    options.abortSignal != null
+      ? AbortSignal.any([signal, options.abortSignal])
+      : signal;
   try {
     let last = "";
     for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
-      const { text } = await generateText({
+      const result = await generateText({
         model: options.model,
         system: options.system,
         prompt: options.prompt.trim(),
         temperature: options.temperature ?? 0.4,
-        abortSignal: signal,
+        abortSignal,
       });
-      last = text.trim();
+      noteUsage(result);
+      last = result.text.trim();
       if (last) return last;
     }
     return last;
@@ -495,6 +522,7 @@ export async function refineGoalLlm(
 
 export type CoachChatStreamLlmOptions = {
   promptMode?: "tool_continuation";
+  abortSignal?: AbortSignal;
 };
 
 export async function coachChatStreamLlm(
@@ -512,6 +540,10 @@ export async function coachChatStreamLlm(
   }
 
   const { signal, cancel } = coachLlmAbortSignal();
+  const abortSignal =
+    options?.abortSignal != null
+      ? AbortSignal.any([signal, options.abortSignal])
+      : signal;
   try {
     const result = streamText({
       model: createModel(creds),
@@ -524,10 +556,11 @@ export async function coachChatStreamLlm(
             : false,
       }),
       temperature: isDiscourseTopicMessage(message) ? 0.45 : 0.3,
-      abortSignal: signal,
+      abortSignal,
     });
     let full = "";
     for await (const delta of result.textStream) {
+      if (abortSignal.aborted) break;
       full += delta;
       await onDelta(delta);
     }

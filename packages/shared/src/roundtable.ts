@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { DEFAULT_MODEL_REF, ModelRefSchema } from "./model-config.js";
+import { KnowledgeContextSelectionSchema } from "./knowledge.js";
+import {
+  DEFAULT_MODEL_REF,
+  ModelRefSchema,
+  listConfiguredModelRefs,
+} from "./model-config.js";
 
 /** 圆桌会话模式 */
 export const ConversationModeSchema = z.enum(["foreman", "roundtable"]);
@@ -71,6 +76,23 @@ export type UpsertConversationParticipantsInput = z.infer<
   typeof UpsertConversationParticipantsSchema
 >;
 
+/** 圆桌席位双向配置：Agent（profileId）× 模型（modelRef） */
+export const RoundtableSeatInputSchema = z.object({
+  profileId: z.string().min(1),
+  modelRef: ModelRefSchema.optional(),
+  displayName: z.string().min(1).optional(),
+});
+export type RoundtableSeatInput = z.infer<typeof RoundtableSeatInputSchema>;
+
+export const EnableRoundtableSchema = z.object({
+  participantProfileIds: z.array(z.string().min(1)).optional(),
+  participantSeats: z.array(RoundtableSeatInputSchema).optional(),
+});
+export type EnableRoundtableInput = z.infer<typeof EnableRoundtableSchema>;
+
+/** 通用席位画像 id（先选模型再挂 Agent 时的默认画像） */
+export const ROUNDTABLE_GENERAL_PROFILE_ID = "general";
+
 export const ChatRoundModeSchema = z.enum(["direct", "diverge"]);
 export type ChatRoundMode = z.infer<typeof ChatRoundModeSchema>;
 
@@ -133,6 +155,15 @@ export type ChatRoundOutputGoal = z.infer<typeof ChatRoundOutputGoalSchema>;
 export const ChatRoundLengthSchema = z.enum(["short", "medium", "long"]);
 export type ChatRoundLength = z.infer<typeof ChatRoundLengthSchema>;
 
+/** 圆桌发送时 Composer 选中的 Context 快照（与 CoachChatInput 对齐） */
+export const ChatRoundComposerContextSchema = z.object({
+  skillIds: z.array(z.string()).optional(),
+  mcpIds: z.array(z.string()).optional(),
+  knowledge: KnowledgeContextSelectionSchema.optional(),
+  permissionMode: z.enum(["read_only", "ask_write", "full"]).optional(),
+});
+export type ChatRoundComposerContext = z.infer<typeof ChatRoundComposerContextSchema>;
+
 export const ChatRoundSchema = z.object({
   id: z.string().min(1),
   conversationId: z.string().min(1),
@@ -144,6 +175,8 @@ export const ChatRoundSchema = z.object({
   estimatedCalls: z.number().int().nonnegative(),
   outputGoal: ChatRoundOutputGoalSchema.optional(),
   length: ChatRoundLengthSchema.optional(),
+  /** 本轮发送时的 Skill/MCP/知识/权限快照 */
+  composerContext: ChatRoundComposerContextSchema.optional(),
   createdAt: z.string(),
   completedAt: z.string().optional(),
 });
@@ -157,8 +190,34 @@ export const CreateChatRoundSchema = z.object({
   synthesize: z.boolean().optional(),
   outputGoal: ChatRoundOutputGoalSchema.optional(),
   length: ChatRoundLengthSchema.optional(),
+  skillIds: z.array(z.string()).optional(),
+  mcpIds: z.array(z.string()).optional(),
+  knowledge: KnowledgeContextSelectionSchema.optional(),
+  permissionMode: z.enum(["read_only", "ask_write", "full"]).optional(),
 });
 export type CreateChatRoundInput = z.infer<typeof CreateChatRoundSchema>;
+
+/** 从创建入参提取可持久化的 Composer 快照 */
+export function pickChatRoundComposerContext(
+  input: Pick<
+    CreateChatRoundInput,
+    "skillIds" | "mcpIds" | "knowledge" | "permissionMode"
+  >,
+): ChatRoundComposerContext | undefined {
+  const skillIds = input.skillIds?.filter((id) => id.trim()) ?? [];
+  const mcpIds = input.mcpIds?.filter((id) => id.trim()) ?? [];
+  const hasKnowledge = input.knowledge != null;
+  const hasPermission = input.permissionMode != null;
+  if (skillIds.length === 0 && mcpIds.length === 0 && !hasKnowledge && !hasPermission) {
+    return undefined;
+  }
+  return {
+    ...(skillIds.length > 0 ? { skillIds } : {}),
+    ...(mcpIds.length > 0 ? { mcpIds } : {}),
+    ...(hasKnowledge ? { knowledge: input.knowledge } : {}),
+    ...(hasPermission ? { permissionMode: input.permissionMode } : {}),
+  };
+}
 
 export const SpeakerTypeSchema = z.enum(["user", "foreman", "participant"]);
 export type SpeakerType = z.infer<typeof SpeakerTypeSchema>;
@@ -206,6 +265,17 @@ export const BUILTIN_AI_PROFILES: AiProfile[] = [
       "你是 OpenX 工头助手，负责主持圆桌讨论：追问澄清、归纳共识与分歧、给出可执行下一步，并在用户要求时整理成任务单。不要替施工队写代码。",
     modelRef: DEFAULT_MODEL_REF,
     defaultCapabilityIds: ["knowledge"],
+    builtin: true,
+  },
+  {
+    id: ROUNDTABLE_GENERAL_PROFILE_ID,
+    name: "通用席位",
+    avatar: "🤖",
+    description: "轻量通用发言席，可再换成具体角色画像",
+    rolePrompt:
+      "你是圆桌通用席位。基于当前议题给出清晰、可执行的观点，标明假设与不确定处。不要冒充工头，不要生成任务单。",
+    modelRef: DEFAULT_MODEL_REF,
+    defaultCapabilityIds: [],
     builtin: true,
   },
   {
@@ -283,6 +353,36 @@ export const DEFAULT_ROUNDTABLE_PROFILE_IDS = [
   "architect",
   "critic",
 ] as const;
+
+/** 从设置拼出圆桌模型池：coach → default → 其余已配置模型（去重） */
+export function buildRoundtableModelPool(settings: {
+  model?: { coach?: string; default?: string; pi?: string; reviewer?: string };
+  providers?: Parameters<typeof listConfiguredModelRefs>[0]["providers"];
+}): string[] {
+  const coach = settings.model?.coach?.trim() || DEFAULT_MODEL_REF;
+  const def = settings.model?.default?.trim() || coach;
+  const pool: string[] = [];
+  const push = (ref?: string) => {
+    const r = ref?.trim();
+    if (r && !pool.includes(r)) pool.push(r);
+  };
+  push(coach);
+  push(def);
+  push(settings.model?.pi);
+  push(settings.model?.reviewer);
+  for (const { ref } of listConfiguredModelRefs({ providers: settings.providers ?? {} })) {
+    push(ref);
+  }
+  if (pool.length === 0) pool.push(DEFAULT_MODEL_REF);
+  return pool;
+}
+
+/** modelRef 短名（UI chip）：取 `/` 后段，过长则截断 */
+export function shortModelRefLabel(modelRef: string, maxLen = 18): string {
+  const raw = modelRef.includes("/") ? modelRef.slice(modelRef.indexOf("/") + 1) : modelRef;
+  if (raw.length <= maxLen) return raw;
+  return `${raw.slice(0, maxLen - 1)}…`;
+}
 
 export function speakerTypeToLegacyRole(
   speakerType: SpeakerType,

@@ -1,12 +1,23 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
+  ChatRoundMode,
   CoachMessageRecord,
+  ConversationParticipant,
   Goal,
   GoalRunState,
   KnowledgeContextSelection,
   KnowledgeSourceRef,
 } from "@openx/shared";
-import { DEFAULT_EXECUTION_AGENT_ID, formatWorkOrderId, isPausedGoal, SYSTEM_MAIN_CONVERSATION_ID } from "@openx/shared";
+import {
+  DEFAULT_EXECUTION_AGENT_ID,
+  ROUNDTABLE_ALL_PARTICIPANTS_ID,
+  ROUNDTABLE_DEFAULT_PARALLEL_REPLIES,
+  ROUNDTABLE_FOREMAN_PROFILE_ID,
+  formatWorkOrderId,
+  isPausedGoal,
+  shortModelRefLabel,
+  SYSTEM_MAIN_CONVERSATION_ID,
+} from "@openx/shared";
 import { api, type ExecutorInfo } from "../api";
 import { defaultExecutorChoice } from "../lib/executors";
 import { ChatWorkOrderCard } from "./ChatWorkOrderCard";
@@ -17,8 +28,20 @@ import { ChatThreadViewport } from "./ChatThreadViewport";
 import { ChatContextPicker } from "./ChatContextPicker";
 import { ChatExecutionCard } from "./ChatExecutionCard";
 import { ChatTaskChip } from "./ChatTaskChip";
+import { ParticipantBar } from "./roundtable/ParticipantBar";
+import {
+  PeerRequestCard,
+  RoundSynthesisCard,
+} from "./roundtable/RoundtableThreadCards";
 import { useSkillCatalog } from "../lib/use-skill-catalog";
 import { renderChatMessageText } from "../lib/chat-message-format";
+import { parseRoundtableMentions } from "../lib/roundtable-mentions";
+import {
+  chatContextDisabledReason,
+  resolveEffectiveRoundtable,
+} from "../lib/roundtable-composer-policy";
+import { requestIsland } from "../lib/island-queue";
+import { islandFromBroadcast } from "../lib/island-payload";
 import { useResizeFromTop } from "../lib/use-resize-from-top";
 import {
   appendCoachRecord,
@@ -55,7 +78,9 @@ import type {
 import type {
   CoachReplyEvent,
   CoachStreamState,
+  RoundReplyStreamState,
 } from "../lib/app-state";
+import { useAppState } from "../lib/app-state";
 import {
   chatSlashHelpText,
   formatConversationStatusSummary,
@@ -68,6 +93,7 @@ import {
 
 type Props = {
   conversationId: string;
+  conversationMode?: "foreman" | "roundtable";
   projectId?: string;
   goals: Goal[];
   selectedGoal: Goal | undefined;
@@ -96,6 +122,7 @@ function isNearBottom(el: HTMLElement) {
 
 export function ChatPanel({
   conversationId,
+  conversationMode = "foreman",
   projectId,
   goals,
   selectedGoal,
@@ -114,6 +141,18 @@ export function ChatPanel({
   coachStream,
   coachMessageEvent,
 }: Props) {
+  const { state } = useAppState();
+  const roundStreams = state.roundStreams;
+  const [participants, setParticipants] = useState<ConversationParticipant[]>([]);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [roundtableError, setRoundtableError] = useState<string | null>(null);
+  const [roundMode, setRoundMode] = useState<ChatRoundMode>("direct");
+  const [roundSynthesize, setRoundSynthesize] = useState(true);
+  const [sourceMessageId, setSourceMessageId] = useState<number | undefined>();
+  const [contextCollapseSignal, setContextCollapseSignal] = useState(0);
+  const [seatCollapseSignal, setSeatCollapseSignal] = useState(0);
   const [draft, setDraft] = useState("");
   const [executorId, setExecutorId] = useState(() =>
     defaultExecutorChoice(executors, defaultExecutorId),
@@ -406,6 +445,85 @@ export function ChatPanel({
       cancelled = true;
     };
   }, [conversationId]);
+
+  useEffect(() => {
+    setParticipants([]);
+    let cancelled = false;
+    void api
+      .getRoundtableParticipants(conversationId)
+      .then(({ participants: parts }) => {
+        if (!cancelled) setParticipants(parts);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRoundtableError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
+  /** 会话 mode 或已有席位时均走圆桌发送（首次加人后 mode 可能尚未回写） */
+  const isRoundtable = resolveEffectiveRoundtable(
+    conversationMode,
+    participants.length,
+  );
+  const contextDisabledReason = chatContextDisabledReason(isRoundtable);
+  const participantNameById = useMemo(() => {
+    const m = new Map<string, ConversationParticipant>();
+    for (const p of participants) m.set(p.id, p);
+    return m;
+  }, [participants]);
+
+  const mentionCandidates = useMemo(() => {
+    if (!isRoundtable) return [];
+    const q = mentionFilter.trim().toLowerCase();
+    const list = [
+      { id: ROUNDTABLE_ALL_PARTICIPANTS_ID, label: "全体" },
+      ...participants
+        .filter((p) => p.enabled)
+        .map((p) => ({ id: p.id, label: p.displayName })),
+    ];
+    if (!q) return list;
+    return list.filter((x) => x.label.toLowerCase().includes(q));
+  }, [isRoundtable, mentionFilter, participants]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionFilter, mentionOpen, mentionCandidates.length]);
+
+  const estimatedRoundCalls = useMemo(() => {
+    if (!isRoundtable) return 0;
+    const { mentionIds } = parseRoundtableMentions(draft, participants);
+    let n = 0;
+    if (roundMode === "diverge") {
+      if (mentionIds.includes(ROUNDTABLE_ALL_PARTICIPANTS_ID)) {
+        n = participants.filter(
+          (p) => p.enabled && p.profileId !== ROUNDTABLE_FOREMAN_PROFILE_ID,
+        ).length;
+      } else if (mentionIds.length > 0) {
+        n = mentionIds.length;
+      } else {
+        n = Math.min(
+          ROUNDTABLE_DEFAULT_PARALLEL_REPLIES,
+          participants.filter(
+            (p) => p.enabled && p.profileId !== ROUNDTABLE_FOREMAN_PROFILE_ID,
+          ).length,
+        );
+      }
+      if (roundSynthesize) n += 1;
+    } else if (mentionIds.length === 0) {
+      n = 1;
+    } else if (mentionIds.includes(ROUNDTABLE_ALL_PARTICIPANTS_ID)) {
+      n = participants.filter(
+        (p) => p.enabled && p.profileId !== ROUNDTABLE_FOREMAN_PROFILE_ID,
+      ).length;
+    } else {
+      n = mentionIds.length;
+    }
+    return n;
+  }, [draft, isRoundtable, participants, roundMode, roundSynthesize]);
 
   useLayoutEffect(() => {
     if (!coachReplyEvent) return;
@@ -711,6 +829,44 @@ export function ChatPanel({
     const text = draft.trim();
     if (!text) return;
 
+    if (isRoundtable) {
+      stickToBottomRef.current = true;
+      setRoundtableError(null);
+      setThreadRecords((records) =>
+        appendCoachRecord(records, { role: "user", text }, conversationId),
+      );
+      setDraft("");
+      setMentionOpen(false);
+      setLoadingMode("streaming");
+      setLoading(true);
+      try {
+        const { cleanMessage, mentionIds } = parseRoundtableMentions(
+          text,
+          participants,
+        );
+        await api.createChatRound(conversationId, {
+          message: cleanMessage || text,
+          mode: roundMode,
+          mentionParticipantIds: mentionIds,
+          sourceMessageId,
+          synthesize: roundMode === "diverge" ? roundSynthesize : false,
+          skillIds: chatSkillIds.length > 0 ? chatSkillIds : undefined,
+          mcpIds: chatMcpIds.length > 0 ? chatMcpIds : undefined,
+          knowledge: coachKnowledgePayload,
+          permissionMode: chatPermissionMode,
+        });
+        setSourceMessageId(undefined);
+        await syncThread();
+      } catch (e) {
+        const errText = e instanceof Error ? e.message : "发送失败";
+        setRoundtableError(errText);
+        appendLocalCoach(`发送失败：${errText}`, true);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (text.startsWith("/")) {
       const slash = parseChatSlash(text);
       stickToBottomRef.current = true;
@@ -776,6 +932,68 @@ export function ChatPanel({
       appendLocalCoach(`发送失败：${errText}`, true);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onRoundtableDraftChange = (value: string) => {
+    setDraft(value);
+    if (!isRoundtable) return;
+    const at = value.lastIndexOf("@");
+    if (at >= 0 && (at === 0 || /\s/.test(value[at - 1] ?? ""))) {
+      setMentionOpen(true);
+      setMentionFilter(value.slice(at + 1));
+    } else {
+      setMentionOpen(false);
+      setMentionFilter("");
+    }
+  };
+
+  const insertMention = (token: { id: string; label: string }) => {
+    const at = draft.lastIndexOf("@");
+    const next =
+      at >= 0
+        ? `${draft.slice(0, at)}@${token.label} `
+        : `${draft}@${token.label} `;
+    setDraft(next);
+    setMentionOpen(false);
+    setMentionFilter("");
+  };
+
+  const onComposerKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isRoundtable && mentionOpen && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex((i) => (i + 1) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex(
+          (i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length,
+        );
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const pick = mentionCandidates[mentionIndex];
+        if (pick) insertMention(pick);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionOpen(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const pick = mentionCandidates[mentionIndex];
+        if (pick) insertMention(pick);
+        return;
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
     }
   };
 
@@ -854,7 +1072,7 @@ export function ChatPanel({
       setRefinedPreview(null);
       setRefinedMessageId(null);
       stickToBottomRef.current = true;
-      appendLocalCoach(`已更新目标「${selectedGoal.title}」。`);
+      appendLocalCoach(`已更新任务「${selectedGoal.title}」。`);
     } finally {
       setLoading(false);
     }
@@ -1295,20 +1513,101 @@ export function ChatPanel({
                 );
               }
 
+              if (item.kind === "peer_request") {
+                return (
+                  <PeerRequestCard
+                    key={item.key}
+                    record={item.record}
+                    onDone={() => void syncThread()}
+                    onError={(msg) => setRoundtableError(msg)}
+                  />
+                );
+              }
+
+              if (item.kind === "round_synthesis") {
+                return (
+                  <RoundSynthesisCard
+                    key={item.key}
+                    record={item.record}
+                    onContinue={() => {
+                      setRoundMode("direct");
+                    }}
+                    onDiverge={() => {
+                      setRoundMode("diverge");
+                      setSourceMessageId(undefined);
+                    }}
+                    onWorkOrder={() => {
+                      void api
+                        .roundToWorkOrder(item.record.synthesis.roundId)
+                        .then(() => syncThread())
+                        .catch((err) =>
+                          setRoundtableError(
+                            err instanceof Error ? err.message : String(err),
+                          ),
+                        );
+                    }}
+                  />
+                );
+              }
+
               if (item.kind === "message") {
                 const m = item.message;
                 const warn =
                   m.warn ||
                   (m.id != null ? messageWarnById[m.id] : false);
+                const stream =
+                  m.id != null
+                    ? (roundStreams[m.id] as RoundReplyStreamState | undefined)
+                    : undefined;
+                const streaming =
+                  stream?.status === "streaming" ||
+                  m.generationStatus === "streaming";
+                const failed =
+                  stream?.status === "failed" ||
+                  m.generationStatus === "failed";
+                const displayText = (
+                  stream?.text ||
+                  m.text ||
+                  (failed
+                    ? `（失败）${stream?.error || m.generationMeta?.error || "生成失败"}`
+                    : "")
+                ).trim();
+                const part =
+                  m.speakerId != null
+                    ? participantNameById.get(m.speakerId)
+                    : undefined;
+                const roleLabel =
+                  m.role === "user"
+                    ? "你"
+                    : part?.displayName ||
+                      (m.speakerType === "foreman" || m.speakerId === "foreman"
+                        ? "工头"
+                        : m.speakerType === "participant"
+                          ? m.speakerId || "成员"
+                          : "工头");
+                const modelLabel =
+                  m.generationMeta?.modelRef || part?.modelRef;
                 return (
                   <div
                     key={item.key}
                     className={`chat-turn chat-turn-${m.role}`}
                   >
                     <div className="chat-turn-meta">
-                      <span className="chat-turn-role">
-                        {m.role === "user" ? "你" : "工头"}
-                      </span>
+                      <span className="chat-turn-role">{roleLabel}</span>
+                      {isRoundtable && modelLabel ? (
+                        <span
+                          className="roundtable-model"
+                          title={modelLabel}
+                        >
+                          {shortModelRefLabel(modelLabel)}
+                        </span>
+                      ) : null}
+                      {streaming ? (
+                        <span className="chat-stream-status">输出中</span>
+                      ) : null}
+                      {failed ? (
+                        <span className="roundtable-status is-error">失败</span>
+                      ) : null}
                       {m.timestamp ? (
                         <time className="chat-turn-time" dateTime={m.timestamp}>
                           {new Date(m.timestamp).toLocaleTimeString(undefined, {
@@ -1318,9 +1617,95 @@ export function ChatPanel({
                         </time>
                       ) : null}
                     </div>
-                    <div className={`chat-bubble ${m.role}${warn ? " warn" : ""}`}>
-                      {renderChatMessageText(m.text, m.role === "user")}
+                    <div
+                      className={`chat-bubble ${m.role}${warn || failed ? " warn" : ""}${streaming ? " streaming" : ""}`}
+                    >
+                      {displayText
+                        ? renderChatMessageText(displayText, m.role === "user")
+                        : null}
+                      {streaming ? (
+                        <span className="chat-stream-cursor" aria-hidden />
+                      ) : null}
                     </div>
+                    {isRoundtable && m.role === "coach" && m.id != null ? (
+                      <footer className="roundtable-bubble-actions">
+                        {streaming ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() =>
+                              void api
+                                .cancelRoundtableReply(m.id!)
+                                .then(() => syncThread())
+                                .catch((err) =>
+                                  setRoundtableError(
+                                    err instanceof Error
+                                      ? err.message
+                                      : String(err),
+                                  ),
+                                )
+                            }
+                          >
+                            停止
+                          </button>
+                        ) : null}
+                        {m.generationStatus === "completed" ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setDraft(`@${roleLabel} `);
+                                setRoundMode("direct");
+                              }}
+                            >
+                              追问
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setDraft("@全体 ");
+                                setRoundMode("diverge");
+                                setSourceMessageId(m.id);
+                              }}
+                            >
+                              让其他人评
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setRoundMode("diverge");
+                                setSourceMessageId(m.id);
+                              }}
+                            >
+                              基于此发散
+                            </button>
+                          </>
+                        ) : null}
+                        {failed ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() =>
+                              void api
+                                .retryRoundtableReply(m.id!)
+                                .then(() => syncThread())
+                                .catch((err) =>
+                                  setRoundtableError(
+                                    err instanceof Error
+                                      ? err.message
+                                      : String(err),
+                                  ),
+                                )
+                            }
+                          >
+                            重试
+                          </button>
+                        ) : null}
+                      </footer>
+                    ) : null}
                   </div>
                 );
               }
@@ -1548,7 +1933,7 @@ export function ChatPanel({
                 </div>
               </div>
             )}
-            {showCoachStreamBubble && activeCoachStream && (
+            {showCoachStreamBubble && activeCoachStream && !isRoundtable && (
               <div className="chat-turn chat-turn-coach">
                 <div className="chat-turn-meta">
                   <span className="chat-turn-role">工头</span>
@@ -1581,7 +1966,7 @@ export function ChatPanel({
 
         <div className="chat-dock" ref={dockRef}>
           <div className="chat-dock-inner">
-            {refinedPreview && (
+            {refinedPreview && !isRoundtable && (
               <div className="chat-dock-actions">
                 <button
                   type="button"
@@ -1601,7 +1986,7 @@ export function ChatPanel({
                 </button>
               </div>
             )}
-            {!refinedPreview && !activeClarifyId && refineSuggestion && (
+            {!isRoundtable && !refinedPreview && !activeClarifyId && refineSuggestion && (
               <div className="chat-dock-hint chat-suggest-bar">
                 <span className="chat-dock-hint-text">
                   这条像可派发的任务，要整理成任务单吗？
@@ -1625,15 +2010,94 @@ export function ChatPanel({
             )}
 
             <div className="chat-composer">
-              <ChatContextPicker
-                skillCatalog={catalogSkills}
-                projectId={projectId}
-                isSystemMain={isSystemMain}
-                globalSources={globalKnowledgeSources}
-                projectSources={projectKnowledgeSources}
-                onContextChange={handleContextChange}
-              />
-              {draft.startsWith("/") ? (
+              <div className="chat-composer-toolbar">
+                <div className="chat-composer-seats-row">
+                  <ParticipantBar
+                    conversationId={conversationId}
+                    participants={participants}
+                    onChange={setParticipants}
+                    onError={(msg) => setRoundtableError(msg)}
+                    roundtableActive={conversationMode === "roundtable"}
+                    collapseSignal={seatCollapseSignal}
+                    onEditorOpenChange={(open) => {
+                      if (open) setContextCollapseSignal((n) => n + 1);
+                    }}
+                    onRoundtableBootstrapped={() => {
+                      requestIsland(
+                        islandFromBroadcast("已开启圆桌，可用 @ 点名", {
+                          severity: "success",
+                        }),
+                      );
+                    }}
+                  />
+                </div>
+                <div className="chat-composer-context-row">
+                  <ChatContextPicker
+                    skillCatalog={catalogSkills}
+                    projectId={projectId}
+                    isSystemMain={isSystemMain}
+                    globalSources={globalKnowledgeSources}
+                    projectSources={projectKnowledgeSources}
+                    onContextChange={handleContextChange}
+                    disabledReason={contextDisabledReason}
+                    collapseSignal={contextCollapseSignal}
+                    onBannerOpenChange={(open) => {
+                      if (open) setSeatCollapseSignal((n) => n + 1);
+                    }}
+                    trailing={
+                      isRoundtable ? (
+                        <div className="roundtable-composer-toolbar is-inline">
+                          <label className="roundtable-toolbar-field">
+                            <span className="roundtable-toolbar-label">模式</span>
+                            <select
+                              value={roundMode}
+                              onChange={(e) =>
+                                setRoundMode(e.target.value as ChatRoundMode)
+                              }
+                            >
+                              <option value="direct">定向 / 常规</option>
+                              <option value="diverge">发散（并行盲答）</option>
+                            </select>
+                          </label>
+                          {roundMode === "diverge" ? (
+                            <label className="roundtable-check">
+                              <input
+                                type="checkbox"
+                                checked={roundSynthesize}
+                                onChange={(e) =>
+                                  setRoundSynthesize(e.target.checked)
+                                }
+                              />
+                              工头总结
+                            </label>
+                          ) : null}
+                          {sourceMessageId != null ? (
+                            <button
+                              type="button"
+                              className="btn compact"
+                              onClick={() => setSourceMessageId(undefined)}
+                            >
+                              清除引用 #{sourceMessageId}
+                            </button>
+                          ) : null}
+                          <span className="roundtable-estimate">
+                            预计 {estimatedRoundCalls} 路
+                            {roundMode === "diverge" && estimatedRoundCalls > 1
+                              ? " · 盲答"
+                              : ""}
+                          </span>
+                        </div>
+                      ) : null
+                    }
+                  />
+                </div>
+              </div>
+              {roundtableError ? (
+                <p className="chat-dock-hint" style={{ color: "var(--danger)" }}>
+                  {roundtableError}
+                </p>
+              ) : null}
+              {!isRoundtable && draft.startsWith("/") ? (
                 <p className="chat-slash-hint">OpenX 斜杠命令 · /help 查看全部</p>
               ) : null}
               <div className="chat-composer-field" ref={composerFieldRef}>
@@ -1644,27 +2108,73 @@ export function ChatPanel({
                   aria-label="调整输入框高度"
                   onPointerDown={onResizePointerDown}
                 />
-                <textarea
-                  className="mech-textarea chat-composer-textarea"
-                  style={{ height: composerHeight }}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send();
+                <div className="roundtable-input-wrap">
+                  {isRoundtable && mentionOpen ? (
+                    <ul className="roundtable-mention-pop" role="listbox">
+                      {mentionCandidates.map((c, i) => (
+                        <li key={c.id}>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={i === mentionIndex}
+                            className={
+                              i === mentionIndex
+                                ? "is-active"
+                                : undefined
+                            }
+                            onMouseEnter={() => setMentionIndex(i)}
+                            onClick={() => insertMention(c)}
+                          >
+                            @{c.label}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <textarea
+                    className="mech-textarea chat-composer-textarea"
+                    style={{ height: composerHeight }}
+                    value={draft}
+                    onChange={(e) =>
+                      isRoundtable
+                        ? onRoundtableDraftChange(e.target.value)
+                        : setDraft(e.target.value)
                     }
-                  }}
-                  placeholder={
-                    pausedGoal
-                      ? "普通聊天不会续跑；要点「回复并继续」或 /resume"
-                      : "说你想推进的事… 或 /help 查看斜杠命令"
-                  }
-                  rows={2}
-                />
+                    onKeyDown={onComposerKeyDown}
+                    placeholder={
+                      isRoundtable
+                        ? roundMode === "diverge"
+                          ? "发散议题… @成员 或留空自动前 3 席；↑↓ 选人，Enter 确认/发送"
+                          : "输入问题，@成员点名；↑↓ 选人，Enter 确认/发送"
+                        : pausedGoal
+                          ? "普通聊天不会续跑；要点「回复并继续」或 /resume"
+                          : "说你想推进的事… 或 /help 查看斜杠命令"
+                    }
+                    rows={2}
+                  />
+                </div>
               </div>
               <div className="chat-composer-actions">
-                {pausedGoal ? (
+                {isRoundtable ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={loading}
+                    onClick={() => {
+                      void api
+                        .cancelActiveRoundtableRounds(conversationId)
+                        .then(() => syncThread())
+                        .catch((err) =>
+                          setRoundtableError(
+                            err instanceof Error ? err.message : String(err),
+                          ),
+                        );
+                    }}
+                  >
+                    停止回答
+                  </button>
+                ) : null}
+                {!isRoundtable && pausedGoal ? (
                   <button
                     type="button"
                     className="btn"
@@ -1681,11 +2191,13 @@ export function ChatPanel({
                   onClick={() => void send()}
                 >
                   {loading
-                    ? loadingMode === "structuring"
-                      ? structuringKind === "clarify"
-                        ? "准备澄清中…"
-                        : "整理工单中…"
-                      : "回复中…"
+                    ? isRoundtable
+                      ? "回复中…"
+                      : loadingMode === "structuring"
+                        ? structuringKind === "clarify"
+                          ? "准备澄清中…"
+                          : "整理工单中…"
+                        : "回复中…"
                     : "发送"}
                 </button>
               </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMcpCatalog } from "../lib/use-mcp-catalog";
 import {
   COACH_SKILLS,
@@ -32,6 +32,14 @@ type Props = {
   isSystemMain?: boolean;
   globalSources?: KnowledgeSourceRef[];
   projectSources?: KnowledgeSourceRef[];
+  /** 工具栏左侧插槽（保留 API；Composer 席位行不再使用） */
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  /** 有值则禁用 tabs 并展示说明（圆桌下 Context 未接入发送管线） */
+  disabledReason?: string;
+  /** 递增时强制关闭展开的 banner（与席位编辑互斥） */
+  collapseSignal?: number;
+  onBannerOpenChange?: (open: boolean) => void;
   onContextChange?: (ctx: {
     skills: Record<string, boolean>;
     mcps: Record<string, boolean>;
@@ -47,10 +55,31 @@ export function ChatContextPicker({
   isSystemMain = false,
   globalSources = [],
   projectSources = [],
+  leading,
+  trailing,
+  disabledReason,
+  collapseSignal = 0,
+  onBannerOpenChange,
   onContextChange,
 }: Props) {
   const { mcps: mcpCatalog } = useMcpCatalog();
   const [openTab, setOpenTab] = useState<PickerTab | null>(null);
+  const disabled = Boolean(disabledReason);
+  const onBannerOpenChangeRef = useRef(onBannerOpenChange);
+  onBannerOpenChangeRef.current = onBannerOpenChange;
+
+  useEffect(() => {
+    if (collapseSignal > 0) setOpenTab(null);
+  }, [collapseSignal]);
+
+  useEffect(() => {
+    if (disabled) setOpenTab(null);
+  }, [disabled]);
+
+  useEffect(() => {
+    onBannerOpenChangeRef.current?.(openTab != null);
+  }, [openTab]);
+
   const [skills, setSkills] = useState(() => loadSkillSelection(skillCatalog));
   const [mcps, setMcps] = useState(() => loadMcpSelection(mcpCatalog));
   const globalSourceKey = globalSources.map((s) => s.id).join("|");
@@ -175,6 +204,7 @@ export function ChatContextPicker({
   }, [openTab]);
 
   const toggleTab = (tab: PickerTab) => {
+    if (disabled) return;
     setOpenTab((prev) => (prev === tab ? null : tab));
   };
 
@@ -215,12 +245,21 @@ export function ChatContextPicker({
       : PERMISSION_PICKER_OPTIONS.find((o) => o.id === permission)?.label ?? "";
 
   return (
-    <div className="chat-context-picker" ref={footerRef}>
-      <div className="chat-context-tabs">
+    <div
+      className={`chat-context-picker${disabled ? " is-disabled" : ""}`}
+      ref={footerRef}
+      title={disabledReason}
+    >
+      <div className="chat-context-tabs" aria-disabled={disabled || undefined}>
+        {leading ? (
+          <div className="chat-context-leading">{leading}</div>
+        ) : null}
         <button
           type="button"
           className={`chat-context-tab${openTab === "skill" ? " open" : ""}`}
           aria-expanded={openTab === "skill"}
+          disabled={disabled}
+          title={disabledReason ?? undefined}
           onClick={() => toggleTab("skill")}
         >
           Skill{skillCount > 0 ? ` ${skillCount}` : ""}
@@ -229,6 +268,8 @@ export function ChatContextPicker({
           type="button"
           className={`chat-context-tab${openTab === "mcp" ? " open" : ""}`}
           aria-expanded={openTab === "mcp"}
+          disabled={disabled}
+          title={disabledReason ?? undefined}
           onClick={() => toggleTab("mcp")}
         >
           MCP{mcpCount > 0 ? ` ${mcpCount}` : ""}
@@ -237,8 +278,9 @@ export function ChatContextPicker({
           type="button"
           className={`chat-context-tab chat-context-tab-permission${openTab === "permission" ? " open" : ""}${permission !== "default" ? " active-selection" : ""}`}
           aria-expanded={openTab === "permission"}
+          disabled={disabled}
           onClick={() => toggleTab("permission")}
-          title="派单权限模式"
+          title={disabledReason ?? "派单权限模式"}
         >
           权限{permissionLabel ? ` · ${permissionLabel}` : ""}
         </button>
@@ -246,14 +288,18 @@ export function ChatContextPicker({
           type="button"
           className={`chat-context-tab${openTab === "knowledge" ? " open" : ""}${knowledgeSelection.mode === "all" ? " active-selection" : ""}`}
           aria-expanded={openTab === "knowledge"}
+          disabled={disabled}
           onClick={() => toggleTab("knowledge")}
-          title="本次对话包含的知识库"
+          title={disabledReason ?? "本次对话包含的知识库"}
         >
           知识 · {knowledgeLabel}
         </button>
+        {trailing ? (
+          <div className="chat-context-trailing">{trailing}</div>
+        ) : null}
       </div>
 
-      {openTab && (
+      {openTab && !disabled && (
         <div className="chat-context-banner" role="listbox" aria-label="上下文选择">
           <div className="chat-context-banner-head">
             <span className="chat-context-banner-title">

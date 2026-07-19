@@ -553,7 +553,9 @@ function migrateBaseline(database: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_chat_rounds_conv
       ON chat_rounds(conversation_id, created_at DESC);
-
+  `);
+  ensureColumn(database, "chat_rounds", "composer_context_json", "TEXT");
+  database.exec(`
     CREATE TABLE IF NOT EXISTS peer_requests (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,

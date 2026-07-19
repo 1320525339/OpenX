@@ -3,9 +3,11 @@ import { nanoid } from "nanoid";
 import {
   CreateAiProfileSchema,
   CreateChatRoundSchema,
+  EnableRoundtableSchema,
   UpdateAiProfileSchema,
   UpsertConversationParticipantsSchema,
   ROUNDTABLE_FOREMAN_PROFILE_ID,
+  DEFAULT_MODEL_REF,
   type ConversationParticipant,
 } from "@openx/shared";
 import {
@@ -24,6 +26,7 @@ import {
   seedRoundtableParticipants,
   updateAiProfile,
 } from "../db/roundtable-repo.js";
+import { loadSettings } from "../settings-store.js";
 import { broadcast } from "../sse.js";
 import {
   cancelRoundtableReply,
@@ -77,6 +80,9 @@ roundtableRoutes.put("/conversations/:id/participants", async (c) => {
   const conversation = getConversationById(c.req.param("id"));
   if (!conversation) return c.json({ error: "Not found" }, 404);
   const body = UpsertConversationParticipantsSchema.parse(await c.req.json());
+  const existingList = listConversationParticipants(conversation.id);
+  const existingById = new Map(existingList.map((p) => [p.id, p]));
+  const coachRef = loadSettings().model?.coach?.trim() || DEFAULT_MODEL_REF;
   const next: ConversationParticipant[] = [];
   let order = 0;
   let hasForeman = false;
@@ -86,12 +92,17 @@ roundtableRoutes.put("/conversations/:id/participants", async (c) => {
       return c.json({ error: `未知画像：${item.profileId}` }, 400);
     }
     if (profile.id === ROUNDTABLE_FOREMAN_PROFILE_ID) hasForeman = true;
+    const existing = item.id ? existingById.get(item.id) : undefined;
     next.push({
       id: item.id ?? nanoid(),
       conversationId: conversation.id,
       profileId: profile.id,
       displayName: item.displayName?.trim() || profile.name,
-      modelRef: item.modelRef ?? profile.modelRef,
+      // 显式 modelRef > 保留原席位 modelRef > 工头跟 coach / 画像默认
+      modelRef:
+        item.modelRef ??
+        existing?.modelRef ??
+        (profile.id === ROUNDTABLE_FOREMAN_PROFILE_ID ? coachRef : profile.modelRef),
       enabled: item.enabled ?? true,
       capabilityIds: item.capabilityIds ?? [...profile.defaultCapabilityIds],
       sortOrder: item.sortOrder ?? order,
@@ -106,7 +117,7 @@ roundtableRoutes.put("/conversations/:id/participants", async (c) => {
         conversationId: conversation.id,
         profileId: foreman.id,
         displayName: foreman.name,
-        modelRef: foreman.modelRef,
+        modelRef: coachRef,
         enabled: true,
         capabilityIds: [...foreman.defaultCapabilityIds],
         sortOrder: -1,
@@ -244,13 +255,11 @@ roundtableRoutes.post("/conversations/:id/enable", async (c) => {
   updateConversation(conversation);
   let participants = listConversationParticipants(conversation.id);
   if (participants.length === 0) {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      participantProfileIds?: string[];
-    };
-    participants = seedRoundtableParticipants(
-      conversation.id,
-      body.participantProfileIds ?? [],
-    );
+    const body = EnableRoundtableSchema.parse(await c.req.json().catch(() => ({})));
+    participants = seedRoundtableParticipants(conversation.id, {
+      profileIds: body.participantProfileIds,
+      seats: body.participantSeats,
+    });
   }
   return c.json({ conversation, participants });
 });

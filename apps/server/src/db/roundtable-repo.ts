@@ -12,14 +12,21 @@ import type {
   PeerMentionGrant,
   PeerRequest,
   PeerRequestStatus,
+  RoundtableSeatInput,
   UpdateAiProfileInput,
 } from "@openx/shared";
 import {
   AiCapabilityIdSchema,
   BUILTIN_AI_PROFILES,
+  ChatRoundComposerContextSchema,
+  DEFAULT_MODEL_REF,
+  DEFAULT_ROUNDTABLE_PROFILE_IDS,
   ROUNDTABLE_FOREMAN_PROFILE_ID,
+  buildRoundtableModelPool,
+  type ChatRoundComposerContext,
 } from "@openx/shared";
 import { getDb } from "./connection.js";
+import { loadSettings } from "../settings-store.js";
 
 type AiProfileRow = {
   id: string;
@@ -58,6 +65,7 @@ type ChatRoundRow = {
   estimated_calls: number;
   output_goal: string | null;
   length: string | null;
+  composer_context_json: string | null;
   created_at: string;
   completed_at: string | null;
 };
@@ -101,6 +109,18 @@ function rowToParticipant(row: ParticipantRow): ConversationParticipant {
   };
 }
 
+function parseComposerContext(
+  raw: string | null | undefined,
+): ChatRoundComposerContext | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = ChatRoundComposerContextSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function rowToRound(row: ChatRoundRow): ChatRound {
   let participantIds: string[] = [];
   try {
@@ -122,6 +142,7 @@ function rowToRound(row: ChatRoundRow): ChatRound {
     estimatedCalls: row.estimated_calls,
     outputGoal: (row.output_goal as ChatRoundOutputGoal | null) ?? undefined,
     length: (row.length as ChatRoundLength | null) ?? undefined,
+    composerContext: parseComposerContext(row.composer_context_json),
     createdAt: row.created_at,
     completedAt: row.completed_at ?? undefined,
   };
@@ -293,7 +314,13 @@ export function replaceConversationParticipants(
 ): ConversationParticipant[] {
   const database = getDb();
   const now = new Date().toISOString();
+  const existing = listConversationParticipants(conversationId);
+  const nextIds = new Set(participants.map((p) => p.id));
+  const removedIds = existing.filter((p) => !nextIds.has(p.id)).map((p) => p.id);
   const tx = database.transaction(() => {
+    if (removedIds.length > 0) {
+      deletePeerMentionGrantsForParticipants(conversationId, removedIds);
+    }
     database
       .prepare("DELETE FROM conversation_participants WHERE conversation_id = ?")
       .run(conversationId);
@@ -322,31 +349,74 @@ export function replaceConversationParticipants(
   return listConversationParticipants(conversationId);
 }
 
-/** 为圆桌会话播种默认参与者 */
+export type SeedRoundtableParticipantsInput = {
+  profileIds?: string[];
+  seats?: RoundtableSeatInput[];
+};
+
+function resolveCoachModelRef(): string {
+  const settings = loadSettings();
+  return settings.model?.coach?.trim() || DEFAULT_MODEL_REF;
+}
+
+function resolveModelPool(): string[] {
+  return buildRoundtableModelPool(loadSettings());
+}
+
+function pickModelForSeat(
+  index: number,
+  profileId: string,
+  override: string | undefined,
+  pool: string[],
+  coachRef: string,
+): string {
+  if (override?.trim()) return override.trim();
+  if (profileId === ROUNDTABLE_FOREMAN_PROFILE_ID) return coachRef;
+  return pool[index % pool.length] ?? coachRef;
+}
+
+/** 为圆桌会话播种默认参与者（支持 profileIds 或双向 seats） */
 export function seedRoundtableParticipants(
   conversationId: string,
-  profileIds: string[],
+  input: string[] | SeedRoundtableParticipantsInput = [],
 ): ConversationParticipant[] {
   ensureBuiltinAiProfiles();
-  const ids =
-    profileIds.length > 0
-      ? profileIds
-      : [ROUNDTABLE_FOREMAN_PROFILE_ID, "product", "architect", "critic"];
-  const unique = [...new Set(ids)];
-  if (!unique.includes(ROUNDTABLE_FOREMAN_PROFILE_ID)) {
-    unique.unshift(ROUNDTABLE_FOREMAN_PROFILE_ID);
+  const opts: SeedRoundtableParticipantsInput = Array.isArray(input)
+    ? { profileIds: input }
+    : input;
+  const seats = opts.seats?.length ? opts.seats : undefined;
+  const coachRef = resolveCoachModelRef();
+  const pool = resolveModelPool();
+
+  let seatSpecs: RoundtableSeatInput[];
+  if (seats) {
+    seatSpecs = [...seats];
+    if (!seatSpecs.some((s) => s.profileId === ROUNDTABLE_FOREMAN_PROFILE_ID)) {
+      seatSpecs.unshift({ profileId: ROUNDTABLE_FOREMAN_PROFILE_ID });
+    }
+  } else {
+    const ids =
+      opts.profileIds && opts.profileIds.length > 0
+        ? [...opts.profileIds]
+        : [...DEFAULT_ROUNDTABLE_PROFILE_IDS];
+    const unique = [...new Set(ids)];
+    if (!unique.includes(ROUNDTABLE_FOREMAN_PROFILE_ID)) {
+      unique.unshift(ROUNDTABLE_FOREMAN_PROFILE_ID);
+    }
+    seatSpecs = unique.map((profileId) => ({ profileId }));
   }
+
   const participants: ConversationParticipant[] = [];
   let order = 0;
-  for (const profileId of unique) {
-    const profile = getAiProfileById(profileId);
+  for (const seat of seatSpecs) {
+    const profile = getAiProfileById(seat.profileId);
     if (!profile) continue;
     participants.push({
       id: nanoid(),
       conversationId,
       profileId: profile.id,
-      displayName: profile.name,
-      modelRef: profile.modelRef,
+      displayName: seat.displayName?.trim() || profile.name,
+      modelRef: pickModelForSeat(order, profile.id, seat.modelRef, pool, coachRef),
       enabled: true,
       capabilityIds: [...profile.defaultCapabilityIds],
       sortOrder: order++,
@@ -361,8 +431,8 @@ export function insertChatRound(round: ChatRound): ChatRound {
       `INSERT INTO chat_rounds (
         id, conversation_id, source_message_id, mode, participant_ids_json,
         synthesize, status, estimated_calls, output_goal, length,
-        created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        composer_context_json, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       round.id,
@@ -375,6 +445,7 @@ export function insertChatRound(round: ChatRound): ChatRound {
       round.estimatedCalls,
       round.outputGoal ?? null,
       round.length ?? null,
+      round.composerContext ? JSON.stringify(round.composerContext) : null,
       round.createdAt,
       round.completedAt ?? null,
     );
@@ -405,6 +476,20 @@ export function purgeRoundtableForConversation(conversationId: string): void {
   database
     .prepare("DELETE FROM conversation_participants WHERE conversation_id = ?")
     .run(conversationId);
+  database
+    .prepare("DELETE FROM chat_rounds WHERE conversation_id = ?")
+    .run(conversationId);
+  database
+    .prepare("DELETE FROM peer_requests WHERE conversation_id = ?")
+    .run(conversationId);
+  database
+    .prepare("DELETE FROM peer_mention_grants WHERE conversation_id = ?")
+    .run(conversationId);
+}
+
+/** 清空圆桌运行态，保留席位配置（clear_thread 用） */
+export function purgeRoundtableRuntimeForConversation(conversationId: string): void {
+  const database = getDb();
   database
     .prepare("DELETE FROM chat_rounds WHERE conversation_id = ?")
     .run(conversationId);
@@ -481,6 +566,17 @@ export function getPeerRequestById(id: string): PeerRequest | undefined {
   return row ? rowToPeerRequest(row) : undefined;
 }
 
+export function listPendingPeerRequests(conversationId: string): PeerRequest[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM peer_requests
+       WHERE conversation_id = ? AND status = 'pending'
+       ORDER BY created_at ASC`,
+    )
+    .all(conversationId) as PeerRequestRow[];
+  return rows.map(rowToPeerRequest);
+}
+
 export function updatePeerRequest(
   id: string,
   patch: {
@@ -544,6 +640,23 @@ export function upsertPeerMentionGrant(
       grant.createdAt,
     );
   return grant;
+}
+
+/** 移出席位时清除涉及该席位的互问授权 */
+export function deletePeerMentionGrantsForParticipants(
+  conversationId: string,
+  participantIds: string[],
+): void {
+  if (participantIds.length === 0) return;
+  const database = getDb();
+  const del = database.prepare(
+    `DELETE FROM peer_mention_grants
+     WHERE conversation_id = ?
+       AND (from_participant_id = ? OR to_participant_id = ?)`,
+  );
+  for (const id of participantIds) {
+    del.run(conversationId, id, id);
+  }
 }
 
 export function listRunningChatRounds(conversationId: string): ChatRound[] {
